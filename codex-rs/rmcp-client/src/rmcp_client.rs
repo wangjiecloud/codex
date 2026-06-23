@@ -3,6 +3,7 @@ use std::ffi::OsString;
 use std::future::Future;
 use std::io;
 use std::sync::Arc;
+use std::sync::OnceLock;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -69,6 +70,7 @@ use crate::oauth::LoadedOAuthTokens;
 use crate::oauth::OAuthPersistor;
 use crate::oauth::ResolvedOAuthCredentialStore;
 use crate::oauth::StoredOAuthTokens;
+use crate::oauth::load_oauth_tokens_from_resolved_store;
 use crate::oauth::load_oauth_tokens_with_source;
 use crate::stdio_server_launcher::StdioServerCommand;
 use crate::stdio_server_launcher::StdioServerLauncher;
@@ -83,7 +85,6 @@ mod streamable_http_retry;
 
 use self::streamable_http_retry::HandshakeError;
 use self::streamable_http_retry::STREAMABLE_HTTP_RETRY_DELAYS_MS;
-use self::streamable_http_retry::initialize_timeout_error;
 use self::streamable_http_retry::remaining_initialize_timeout;
 use self::streamable_http_retry::sleep_with_retry_deadline;
 
@@ -131,6 +132,7 @@ enum TransportRecipe {
         env_http_headers: Option<HashMap<String, String>>,
         store_mode: OAuthCredentialsStoreMode,
         keyring_backend_kind: AuthKeyringBackendKind,
+        resolved_store: Arc<OnceLock<ResolvedOAuthCredentialStore>>,
         http_client: Arc<dyn HttpClient>,
         auth_provider: Option<SharedAuthProvider>,
     },
@@ -407,6 +409,7 @@ impl RmcpClient {
             env_http_headers,
             store_mode,
             keyring_backend_kind,
+            resolved_store: Arc::new(OnceLock::new()),
             http_client,
             auth_provider,
         };
@@ -449,11 +452,13 @@ impl RmcpClient {
             }
         };
 
+        let mut initialize_deadline = timeout.map(|duration| Instant::now() + duration);
         let (service, oauth_persistor) = self
             .connect_pending_transport_with_initialize_retries(
                 pending_transport,
                 client_service.clone(),
                 timeout,
+                &mut initialize_deadline,
             )
             .await?;
 
@@ -786,6 +791,7 @@ impl RmcpClient {
                 env_http_headers,
                 store_mode,
                 keyring_backend_kind,
+                resolved_store,
                 http_client,
                 auth_provider,
             } => {
@@ -802,16 +808,34 @@ impl RmcpClient {
                     && auth_provider.is_none()
                     && !default_headers.contains_key(AUTHORIZATION)
                 {
-                    match load_oauth_tokens_with_source(
-                        server_name,
-                        url,
-                        *store_mode,
-                        *keyring_backend_kind,
-                    ) {
-                        Ok(tokens) => tokens,
-                        Err(err) => {
-                            warn!("failed to read tokens for server `{server_name}`: {err}");
-                            None
+                    if let Some(store) = resolved_store.get().copied() {
+                        load_oauth_tokens_from_resolved_store(server_name, url, store)?
+                            .map(|tokens| LoadedOAuthTokens { tokens, store })
+                    } else {
+                        match load_oauth_tokens_with_source(
+                            server_name,
+                            url,
+                            *store_mode,
+                            *keyring_backend_kind,
+                        ) {
+                            Ok(tokens) => {
+                                if let Some(loaded) = tokens.as_ref() {
+                                    // Transport retries and session recovery are part of the same
+                                    // client lifecycle. Pin the first concrete source in memory so
+                                    // rebuilding a transport never re-evaluates Auto and adopts a
+                                    // possibly stale credential from another store.
+                                    resolved_store.set(loaded.store).map_err(|_| {
+                                        anyhow!(
+                                            "OAuth credential store resolved concurrently for MCP server `{server_name}`"
+                                        )
+                                    })?;
+                                }
+                                tokens
+                            }
+                            Err(err) => {
+                                warn!("failed to read tokens for server `{server_name}`: {err}");
+                                None
+                            }
                         }
                     }
                 } else {
@@ -893,11 +917,11 @@ impl RmcpClient {
         pending_transport: PendingTransport,
         client_service: ElicitationClientService,
         timeout: Option<Duration>,
+        initialize_deadline: &mut Option<Instant>,
     ) -> Result<(
         Arc<RunningService<RoleClient, ElicitationClientService>>,
         Option<OAuthPersistor>,
     )> {
-        let deadline = timeout.map(|duration| Instant::now() + duration);
         let (transport, oauth_persistor) = match pending_transport {
             PendingTransport::InProcess { transport } => (
                 service::serve_client(client_service, transport).boxed(),
@@ -915,14 +939,16 @@ impl RmcpClient {
                 transport,
                 oauth_persistor,
             } => {
-                match remaining_initialize_timeout(timeout, deadline)? {
-                    Some(remaining) => {
-                        time::timeout(remaining, oauth_persistor.refresh_if_needed())
-                            .await
-                            .map_err(|_| initialize_timeout_error(timeout, remaining))??;
-                    }
-                    None => oauth_persistor.refresh_if_needed().await?,
+                // `startup_timeout_sec` bounds MCP transport setup, retry delays, and the
+                // initialization handshake. OAuth refresh has independent lock and provider
+                // request bounds, and persistence must finish after a successful response, so the
+                // complete refresh transaction is deliberately excluded from that deadline.
+                let refresh_started_at = Instant::now();
+                let refresh_result = oauth_persistor.refresh_if_needed().await;
+                if let Some(deadline) = initialize_deadline.as_mut() {
+                    *deadline += refresh_started_at.elapsed();
                 }
+                refresh_result?;
                 (
                     service::serve_client(client_service, transport).boxed(),
                     Some(oauth_persistor),
@@ -930,7 +956,7 @@ impl RmcpClient {
             }
         };
 
-        let handshake_timeout = remaining_initialize_timeout(timeout, deadline)?;
+        let handshake_timeout = remaining_initialize_timeout(timeout, *initialize_deadline)?;
         let service_result = match handshake_timeout {
             Some(duration) => match time::timeout(duration, transport).await {
                 Ok(result) => {
@@ -1149,11 +1175,15 @@ impl RmcpClient {
             .clone()
             .ok_or_else(|| anyhow!("MCP client cannot recover before initialize succeeds"))?;
         let pending_transport = Self::create_pending_transport(&self.transport_recipe).await?;
+        let mut initialize_deadline = initialize_context
+            .timeout
+            .map(|duration| Instant::now() + duration);
         let (service, oauth_persistor) = self
             .connect_pending_transport_with_initialize_retries(
                 pending_transport,
                 initialize_context.client_service,
                 initialize_context.timeout,
+                &mut initialize_deadline,
             )
             .await?;
 

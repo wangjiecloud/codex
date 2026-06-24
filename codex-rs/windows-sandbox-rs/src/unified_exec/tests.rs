@@ -194,16 +194,33 @@ fn legacy_pipe_and_conpty_launch_batch_from_request_path() {
     let runtime = current_thread_runtime();
     runtime.block_on(async move {
         let workspace = TempDir::new().expect("workspace tempdir");
-        let bin = workspace.path().join("bin");
+        let bin = workspace.path().join("bin%CODEX_BATCH_PATH_SENTINEL%");
         fs::create_dir_all(&bin).expect("create bin");
         fs::write(
+            bin.join("echo-arg.js"),
+            "WScript.StdOut.WriteLine(\"ARG=\" + WScript.Arguments.Item(0));\r\n",
+        )
+        .expect("write argument echo helper");
+        fs::write(
             bin.join("request-script.cmd"),
-            "@echo off\r\necho ARG=%~1\r\nexit /b 0\r\n",
+            concat!(
+                "@echo off\r\n",
+                "@\"%SystemRoot%\\System32\\cscript.exe\" //nologo ",
+                "\"%~dp0echo-arg.js\" %1\r\n",
+                "exit /b %ERRORLEVEL%\r\n",
+            ),
         )
         .expect("write batch fixture");
         let env_map = HashMap::from([
-            ("Path".to_string(), "bin".to_string()),
+            (
+                "Path".to_string(),
+                "bin%CODEX_BATCH_PATH_SENTINEL%".to_string(),
+            ),
             ("PathExt".to_string(), ".CMD".to_string()),
+            (
+                "SystemRoot".to_string(),
+                std::env::var("SystemRoot").expect("SystemRoot environment variable"),
+            ),
         ]);
 
         for tty in [false, true] {

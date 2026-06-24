@@ -73,6 +73,7 @@ fn retry_uses_original_unified_exec_request_and_stops_after_second_failure() {
             launch: WindowsProcessLaunch {
                 application_path: PathBuf::from(r"C:\tools\pwsh.exe"),
                 command_line: "pwsh.exe -NoProfile".encode_utf16().collect(),
+                required_read_files: vec![PathBuf::from(r"C:\tools\pwsh.exe")],
             },
             cwd: PathBuf::from(r"C:\workspace"),
             env: env_map.clone(),

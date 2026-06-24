@@ -156,6 +156,37 @@ pub fn require_logon_sandbox_creds(
     proxy_enforced: bool,
     proxy_settings_mode: crate::WindowsSandboxProxySettingsMode,
 ) -> Result<SandboxCreds> {
+    require_logon_sandbox_creds_with_required_read_files(
+        permissions,
+        command_cwd,
+        env_map,
+        codex_home,
+        read_roots_override,
+        /*required_read_files*/ &[],
+        read_roots_include_platform_defaults,
+        write_roots_override,
+        deny_read_paths_override,
+        deny_write_paths_override,
+        proxy_enforced,
+        proxy_settings_mode,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn require_logon_sandbox_creds_with_required_read_files(
+    permissions: &ResolvedWindowsSandboxPermissions,
+    command_cwd: &Path,
+    env_map: &HashMap<String, String>,
+    codex_home: &Path,
+    read_roots_override: Option<&[PathBuf]>,
+    required_read_files: &[PathBuf],
+    read_roots_include_platform_defaults: bool,
+    write_roots_override: Option<&[PathBuf]>,
+    deny_read_paths_override: &[PathBuf],
+    deny_write_paths_override: &[PathBuf],
+    proxy_enforced: bool,
+    proxy_settings_mode: crate::WindowsSandboxProxySettingsMode,
+) -> Result<SandboxCreds> {
     let sandbox_dir = crate::setup::sandbox_dir(codex_home);
     let needed_read = read_roots_override
         .map(<[PathBuf]>::to_vec)
@@ -223,6 +254,7 @@ pub fn require_logon_sandbox_creds(
                 deny_read_paths: Some(deny_read_paths_override.to_vec()),
                 deny_write_paths: Some(deny_write_paths_override.to_vec()),
             },
+            required_read_files,
             &desired_offline_proxy_settings,
         )?;
         identity = select_identity(network_identity, codex_home)?;
@@ -243,6 +275,7 @@ pub fn require_logon_sandbox_creds(
             deny_read_paths: Some(deny_read_paths_override.to_vec()),
             deny_write_paths: Some(deny_write_paths_override.to_vec()),
         },
+        required_read_files,
         &desired_offline_proxy_settings,
     )?;
     let identity = identity.ok_or_else(|| {
@@ -279,6 +312,7 @@ pub(crate) fn refresh_logon_sandbox_creds(
     env_map: &HashMap<String, String>,
     codex_home: &Path,
     read_roots_override: Option<&[PathBuf]>,
+    required_read_files: &[PathBuf],
     read_roots_include_platform_defaults: bool,
     write_roots_override: Option<&[PathBuf]>,
     deny_read_paths_override: &[PathBuf],
@@ -287,12 +321,13 @@ pub(crate) fn refresh_logon_sandbox_creds(
     proxy_settings_mode: crate::WindowsSandboxProxySettingsMode,
 ) -> Result<SandboxCreds> {
     remove_sandbox_users_file(codex_home, "sandbox user login failed")?;
-    require_logon_sandbox_creds(
+    require_logon_sandbox_creds_with_required_read_files(
         permissions,
         command_cwd,
         env_map,
         codex_home,
         read_roots_override,
+        required_read_files,
         read_roots_include_platform_defaults,
         write_roots_override,
         deny_read_paths_override,

@@ -130,6 +130,7 @@ pub fn run_setup_refresh(
             proxy_enforced,
         },
         SetupRootOverrides::default(),
+        /*required_read_files*/ &[],
         /*offline_proxy_settings_override*/ None,
     )
 }
@@ -137,9 +138,15 @@ pub fn run_setup_refresh(
 pub(crate) fn run_setup_refresh_with_overrides_and_proxy_settings(
     request: SandboxSetupRequest<'_>,
     overrides: SetupRootOverrides,
+    required_read_files: &[PathBuf],
     offline_proxy_settings: &OfflineProxySettings,
 ) -> Result<()> {
-    run_setup_refresh_inner(request, overrides, Some(offline_proxy_settings))
+    run_setup_refresh_inner(
+        request,
+        overrides,
+        required_read_files,
+        Some(offline_proxy_settings),
+    )
 }
 
 pub fn run_setup_refresh_with_extra_read_roots(
@@ -176,6 +183,7 @@ pub fn run_setup_refresh_with_extra_read_roots(
             deny_read_paths: None,
             deny_write_paths: None,
         },
+        /*required_read_files*/ &[],
         /*offline_proxy_settings_override*/ None,
     )
 }
@@ -183,12 +191,13 @@ pub fn run_setup_refresh_with_extra_read_roots(
 fn run_setup_refresh_inner(
     request: SandboxSetupRequest<'_>,
     overrides: SetupRootOverrides,
+    required_read_files: &[PathBuf],
     offline_proxy_settings_override: Option<&OfflineProxySettings>,
 ) -> Result<()> {
     if !request.permissions.is_enforceable_by_windows_sandbox() {
         anyhow::bail!("unsupported filesystem permissions for Windows sandbox setup");
     }
-    let (read_roots, write_roots) = build_payload_roots(&request, &overrides);
+    let (read_roots, write_roots) = build_payload_roots(&request, &overrides, required_read_files);
     let deny_read_paths = build_payload_deny_read_paths(overrides.deny_read_paths);
     let deny_write_paths = build_payload_deny_write_paths(&request, overrides.deny_write_paths);
     let offline_proxy_settings =
@@ -844,21 +853,31 @@ pub fn run_elevated_setup(
     overrides: SetupRootOverrides,
 ) -> Result<()> {
     run_elevated_setup_inner(
-        request, overrides, /*offline_proxy_settings_override*/ None,
+        request,
+        overrides,
+        /*required_read_files*/ &[],
+        /*offline_proxy_settings_override*/ None,
     )
 }
 
 pub(crate) fn run_elevated_setup_with_proxy_settings(
     request: SandboxSetupRequest<'_>,
     overrides: SetupRootOverrides,
+    required_read_files: &[PathBuf],
     offline_proxy_settings: &OfflineProxySettings,
 ) -> Result<()> {
-    run_elevated_setup_inner(request, overrides, Some(offline_proxy_settings))
+    run_elevated_setup_inner(
+        request,
+        overrides,
+        required_read_files,
+        Some(offline_proxy_settings),
+    )
 }
 
 fn run_elevated_setup_inner(
     request: SandboxSetupRequest<'_>,
     overrides: SetupRootOverrides,
+    required_read_files: &[PathBuf],
     offline_proxy_settings_override: Option<&OfflineProxySettings>,
 ) -> Result<()> {
     if !request.permissions.is_enforceable_by_windows_sandbox() {
@@ -872,7 +891,7 @@ fn run_elevated_setup_inner(
             format!("failed to create sandbox dir {}: {err}", sbx_dir.display()),
         )
     })?;
-    let (read_roots, write_roots) = build_payload_roots(&request, &overrides);
+    let (read_roots, write_roots) = build_payload_roots(&request, &overrides, required_read_files);
     let deny_read_paths = build_payload_deny_read_paths(overrides.deny_read_paths);
     let deny_write_paths = build_payload_deny_write_paths(&request, overrides.deny_write_paths);
     let offline_proxy_settings =
@@ -945,6 +964,7 @@ pub fn run_elevated_provisioning_setup(codex_home: &Path, real_user: &str) -> Re
 fn build_payload_roots(
     request: &SandboxSetupRequest<'_>,
     overrides: &SetupRootOverrides,
+    required_read_files: &[PathBuf],
 ) -> (Vec<PathBuf>, Vec<PathBuf>) {
     let write_roots = effective_write_roots_for_setup(
         request.permissions,
@@ -980,6 +1000,16 @@ fn build_payload_roots(
     read_roots = filter_ssh_config_dependency_roots(read_roots);
     let write_root_set: HashSet<PathBuf> = write_roots.iter().cloned().collect();
     read_roots.retain(|root| !write_root_set.contains(root));
+    for required in required_read_files {
+        if !read_roots.contains(required) {
+            read_roots.push(required.clone());
+        }
+        if let Some(canonical) = canonical_existing(std::slice::from_ref(required)).pop()
+            && !read_roots.contains(&canonical)
+        {
+            read_roots.push(canonical);
+        }
+    }
     (read_roots, write_roots)
 }
 
@@ -1717,6 +1747,7 @@ mod tests {
                 deny_read_paths: None,
                 deny_write_paths: None,
             },
+            /*required_read_files*/ &[],
         );
         let expected_helper =
             dunce::canonicalize(helper_bin_dir(&codex_home)).expect("canonical helper dir");
@@ -1732,6 +1763,51 @@ mod tests {
             canonical_windows_platform_default_roots()
                 .into_iter()
                 .all(|path| read_roots.contains(&path))
+        );
+    }
+
+    #[test]
+    fn build_payload_roots_preserves_required_lexical_and_canonical_files() {
+        let tmp = TempDir::new().expect("tempdir");
+        let codex_home = tmp.path().join("codex-home");
+        let command_cwd = tmp.path().join("workspace");
+        let bin = tmp.path().join("bin");
+        let executable = tmp.path().join("runner.exe");
+        fs::create_dir_all(&command_cwd).expect("create workspace");
+        fs::create_dir_all(&bin).expect("create bin");
+        fs::write(&executable, []).expect("write executable fixture");
+        let lexical_executable = bin.join("..").join("runner.exe");
+        let permission_profile = PermissionProfile::read_only();
+        let workspace_roots = workspace_roots_for(command_cwd.as_path());
+        let permissions = permissions_for(&permission_profile, workspace_roots.as_slice());
+
+        let (read_roots, _write_roots) = build_payload_roots(
+            &super::SandboxSetupRequest {
+                permissions: &permissions,
+                command_cwd: &command_cwd,
+                env_map: &HashMap::new(),
+                codex_home: &codex_home,
+                proxy_enforced: false,
+            },
+            &super::SetupRootOverrides {
+                read_roots: Some(Vec::new()),
+                read_roots_include_platform_defaults: false,
+                write_roots: None,
+                deny_read_paths: None,
+                deny_write_paths: None,
+            },
+            std::slice::from_ref(&lexical_executable),
+        );
+        let canonical_executable =
+            dunce::canonicalize(&executable).expect("canonical executable fixture");
+        let required_roots = read_roots
+            .into_iter()
+            .filter(|root| root == &lexical_executable || root == &canonical_executable)
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            required_roots,
+            vec![lexical_executable, canonical_executable]
         );
     }
 
@@ -1764,6 +1840,7 @@ mod tests {
                 deny_read_paths: None,
                 deny_write_paths: None,
             },
+            /*required_read_files*/ &[],
         );
         let expected_helper =
             dunce::canonicalize(helper_bin_dir(&codex_home)).expect("canonical helper dir");
@@ -1828,7 +1905,8 @@ mod tests {
             &codex_home,
             Some(&override_roots),
         );
-        let (_read_roots, payload_write_roots) = build_payload_roots(&request, &overrides);
+        let (_read_roots, payload_write_roots) =
+            build_payload_roots(&request, &overrides, /*required_read_files*/ &[]);
 
         let expected_workspace = dunce::canonicalize(&command_cwd).expect("canonical workspace");
         let expected_extra = dunce::canonicalize(&extra_root).expect("canonical extra root");

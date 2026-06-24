@@ -94,6 +94,7 @@ fn native_launches_preserve_the_requested_lexical_path() {
     .expect("resolve lexical native executable");
 
     assert_eq!(resolved.application_path, lexical);
+    assert_eq!(resolved.required_read_files, vec![lexical]);
 }
 
 #[test]
@@ -105,7 +106,7 @@ fn ordinary_windows_apps_files_do_not_bypass_binary_validation() {
         .join("Local")
         .join("Microsoft")
         .join("WindowsApps");
-    fs::create_dir(&windows_apps).expect("create WindowsApps fixture directory");
+    fs::create_dir_all(&windows_apps).expect("create WindowsApps fixture directory");
     let alias = windows_apps.join("tool.exe");
     fs::write(&alias, []).expect("write alias fixture");
 
@@ -151,6 +152,37 @@ fn verbatim_unc_batch_paths_are_converted_for_cmd() {
 }
 
 #[test]
+fn verbatim_unc_batch_paths_that_win32_normalizes_are_rejected() {
+    let path = std::path::Path::new(r"\\?\UNC\server\share\directory\..\tool.cmd");
+
+    let error = batch_user_path(path).expect_err("reject path changed by Win32 normalization");
+
+    assert!(
+        error
+            .to_string()
+            .contains("changes under Win32 normalization")
+    );
+}
+
+#[test]
+fn case_insensitive_environment_duplicates_are_rejected() {
+    let tempdir = TempDir::new().expect("tempdir");
+    let env_map = HashMap::from([
+        ("PATH".to_string(), r"C:\first".to_string()),
+        ("Path".to_string(), r"C:\second".to_string()),
+    ]);
+
+    let error = resolve_windows_command(&["tool".to_string()], tempdir.path(), &env_map)
+        .expect_err("reject duplicate Windows environment keys");
+
+    assert!(
+        error
+            .to_string()
+            .contains("duplicate keys `PATH` and `Path`")
+    );
+}
+
+#[test]
 fn batch_candidates_win_in_pathext_order_and_use_cmd_escaping() {
     let tempdir = TempDir::new().expect("tempdir");
     let bin = tempdir.path().join("bin");
@@ -174,7 +206,7 @@ fn batch_candidates_win_in_pathext_order_and_use_cmd_escaping() {
     assert_eq!(
         String::from_utf16(&resolved.command_line).expect("batch command line UTF-16"),
         format!(
-            "cmd.exe /e:ON /v:OFF /d /c \"\"{}\" \"space 100%%cd:~,%%&\" \"say\"\"hi\"\"",
+            "cmd.exe /e:ON /v:OFF /d /c \"\"{}\" \"space 100%%cd:~,%&\" \"say\"\"hi\"\"",
             script.display()
         )
     );

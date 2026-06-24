@@ -32,7 +32,7 @@ mod windows_impl {
     use crate::env::inherit_path_env;
     use crate::env::normalize_null_device_env;
     use crate::identity::refresh_logon_sandbox_creds;
-    use crate::identity::require_logon_sandbox_creds;
+    use crate::identity::require_logon_sandbox_creds_with_required_read_files;
     use crate::ipc_framed::EmptyPayload;
     use crate::ipc_framed::FramedMessage;
     use crate::ipc_framed::Message;
@@ -141,12 +141,13 @@ mod windows_impl {
 
         let logs_base_dir: Option<&Path> = Some(sandbox_base.as_path());
         log_start(&command, logs_base_dir);
-        let sandbox_creds = require_logon_sandbox_creds(
+        let sandbox_creds = require_logon_sandbox_creds_with_required_read_files(
             &permissions,
             cwd,
             &env_map,
             codex_home,
             read_roots_override,
+            &launch.required_read_files,
             read_roots_include_platform_defaults,
             write_roots_override,
             &deny_read_paths_override,
@@ -217,6 +218,7 @@ mod windows_impl {
                         &env_map,
                         codex_home,
                         read_roots_override,
+                        &launch.required_read_files,
                         read_roots_include_platform_defaults,
                         write_roots_override,
                         &deny_read_paths_override,

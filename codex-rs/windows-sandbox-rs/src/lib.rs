@@ -85,6 +85,8 @@ mod wfp;
 #[cfg(target_os = "windows")]
 mod wfp_setup;
 #[cfg(target_os = "windows")]
+mod windows_binary;
+#[cfg(target_os = "windows")]
 mod winutil;
 #[cfg(target_os = "windows")]
 mod workspace_acl;
@@ -548,6 +550,7 @@ mod windows_impl {
         if !additional_deny_read_paths.is_empty() {
             anyhow::bail!("deny-read overrides require the elevated Windows sandbox backend");
         }
+        let launch = resolve_windows_command(&command, cwd, &env_map)?;
         let capability_roots =
             legacy_session_capability_roots(&permissions, &current_dir, &env_map, codex_home);
         let security = prepare_legacy_session_security(
@@ -570,7 +573,6 @@ mod windows_impl {
                 write_root_sids: &security.write_root_sids,
             },
         )?;
-        let launch = resolve_windows_command(&command, cwd, &env_map)?;
         let (stdin_pair, stdout_pair, stderr_pair) = unsafe { setup_stdio_pipes()? };
         let ((in_r, in_w), (out_r, out_w), (err_r, err_w)) = (stdin_pair, stdout_pair, stderr_pair);
         let spawn_res = unsafe {

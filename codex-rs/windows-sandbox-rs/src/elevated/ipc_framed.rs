@@ -216,6 +216,7 @@ mod tests {
         let launch = WindowsProcessLaunch {
             application_path: PathBuf::from(r"C:\Windows\System32\cmd.exe"),
             command_line: "cmd.exe /c ver".encode_utf16().collect(),
+            required_read_files: vec![PathBuf::from(r"C:\Windows\System32\cmd.exe")],
         };
         let msg = FramedMessage {
             version: IPC_PROTOCOL_VERSION,

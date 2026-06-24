@@ -1,3 +1,4 @@
+use crate::windows_binary::is_windows_binary;
 use crate::winutil::argv_to_command_line;
 use crate::winutil::to_wide;
 use anyhow::Context;
@@ -20,7 +21,7 @@ use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT;
 use windows_sys::Win32::Storage::FileSystem::FILE_SHARE_DELETE;
 use windows_sys::Win32::Storage::FileSystem::FILE_SHARE_READ;
 use windows_sys::Win32::Storage::FileSystem::FILE_SHARE_WRITE;
-use windows_sys::Win32::Storage::FileSystem::GetBinaryTypeW;
+use windows_sys::Win32::Storage::FileSystem::GetFullPathNameW;
 use windows_sys::Win32::Storage::FileSystem::MAXIMUM_REPARSE_DATA_BUFFER_SIZE;
 use windows_sys::Win32::Storage::FileSystem::OPEN_EXISTING;
 use windows_sys::Win32::System::IO::DeviceIoControl;
@@ -32,6 +33,7 @@ use windows_sys::Win32::System::SystemServices::IO_REPARSE_TAG_APPEXECLINK;
 pub struct WindowsProcessLaunch {
     pub(crate) application_path: PathBuf,
     pub(crate) command_line: Vec<u16>,
+    pub(crate) required_read_files: Vec<PathBuf>,
 }
 
 /// Resolves a Windows command using its child environment and working directory.
@@ -40,6 +42,7 @@ pub(crate) fn resolve_windows_command(
     cwd: &Path,
     env_map: &HashMap<String, String>,
 ) -> Result<WindowsProcessLaunch> {
+    validate_windows_env_keys(env_map)?;
     if command.iter().any(|arg| arg.contains('\0')) {
         return Err(anyhow!("Windows command arguments may not contain NUL"));
     }
@@ -139,20 +142,24 @@ fn resolved_windows_command(
             lexical_path.display()
         ));
     }
-    let (application_path, command_line) = if is_batch {
+    let (application_path, command_line, required_read_files) = if is_batch {
+        let command_prompt = command_prompt_path()?;
         (
-            command_prompt_path()?,
+            command_prompt.clone(),
             make_batch_command_line(&lexical_path, &command[1..])?,
+            vec![command_prompt, lexical_path],
         )
     } else {
         (
-            lexical_path,
+            lexical_path.clone(),
             argv_to_command_line(command).encode_utf16().collect(),
+            vec![lexical_path],
         )
     };
     Ok(WindowsProcessLaunch {
         application_path,
         command_line,
+        required_read_files,
     })
 }
 
@@ -224,12 +231,6 @@ fn existing_candidate_path(path: &Path) -> Result<Option<PathBuf>> {
         return Ok(None);
     }
     Ok(Some(path.to_path_buf()))
-}
-
-fn is_windows_binary(path: &Path) -> bool {
-    let path = to_wide(path);
-    let mut binary_type = 0;
-    unsafe { GetBinaryTypeW(path.as_ptr(), &mut binary_type) != 0 }
 }
 
 fn is_windows_apps_alias(path: &Path) -> bool {
@@ -307,7 +308,12 @@ fn make_batch_command_line(script: &Path, args: &[String]) -> Result<Vec<u16>> {
             "Windows batch file paths may not contain `\"` or end with `\\`"
         ));
     }
-    command_line.extend(script);
+    for character in script {
+        if character == b'%' as u16 {
+            command_line.extend("%%cd:~,".encode_utf16());
+        }
+        command_line.push(character);
+    }
     command_line.push(b'"' as u16);
     for arg in args {
         command_line.push(b' ' as u16);
@@ -337,7 +343,13 @@ fn batch_user_path(path: &Path) -> Result<PathBuf> {
             .copied()
             .chain(wide[VERBATIM_UNC_PREFIX.len()..].iter().copied())
             .collect::<Vec<_>>();
-        return Ok(PathBuf::from(OsString::from_wide(&user_path)));
+        let user_path = PathBuf::from(OsString::from_wide(&user_path));
+        if full_path_name(&user_path)? != user_path {
+            return Err(anyhow!(
+                "Windows verbatim UNC batch file path changes under Win32 normalization"
+            ));
+        }
+        return Ok(user_path);
     }
     if wide.starts_with(&VERBATIM_PREFIX) {
         return Err(anyhow!(
@@ -374,7 +386,7 @@ fn append_batch_arg(command_line: &mut Vec<u16>, arg: &str) -> Result<()> {
                 command_line.extend(std::iter::repeat_n(b'\\' as u16, backslashes));
                 command_line.push(b'"' as u16);
             } else if character == b'%' as u16 {
-                command_line.extend("%%cd:~,%".encode_utf16());
+                command_line.extend("%%cd:~,".encode_utf16());
             }
             backslashes = 0;
         }
@@ -385,6 +397,32 @@ fn append_batch_arg(command_line: &mut Vec<u16>, arg: &str) -> Result<()> {
         command_line.push(b'"' as u16);
     }
     Ok(())
+}
+
+fn full_path_name(path: &Path) -> Result<PathBuf> {
+    let path_wide = to_wide(path);
+    let mut buffer = vec![0u16; 260];
+    loop {
+        let len = unsafe {
+            GetFullPathNameW(
+                path_wide.as_ptr(),
+                u32::try_from(buffer.len()).unwrap_or(u32::MAX),
+                buffer.as_mut_ptr(),
+                std::ptr::null_mut(),
+            )
+        } as usize;
+        if len == 0 {
+            return Err(std::io::Error::last_os_error()).context(format!(
+                "normalize Windows batch file path {}",
+                path.display()
+            ));
+        }
+        if len < buffer.len() {
+            buffer.truncate(len);
+            return Ok(PathBuf::from(OsString::from_wide(&buffer)));
+        }
+        buffer.resize(len + 1, 0);
+    }
 }
 
 fn is_drive_relative(path: &Path) -> bool {
@@ -406,6 +444,25 @@ fn windows_env_value<'a>(env_map: &'a HashMap<String, String>, key: &str) -> Opt
                 .map(|(_, value)| value)
         })
         .map(String::as_str)
+}
+
+fn validate_windows_env_keys(env_map: &HashMap<String, String>) -> Result<()> {
+    let mut keys = env_map.keys().collect::<Vec<_>>();
+    keys.sort_by(|a, b| {
+        a.to_ascii_uppercase()
+            .cmp(&b.to_ascii_uppercase())
+            .then(a.cmp(b))
+    });
+    for pair in keys.windows(2) {
+        if pair[0].eq_ignore_ascii_case(pair[1]) {
+            return Err(anyhow!(
+                "Windows environment contains case-insensitive duplicate keys `{}` and `{}`",
+                pair[0],
+                pair[1]
+            ));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

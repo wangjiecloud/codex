@@ -16,7 +16,7 @@ use crate::env::ensure_non_interactive_pager;
 use crate::env::inherit_path_env;
 use crate::env::normalize_null_device_env;
 use crate::identity::SandboxCreds;
-use crate::identity::require_logon_sandbox_creds;
+use crate::identity::require_logon_sandbox_creds_with_required_read_files;
 use crate::logging::log_start;
 use crate::path_normalization::canonicalize_path;
 use crate::resolved_permissions::ResolvedWindowsSandboxPermissions;
@@ -403,12 +403,13 @@ pub(crate) fn prepare_elevated_spawn_context_for_permissions(
     } else {
         write_roots_override
     };
-    let sandbox_creds = require_logon_sandbox_creds(
+    let sandbox_creds = require_logon_sandbox_creds_with_required_read_files(
         &permissions,
         cwd,
         env_map,
         codex_home,
         read_roots_override,
+        &launch.required_read_files,
         read_roots_include_platform_defaults,
         setup_write_roots_override,
         deny_read_paths_override,

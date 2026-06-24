@@ -105,6 +105,7 @@ async fn thread_start_creates_thread_and_emits_started() -> Result<()> {
         !thread.ephemeral,
         "new persistent threads should not be ephemeral"
     );
+    assert_eq!(thread.history_mode, Default::default());
     assert_eq!(thread.status, ThreadStatus::Idle);
     assert_eq!(thread.thread_source, Some(ThreadSource::User));
     let thread_path = thread.path.clone().expect("thread path should be present");
@@ -138,6 +139,11 @@ async fn thread_start_creates_thread_and_emits_started() -> Result<()> {
         thread_json.get("ephemeral").and_then(Value::as_bool),
         Some(false),
         "new persistent threads should serialize `ephemeral: false`"
+    );
+    assert_eq!(
+        thread_json.get("historyMode").and_then(Value::as_str),
+        Some("legacy"),
+        "new threads should serialize `historyMode: legacy`"
     );
     assert_eq!(
         thread_json.get("threadSource").and_then(Value::as_str),
@@ -184,6 +190,13 @@ async fn thread_start_creates_thread_and_emits_started() -> Result<()> {
             .and_then(Value::as_bool),
         Some(false),
         "thread/started should serialize `ephemeral: false` for new persistent threads"
+    );
+    assert_eq!(
+        started_thread_json
+            .get("historyMode")
+            .and_then(Value::as_str),
+        Some("legacy"),
+        "thread/started should serialize `historyMode: legacy`"
     );
     assert_eq!(
         started_thread_json

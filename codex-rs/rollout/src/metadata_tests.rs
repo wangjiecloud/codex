@@ -13,6 +13,7 @@ use codex_protocol::protocol::RolloutLine;
 use codex_protocol::protocol::SessionMeta;
 use codex_protocol::protocol::SessionMetaLine;
 use codex_protocol::protocol::SessionSource;
+use codex_protocol::protocol::ThreadHistoryMode;
 use codex_state::BackfillStatus;
 use codex_state::ThreadMetadataBuilder;
 use pretty_assertions::assert_eq;
@@ -50,6 +51,7 @@ async fn extract_metadata_from_rollout_uses_session_meta() {
         base_instructions: None,
         dynamic_tools: None,
         memory_mode: None,
+        history_mode: ThreadHistoryMode::Paginated,
         multi_agent_version: None,
         context_window: None,
     };
@@ -76,6 +78,7 @@ async fn extract_metadata_from_rollout_uses_session_meta() {
     expected.recency_at = expected.updated_at;
 
     assert_eq!(outcome.metadata, expected);
+    assert_eq!(outcome.metadata.history_mode, ThreadHistoryMode::Paginated);
     assert_eq!(outcome.memory_mode, None);
     assert_eq!(outcome.parse_errors, 0);
 }
@@ -107,6 +110,7 @@ async fn extract_metadata_from_rollout_returns_latest_memory_mode() {
         base_instructions: None,
         dynamic_tools: None,
         memory_mode: None,
+        history_mode: Default::default(),
         multi_agent_version: None,
         context_window: None,
     };
@@ -376,6 +380,7 @@ fn write_rollout_in_sessions_with_cwd(
         base_instructions: None,
         dynamic_tools: None,
         memory_mode: None,
+        history_mode: Default::default(),
         multi_agent_version: None,
         context_window: None,
     };

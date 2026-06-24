@@ -4,6 +4,7 @@ use codex_protocol::models::PermissionProfile;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::SessionMetaLine;
 use codex_protocol::protocol::SessionSource;
+use codex_protocol::protocol::ThreadHistoryMode;
 use codex_rollout::RolloutRecorder;
 use codex_rollout::find_archived_thread_path_by_id_str;
 use codex_rollout::find_thread_name_by_id;
@@ -25,6 +26,7 @@ use crate::StoredThread;
 use crate::StoredThreadHistory;
 use crate::ThreadStoreError;
 use crate::ThreadStoreResult;
+use crate::error::PAGINATED_THREADS_UNSUPPORTED_OPERATION;
 
 pub(super) async fn read_thread(
     store: &LocalThreadStore,
@@ -66,6 +68,7 @@ pub(super) async fn read_thread(
             );
             thread = rollout_thread;
         }
+        reject_paginated_history(&thread, params.include_history)?;
         attach_history_if_requested(&mut thread, params.include_history).await?;
         return Ok(thread);
     }
@@ -82,6 +85,7 @@ pub(super) async fn read_thread(
             message: format!("thread {} is archived", thread.thread_id),
         });
     }
+    reject_paginated_history(&thread, params.include_history)?;
     attach_history_if_requested(&mut thread, params.include_history).await?;
     Ok(thread)
 }
@@ -132,8 +136,18 @@ pub(super) async fn read_thread_by_rollout_path(
             metadata.git_origin_url.or(fallback_origin_url),
         );
     }
+    reject_paginated_history(&thread, include_history)?;
     attach_history_if_requested(&mut thread, include_history).await?;
     Ok(thread)
+}
+
+fn reject_paginated_history(thread: &StoredThread, include_history: bool) -> ThreadStoreResult<()> {
+    if include_history && matches!(thread.history_mode, ThreadHistoryMode::Paginated) {
+        return Err(ThreadStoreError::Unsupported {
+            operation: PAGINATED_THREADS_UNSUPPORTED_OPERATION,
+        });
+    }
+    Ok(())
 }
 
 async fn resolve_requested_rollout_path(
@@ -264,6 +278,7 @@ async fn read_thread_from_rollout_path(
     if let Ok(meta_line) = read_session_meta_line(path.as_path()).await {
         thread.forked_from_id = meta_line.meta.forked_from_id;
         thread.parent_thread_id = meta_line.meta.parent_thread_id;
+        thread.history_mode = meta_line.meta.history_mode;
         if let Some(model_provider) = meta_line
             .meta
             .model_provider
@@ -318,6 +333,10 @@ async fn stored_thread_from_sqlite_metadata(
     let rollout_path = codex_rollout::plain_rollout_path(metadata.rollout_path.as_path());
     let forked_from_id = session_meta.as_ref().and_then(|meta| meta.forked_from_id);
     let parent_thread_id = session_meta.as_ref().and_then(|meta| meta.parent_thread_id);
+    let history_mode = session_meta
+        .as_ref()
+        .map(|meta| meta.history_mode)
+        .unwrap_or(metadata.history_mode);
     let preview = metadata
         .preview
         .clone()
@@ -347,6 +366,7 @@ async fn stored_thread_from_sqlite_metadata(
         cwd: metadata.cwd,
         cli_version: metadata.cli_version,
         source: parse_session_source(&metadata.source),
+        history_mode,
         thread_source: metadata.thread_source,
         agent_nickname: metadata.agent_nickname,
         agent_role: metadata.agent_role,
@@ -414,6 +434,7 @@ fn stored_thread_from_meta_line(
         cwd: meta_line.meta.cwd,
         cli_version: meta_line.meta.cli_version,
         source: meta_line.meta.source,
+        history_mode: meta_line.meta.history_mode,
         thread_source: meta_line.meta.thread_source,
         agent_nickname: meta_line.meta.agent_nickname,
         agent_role: meta_line.meta.agent_role,
@@ -665,6 +686,7 @@ mod tests {
             "Forked user message",
             Some("test-provider"),
             Some(parent_uuid),
+            "legacy",
         )
         .expect("forked session file");
 

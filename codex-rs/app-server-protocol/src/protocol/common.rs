@@ -2579,6 +2579,7 @@ mod tests {
                     parent_thread_id: None,
                     preview: "first prompt".to_string(),
                     ephemeral: true,
+                    history_mode: Default::default(),
                     model_provider: "openai".to_string(),
                     created_at: 1,
                     updated_at: 2,

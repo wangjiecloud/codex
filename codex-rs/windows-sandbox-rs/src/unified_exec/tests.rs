@@ -190,6 +190,9 @@ fn legacy_non_tty_cmd_emits_output() {
 
 #[test]
 fn legacy_pipe_and_conpty_launch_batch_from_request_path() {
+    let Some(pwsh) = pwsh_path() else {
+        return;
+    };
     let _guard = legacy_process_test_guard();
     let runtime = current_thread_runtime();
     runtime.block_on(async move {
@@ -197,17 +200,20 @@ fn legacy_pipe_and_conpty_launch_batch_from_request_path() {
         let bin = workspace.path().join("bin%CODEX_BATCH_PATH_SENTINEL%");
         fs::create_dir_all(&bin).expect("create bin");
         fs::write(
-            bin.join("echo-arg.js"),
-            "WScript.StdOut.WriteLine(\"ARG=\" + WScript.Arguments.Item(0));\r\n",
+            bin.join("echo-arg.ps1"),
+            "param([string]$Value)\r\nWrite-Output \"ARG=$Value\"\r\n",
         )
         .expect("write argument echo helper");
         fs::write(
             bin.join("request-script.cmd"),
-            concat!(
-                "@echo off\r\n",
-                "@\"%SystemRoot%\\System32\\cscript.exe\" //nologo ",
-                "\"%~dp0echo-arg.js\" %1\r\n",
-                "exit /b %ERRORLEVEL%\r\n",
+            format!(
+                concat!(
+                    "@echo off\r\n",
+                    "@\"{pwsh}\" -NoLogo -NoProfile -ExecutionPolicy Bypass ",
+                    "-File \"%~dp0echo-arg.ps1\" %1\r\n",
+                    "exit /b %ERRORLEVEL%\r\n",
+                ),
+                pwsh = pwsh.display(),
             ),
         )
         .expect("write batch fixture");

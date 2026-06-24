@@ -1,6 +1,7 @@
 use super::RunnerTransportRequest;
 use super::spawn_runner_transport_with_retry;
 use crate::WindowsSandboxProxySettingsMode;
+use crate::command_resolution::WindowsProcessLaunch;
 use crate::identity::SandboxCreds;
 use crate::ipc_framed::ErrorPayload;
 use crate::ipc_framed::ErrorStage;
@@ -67,8 +68,12 @@ fn retry_uses_original_unified_exec_request_and_stops_after_second_failure() {
         cwd: PathBuf::from(r"C:\workspace"),
         env_map: env_map.clone(),
         logs_base_dir: Some(PathBuf::from(r"C:\Users\codex\.sandbox")),
+        retry_command: vec![r"C:\tools\pwsh.exe".to_string()],
         spawn_request: SpawnRequest {
-            command: vec!["pwsh.exe".to_string(), "-NoProfile".to_string()],
+            launch: WindowsProcessLaunch {
+                application_path: PathBuf::from(r"C:\tools\pwsh.exe"),
+                command_line: "pwsh.exe -NoProfile".encode_utf16().collect(),
+            },
             cwd: PathBuf::from(r"C:\workspace"),
             env: env_map.clone(),
             permission_profile,

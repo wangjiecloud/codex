@@ -209,9 +209,18 @@ async fn windows_elevated_enforces_deny_read_and_protects_setup_marker() -> anyh
     let exact_secret = cwd.join("exact-secret.txt");
     let public = cwd.join("public.txt");
     let setup_marker = codex_home.path().join(".sandbox").join("setup_marker.json");
+    let batch = cwd.join("sandbox-check.CMD");
     std::fs::write(&glob_secret, "glob secret\n")?;
     std::fs::write(&exact_secret, "exact secret\n")?;
     std::fs::write(&public, "public ok\n")?;
+    std::fs::write(
+        &batch,
+        format!(
+            "@echo off\r\n(type secret.env 1>NUL 2>NUL && echo GLOB-READ || echo GLOB-DENIED) & (type exact-secret.txt 1>NUL 2>NUL && echo EXACT-READ || echo EXACT-DENIED) & (type \"{}\" 1>NUL 2>NUL && echo MARKER-READ-ALLOWED || echo MARKER-READ-DENIED) & (echo tampered > \"{}\" 2>NUL && echo MARKER-WRITE-ALLOWED || echo MARKER-WRITE-DENIED) & type public.txt\r\n",
+            setup_marker.display(),
+            setup_marker.display()
+        ),
+    )?;
 
     let file_system_sandbox_policy = FileSystemSandboxPolicy::restricted(vec![
         FileSystemSandboxEntry {
@@ -243,25 +252,17 @@ async fn windows_elevated_enforces_deny_read_and_protects_setup_marker() -> anyh
     );
 
     let ExecToolCallOutput {
-        exit_code,
-        stdout,
-        ..
+        exit_code, stdout, ..
     } = process_exec_tool_call(
         ExecParams {
-            command: vec![
-                "cmd.exe".to_string(),
-                "/D".to_string(),
-                "/C".to_string(),
-                format!(
-                    "(type secret.env 1>NUL 2>NUL && echo GLOB-READ || echo GLOB-DENIED) & (type exact-secret.txt 1>NUL 2>NUL && echo EXACT-READ || echo EXACT-DENIED) & (type \"{}\" 1>NUL 2>NUL && echo MARKER-READ-ALLOWED || echo MARKER-READ-DENIED) & (echo tampered > \"{}\" 2>NUL && echo MARKER-WRITE-ALLOWED || echo MARKER-WRITE-DENIED) & type public.txt",
-                    setup_marker.display(),
-                    setup_marker.display()
-                ),
-            ],
+            command: vec!["sandbox-check".to_string()],
             cwd: cwd.clone(),
             expiration: 10_000.into(),
             capture_policy: ExecCapturePolicy::ShellTool,
-            env: HashMap::new(),
+            env: HashMap::from([
+                ("Path".to_string(), cwd.display().to_string()),
+                ("PathExt".to_string(), ".CMD".to_string()),
+            ]),
             network: None,
             network_environment_id: None,
             sandbox_permissions: SandboxPermissions::UseDefault,

@@ -1,7 +1,8 @@
+use crate::command_resolution::WindowsProcessLaunch;
+use crate::command_resolution::resolve_windows_command;
 use crate::desktop::LaunchDesktop;
 use crate::logging;
 use crate::proc_thread_attr::ProcThreadAttributeList;
-use crate::winutil::argv_to_command_line;
 use crate::winutil::format_last_error;
 use crate::winutil::to_wide;
 use anyhow::Context;
@@ -73,20 +74,34 @@ unsafe fn ensure_inheritable_stdio(si: &mut STARTUPINFOW) -> Result<()> {
     Ok(())
 }
 
+pub(crate) struct CreateProcessAsUserRequest<'a> {
+    pub(crate) launch: &'a WindowsProcessLaunch,
+    pub(crate) cwd: &'a Path,
+    pub(crate) env_map: &'a HashMap<String, String>,
+    pub(crate) logs_base_dir: Option<&'a Path>,
+    pub(crate) stdio: Option<(HANDLE, HANDLE, HANDLE)>,
+    pub(crate) use_private_desktop: bool,
+}
+
 /// # Safety
-/// Caller must provide a valid primary token handle (`h_token`) with appropriate access,
-/// and the `argv`, `cwd`, and `env_map` must remain valid for the duration of the call.
-pub unsafe fn create_process_as_user(
+/// Caller must provide a valid primary token handle (`h_token`) with appropriate access, and all
+/// borrowed request fields must remain valid for the duration of the call.
+pub(crate) unsafe fn create_process_as_user_with_launch(
     h_token: HANDLE,
-    argv: &[String],
-    cwd: &Path,
-    env_map: &HashMap<String, String>,
-    logs_base_dir: Option<&Path>,
-    stdio: Option<(HANDLE, HANDLE, HANDLE)>,
-    use_private_desktop: bool,
+    request: CreateProcessAsUserRequest<'_>,
 ) -> Result<CreatedProcess> {
-    let cmdline_str = argv_to_command_line(argv);
-    let mut cmdline: Vec<u16> = to_wide(&cmdline_str);
+    let CreateProcessAsUserRequest {
+        launch,
+        cwd,
+        env_map,
+        logs_base_dir,
+        stdio,
+        use_private_desktop,
+    } = request;
+    let cmdline_str = String::from_utf16_lossy(&launch.command_line);
+    let mut cmdline = launch.command_line.clone();
+    cmdline.push(0);
+    let application_name = to_wide(&launch.application_path);
     let env_block = make_env_block(env_map);
     let desktop = LaunchDesktop::prepare(use_private_desktop, logs_base_dir)?;
     let mut pi: PROCESS_INFORMATION = std::mem::zeroed();
@@ -123,7 +138,7 @@ pub unsafe fn create_process_as_user(
             let creation_flags = CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT;
             let ok = CreateProcessAsUserW(
                 h_token,
-                std::ptr::null(),
+                application_name.as_ptr(),
                 cmdline.as_mut_ptr(),
                 std::ptr::null_mut(),
                 std::ptr::null_mut(),
@@ -164,7 +179,7 @@ pub unsafe fn create_process_as_user(
             let creation_flags = CREATE_UNICODE_ENVIRONMENT;
             let ok = CreateProcessAsUserW(
                 h_token,
-                std::ptr::null(),
+                application_name.as_ptr(),
                 cmdline.as_mut_ptr(),
                 std::ptr::null_mut(),
                 std::ptr::null_mut(),
@@ -197,6 +212,33 @@ pub unsafe fn create_process_as_user(
             })
         }
     }
+}
+
+/// # Safety
+/// Caller must provide a valid primary token handle (`h_token`) with appropriate access, and the
+/// borrowed command inputs must remain valid for the duration of the call.
+#[allow(clippy::too_many_arguments)]
+pub unsafe fn create_process_as_user(
+    h_token: HANDLE,
+    argv: &[String],
+    cwd: &Path,
+    env_map: &HashMap<String, String>,
+    logs_base_dir: Option<&Path>,
+    stdio: Option<(HANDLE, HANDLE, HANDLE)>,
+    use_private_desktop: bool,
+) -> Result<CreatedProcess> {
+    let launch = resolve_windows_command(argv, cwd, env_map)?;
+    create_process_as_user_with_launch(
+        h_token,
+        CreateProcessAsUserRequest {
+            launch: &launch,
+            cwd,
+            env_map,
+            logs_base_dir,
+            stdio,
+            use_private_desktop,
+        },
+    )
 }
 
 /// Controls whether the child's stdin handle is kept open for writing.
@@ -235,6 +277,31 @@ pub fn spawn_process_with_pipes(
     use_private_desktop: bool,
     logs_base_dir: Option<&Path>,
 ) -> Result<PipeSpawnHandles> {
+    let launch = resolve_windows_command(argv, cwd, env_map)?;
+    spawn_process_with_pipes_with_launch(
+        h_token,
+        &launch,
+        cwd,
+        env_map,
+        stdin_mode,
+        stderr_mode,
+        use_private_desktop,
+        logs_base_dir,
+    )
+}
+
+#[doc(hidden)]
+#[allow(clippy::too_many_arguments)]
+pub fn spawn_process_with_pipes_with_launch(
+    h_token: HANDLE,
+    launch: &WindowsProcessLaunch,
+    cwd: &Path,
+    env_map: &HashMap<String, String>,
+    stdin_mode: StdinMode,
+    stderr_mode: StderrMode,
+    use_private_desktop: bool,
+    logs_base_dir: Option<&Path>,
+) -> Result<PipeSpawnHandles> {
     let mut in_r: HANDLE = 0;
     let mut in_w: HANDLE = 0;
     let mut out_r: HANDLE = 0;
@@ -266,16 +333,17 @@ pub fn spawn_process_with_pipes(
         StderrMode::Separate => err_w,
     };
 
-    let stdio = Some((in_r, out_w, stderr_handle));
     let spawn_result = unsafe {
-        create_process_as_user(
+        create_process_as_user_with_launch(
             h_token,
-            argv,
-            cwd,
-            env_map,
-            logs_base_dir,
-            stdio,
-            use_private_desktop,
+            CreateProcessAsUserRequest {
+                launch,
+                cwd,
+                env_map,
+                logs_base_dir,
+                stdio: Some((in_r, out_w, stderr_handle)),
+                use_private_desktop,
+            },
         )
     };
     let created = match spawn_result {

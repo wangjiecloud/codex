@@ -27,6 +27,7 @@ mod windows_impl {
     use crate::acl::allow_null_device;
     use crate::cap::load_or_create_cap_sids;
     use crate::cap::workspace_write_cap_sid_for_root;
+    use crate::command_resolution::resolve_windows_command;
     use crate::env::ensure_non_interactive_pager;
     use crate::env::inherit_path_env;
     use crate::env::normalize_null_device_env;
@@ -133,6 +134,7 @@ mod windows_impl {
         ensure_non_interactive_pager(&mut env_map);
         inherit_path_env(&mut env_map);
         inject_git_safe_directory(&mut env_map, cwd);
+        let launch = resolve_windows_command(&command, cwd, &env_map)?;
         // Use a temp-based log dir that the sandbox user can write.
         let sandbox_base = codex_home.join(".sandbox");
         ensure_codex_home_exists(&sandbox_base)?;
@@ -181,8 +183,9 @@ mod windows_impl {
         }
 
         (|| -> Result<CaptureResult> {
+            let retry_command = vec![launch.application_path.to_string_lossy().into_owned()];
             let spawn_request = SpawnRequest {
-                command: command.clone(),
+                launch: launch.clone(),
                 cwd: cwd.to_path_buf(),
                 env: env_map.clone(),
                 permission_profile: permission_profile.clone(),
@@ -197,7 +200,7 @@ mod windows_impl {
             };
             let transport = retry_runner_spawn_once(
                 sandbox_creds,
-                &spawn_request.command,
+                &retry_command,
                 |sandbox_creds| {
                     spawn_runner_transport(
                         codex_home,

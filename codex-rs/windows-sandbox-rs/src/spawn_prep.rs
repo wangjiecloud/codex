@@ -8,6 +8,8 @@ use crate::cap::workspace_write_cap_sid_for_root;
 use crate::cap::workspace_write_root_contains_path;
 use crate::cap::workspace_write_root_overlaps_path;
 use crate::cap::workspace_write_root_specificity;
+use crate::command_resolution::WindowsProcessLaunch;
+use crate::command_resolution::resolve_windows_command;
 use crate::deny_read_state::sync_persistent_deny_read_acls;
 use crate::env::apply_no_network_to_env;
 use crate::env::ensure_non_interactive_pager;
@@ -52,6 +54,7 @@ pub(crate) struct ElevatedSpawnContext {
     pub(crate) logs_base_dir: Option<PathBuf>,
     pub(crate) sandbox_creds: SandboxCreds,
     pub(crate) cap_sids: Vec<String>,
+    pub(crate) launch: WindowsProcessLaunch,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -364,6 +367,8 @@ pub(crate) fn prepare_elevated_spawn_context_for_permissions(
     inherit_path_env(env_map);
     inject_git_safe_directory(env_map, cwd);
 
+    let launch = resolve_windows_command(command, cwd, env_map)?;
+
     // Use a temp-based log dir that the sandbox user can write.
     let sandbox_base = codex_home.join(".sandbox");
     ensure_codex_home_exists(&sandbox_base)?;
@@ -441,6 +446,7 @@ pub(crate) fn prepare_elevated_spawn_context_for_permissions(
         logs_base_dir,
         sandbox_creds,
         cap_sids,
+        launch,
     })
 }
 

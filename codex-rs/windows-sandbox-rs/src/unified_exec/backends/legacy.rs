@@ -1,13 +1,14 @@
 use super::windows_common::finish_driver_spawn;
+use crate::command_resolution::resolve_windows_command;
 use crate::conpty::ConptyInstance;
-use crate::conpty::spawn_conpty_process_as_user;
+use crate::conpty::spawn_conpty_process_as_user_with_launch;
 use crate::desktop::LaunchDesktop;
 use crate::logging::log_failure;
 use crate::logging::log_success;
 use crate::process::StderrMode;
 use crate::process::StdinMode;
 use crate::process::read_handle_loop;
-use crate::process::spawn_process_with_pipes;
+use crate::process::spawn_process_with_pipes_with_launch;
 use crate::spawn_prep::LegacyAclSids;
 use crate::spawn_prep::SpawnPrepOptions;
 use crate::spawn_prep::allow_null_device_for_workspace_write;
@@ -69,10 +70,11 @@ fn spawn_legacy_process(
     writer_rx: mpsc::Receiver<Vec<u8>>,
     logs_base_dir: Option<&Path>,
 ) -> Result<LegacyProcessHandles> {
+    let launch = resolve_windows_command(command, cwd, env_map)?;
     let (pi, output_join, writer_handle, hpc, conpty_owner, desktop) = if tty {
-        let (pi, mut conpty) = spawn_conpty_process_as_user(
+        let (pi, mut conpty) = spawn_conpty_process_as_user_with_launch(
             h_token,
-            command,
+            &launch,
             cwd,
             env_map,
             use_private_desktop,
@@ -87,9 +89,9 @@ fn spawn_legacy_process(
         );
         (pi, output_join, writer_handle, hpc, Some(conpty), None)
     } else {
-        let pipe_handles = spawn_process_with_pipes(
+        let pipe_handles = spawn_process_with_pipes_with_launch(
             h_token,
-            command,
+            &launch,
             cwd,
             env_map,
             if stdin_open {

@@ -189,6 +189,59 @@ fn legacy_non_tty_cmd_emits_output() {
 }
 
 #[test]
+fn legacy_pipe_and_conpty_launch_batch_from_request_path() {
+    let _guard = legacy_process_test_guard();
+    let runtime = current_thread_runtime();
+    runtime.block_on(async move {
+        let workspace = TempDir::new().expect("workspace tempdir");
+        let bin = workspace.path().join("bin");
+        fs::create_dir_all(&bin).expect("create bin");
+        fs::write(
+            bin.join("request-script.cmd"),
+            "@echo off\r\necho ARG=%~1\r\nexit /b 0\r\n",
+        )
+        .expect("write batch fixture");
+        let env_map = HashMap::from([
+            ("Path".to_string(), "bin".to_string()),
+            ("PathExt".to_string(), ".CMD".to_string()),
+        ]);
+
+        for tty in [false, true] {
+            let codex_home = sandbox_home(if tty {
+                "legacy-request-batch-conpty"
+            } else {
+                "legacy-request-batch-pipe"
+            });
+            let spawned = spawn_windows_sandbox_session_legacy(
+                &PermissionProfile::workspace_write(),
+                workspace_roots_for(workspace.path()).as_slice(),
+                codex_home.path(),
+                vec!["request-script".to_string(), "space 100%&".to_string()],
+                workspace.path(),
+                env_map.clone(),
+                /*timeout_ms*/ Some(5_000),
+                &[],
+                &[],
+                tty,
+                /*stdin_open*/ false,
+                /*use_private_desktop*/ true,
+            )
+            .await
+            .expect("spawn batch command resolved from request PATH and PATHEXT");
+
+            let (stdout, exit_code) =
+                collect_stdout_and_exit(spawned, codex_home.path(), Duration::from_secs(15)).await;
+            let stdout = String::from_utf8_lossy(&stdout);
+            assert_eq!(exit_code, 0, "tty={tty}, stdout={stdout:?}");
+            assert!(
+                stdout.contains("ARG=space 100%&"),
+                "tty={tty}, stdout={stdout:?}"
+            );
+        }
+    });
+}
+
+#[test]
 fn legacy_non_tty_cmd_rejects_deny_read_overrides() {
     let _guard = legacy_process_test_guard();
     let runtime = current_thread_runtime();

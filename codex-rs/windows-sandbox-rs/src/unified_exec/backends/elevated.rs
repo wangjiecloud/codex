@@ -33,6 +33,7 @@ struct RunnerTransportRequest {
     cwd: PathBuf,
     env_map: HashMap<String, String>,
     logs_base_dir: Option<PathBuf>,
+    retry_command: Vec<String>,
     spawn_request: SpawnRequest,
     read_roots_override: Option<Vec<PathBuf>>,
     read_roots_include_platform_defaults: bool,
@@ -63,7 +64,7 @@ fn spawn_runner_transport_with_retry<T>(
 ) -> Result<T> {
     retry_runner_spawn_once(
         sandbox_creds,
-        &request.spawn_request.command,
+        &request.retry_command,
         |sandbox_creds| {
             spawn(
                 &request.codex_home,
@@ -156,14 +157,22 @@ pub(crate) async fn spawn_windows_sandbox_session_elevated_for_permission_profil
     )?;
 
     let sandbox_creds = elevated.sandbox_creds;
+    let retry_command = vec![
+        elevated
+            .launch
+            .application_path
+            .to_string_lossy()
+            .into_owned(),
+    ];
     let request = RunnerTransportRequest {
         permissions,
         codex_home: codex_home.to_path_buf(),
         cwd: cwd.to_path_buf(),
         env_map: env_map.clone(),
         logs_base_dir: elevated.logs_base_dir,
+        retry_command,
         spawn_request: SpawnRequest {
-            command,
+            launch: elevated.launch,
             cwd: cwd.to_path_buf(),
             env: env_map,
             permission_profile: permission_profile.clone(),

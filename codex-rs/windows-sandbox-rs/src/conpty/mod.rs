@@ -6,10 +6,11 @@
 //! `tty=true`. The helpers are not tied to the IPC layer and can be reused by other
 //! Windows sandbox flows that need a PTY.
 
+use crate::command_resolution::WindowsProcessLaunch;
+use crate::command_resolution::resolve_windows_command;
 use crate::desktop::LaunchDesktop;
 use crate::proc_thread_attr::ProcThreadAttributeList;
 use crate::winutil::format_last_error;
-use crate::winutil::quote_windows_arg;
 use crate::winutil::to_wide;
 use anyhow::Context;
 use anyhow::Result;
@@ -99,12 +100,30 @@ pub fn spawn_conpty_process_as_user(
     use_private_desktop: bool,
     logs_base_dir: Option<&Path>,
 ) -> Result<(PROCESS_INFORMATION, ConptyInstance)> {
-    let cmdline_str = argv
-        .iter()
-        .map(|arg| quote_windows_arg(arg))
-        .collect::<Vec<_>>()
-        .join(" ");
-    let mut cmdline: Vec<u16> = to_wide(&cmdline_str);
+    let launch = resolve_windows_command(argv, cwd, env_map)?;
+    spawn_conpty_process_as_user_with_launch(
+        h_token,
+        &launch,
+        cwd,
+        env_map,
+        use_private_desktop,
+        logs_base_dir,
+    )
+}
+
+#[doc(hidden)]
+pub fn spawn_conpty_process_as_user_with_launch(
+    h_token: HANDLE,
+    launch: &WindowsProcessLaunch,
+    cwd: &Path,
+    env_map: &HashMap<String, String>,
+    use_private_desktop: bool,
+    logs_base_dir: Option<&Path>,
+) -> Result<(PROCESS_INFORMATION, ConptyInstance)> {
+    let application_name = to_wide(&launch.application_path);
+    let cmdline_str = String::from_utf16_lossy(&launch.command_line);
+    let mut cmdline = launch.command_line.clone();
+    cmdline.push(0);
     let env_block = make_env_block(env_map);
     let mut si: STARTUPINFOEXW = unsafe { std::mem::zeroed() };
     si.StartupInfo.cb = std::mem::size_of::<STARTUPINFOEXW>() as u32;
@@ -132,7 +151,7 @@ pub fn spawn_conpty_process_as_user(
     let ok = unsafe {
         CreateProcessAsUserW(
             h_token,
-            std::ptr::null(),
+            application_name.as_ptr(),
             cmdline.as_mut_ptr(),
             std::ptr::null_mut(),
             std::ptr::null_mut(),

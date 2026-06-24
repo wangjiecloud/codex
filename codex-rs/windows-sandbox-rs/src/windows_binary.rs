@@ -23,11 +23,12 @@ pub(crate) fn is_windows_binary(path: &Path) -> bool {
     if file.read_exact(&mut dos_header).is_err() || &dos_header[..2] != b"MZ" {
         return false;
     }
-    let pe_offset = u32::from_le_bytes(
-        dos_header[0x3c..0x40]
-            .try_into()
-            .expect("fixed DOS header offset"),
-    );
+    let pe_offset = u32::from_le_bytes([
+        dos_header[0x3c],
+        dos_header[0x3d],
+        dos_header[0x3e],
+        dos_header[0x3f],
+    ]);
     if file.seek(SeekFrom::Start(u64::from(pe_offset))).is_err() {
         return false;
     }

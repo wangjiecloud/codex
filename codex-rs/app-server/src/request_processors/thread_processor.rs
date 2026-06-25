@@ -887,6 +887,7 @@ impl ThreadRequestProcessor {
         let ThreadStartParams {
             model,
             model_provider,
+            allow_provider_model_fallback,
             service_tier,
             cwd,
             runtime_workspace_roots,
@@ -963,6 +964,7 @@ impl ThreadRequestProcessor {
                 thread_source.map(Into::into),
                 environment_selections,
                 service_name,
+                allow_provider_model_fallback,
                 experimental_raw_events,
                 request_trace,
             )
@@ -1037,6 +1039,7 @@ impl ThreadRequestProcessor {
         thread_source: Option<codex_protocol::protocol::ThreadSource>,
         environments: Option<Vec<TurnEnvironmentSelection>>,
         service_name: Option<String>,
+        allow_provider_model_fallback: bool,
         experimental_raw_events: bool,
         request_trace: Option<W3cTraceContext>,
     ) -> Result<(), JSONRPCErrorError> {
@@ -1144,6 +1147,7 @@ impl ThreadRequestProcessor {
             .thread_manager
             .start_thread_with_options(StartThreadOptions {
                 config,
+                allow_provider_model_fallback,
                 initial_history: match session_start_source
                     .unwrap_or(codex_app_server_protocol::ThreadStartSource::Startup)
                 {

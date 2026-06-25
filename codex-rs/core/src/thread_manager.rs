@@ -182,6 +182,7 @@ pub struct ThreadManager {
 
 pub struct StartThreadOptions {
     pub config: Config,
+    pub allow_provider_model_fallback: bool,
     pub initial_history: InitialHistory,
     pub session_source: Option<SessionSource>,
     pub thread_source: Option<ThreadSource>,
@@ -632,6 +633,7 @@ impl ThreadManager {
         );
         Box::pin(self.start_thread_with_options(StartThreadOptions {
             config,
+            allow_provider_model_fallback: false,
             initial_history: InitialHistory::New,
             session_source: None,
             thread_source: None,
@@ -668,6 +670,7 @@ impl ThreadManager {
         Box::pin(self.state.spawn_thread_with_source(
             options.config,
             options.initial_history,
+            options.allow_provider_model_fallback,
             Arc::clone(&self.state.auth_manager),
             agent_control,
             session_source,
@@ -763,6 +766,7 @@ impl ThreadManager {
         Box::pin(self.state.spawn_thread_with_source(
             config,
             initial_history,
+            /*allow_provider_model_fallback*/ false,
             auth_manager,
             agent_control,
             session_source,
@@ -832,6 +836,7 @@ impl ThreadManager {
         Box::pin(self.state.spawn_thread_with_source(
             config,
             initial_history,
+            /*allow_provider_model_fallback*/ false,
             auth_manager,
             agent_control,
             session_source,
@@ -1332,6 +1337,7 @@ impl ThreadManagerState {
         Box::pin(self.spawn_thread_with_source(
             config,
             InitialHistory::New,
+            /*allow_provider_model_fallback*/ false,
             Arc::clone(&self.auth_manager),
             agent_control,
             session_source,
@@ -1370,6 +1376,7 @@ impl ThreadManagerState {
         Box::pin(self.spawn_thread_with_source(
             config,
             initial_history,
+            /*allow_provider_model_fallback*/ false,
             Arc::clone(&self.auth_manager),
             agent_control,
             session_source,
@@ -1409,6 +1416,7 @@ impl ThreadManagerState {
         Box::pin(self.spawn_thread_with_source(
             config,
             initial_history,
+            /*allow_provider_model_fallback*/ false,
             Arc::clone(&self.auth_manager),
             agent_control,
             session_source,
@@ -1450,6 +1458,7 @@ impl ThreadManagerState {
         Box::pin(self.spawn_thread_with_source(
             config,
             initial_history,
+            /*allow_provider_model_fallback*/ false,
             auth_manager,
             agent_control,
             self.session_source.clone(),
@@ -1474,6 +1483,7 @@ impl ThreadManagerState {
         &self,
         config: Config,
         initial_history: InitialHistory,
+        allow_provider_model_fallback: bool,
         auth_manager: Arc<AuthManager>,
         agent_control: AgentControl,
         session_source: SessionSource,
@@ -1540,6 +1550,7 @@ impl ThreadManagerState {
             codex, thread_id, ..
         } = Box::pin(Codex::spawn(CodexSpawnArgs {
             config,
+            allow_provider_model_fallback,
             user_instructions,
             installation_id: self.installation_id.clone(),
             auth_manager,

@@ -9,6 +9,7 @@ use anyhow::Context;
 use anyhow::Result;
 use codex_keyring_store::DefaultKeyringStore;
 use codex_keyring_store::KeyringStore;
+use oauth2::AccessToken;
 use oauth2::TokenResponse;
 use rmcp::transport::auth::AuthorizationManager;
 use rmcp::transport::auth::CredentialStore as _;
@@ -35,6 +36,7 @@ const REFRESH_REQUEST_TIMEOUT: Duration = Duration::from_secs(45);
 pub(crate) struct OAuthPersistor {
     inner: Arc<OAuthPersistorInner>,
 }
+
 struct OAuthPersistorInner {
     server_name: String,
     url: String,
@@ -90,9 +92,15 @@ impl OAuthPersistor {
             .await
     }
 
-    pub(crate) async fn refresh_after_unauthorized(&self) -> Result<()> {
-        self.refresh_after_unauthorized_with_keyring_store(&DefaultKeyringStore)
-            .await
+    pub(crate) async fn refresh_after_unauthorized(
+        &self,
+        rejected_access_token: AccessToken,
+    ) -> Result<()> {
+        self.refresh_after_unauthorized_with_keyring_store(
+            &DefaultKeyringStore,
+            rejected_access_token,
+        )
+        .await
     }
 
     pub(super) async fn refresh_if_needed_with_keyring_store<K: KeyringStore + Clone + 'static>(
@@ -106,7 +114,9 @@ impl OAuthPersistor {
         .await
     }
 
-    pub(super) async fn refresh_if_needed_with_keyring_store_and_timeout<K: KeyringStore + Clone + 'static>(
+    pub(super) async fn refresh_if_needed_with_keyring_store_and_timeout<
+        K: KeyringStore + Clone + 'static,
+    >(
         &self,
         keyring_store: &K,
         refresh_request_timeout: Duration,
@@ -128,13 +138,18 @@ impl OAuthPersistor {
         .await
     }
 
-    pub(super) async fn refresh_after_unauthorized_with_keyring_store<K: KeyringStore + Clone + 'static>(
+    pub(super) async fn refresh_after_unauthorized_with_keyring_store<
+        K: KeyringStore + Clone + 'static,
+    >(
         &self,
         keyring_store: &K,
+        rejected_access_token: AccessToken,
     ) -> Result<()> {
         self.refresh_transaction(
             keyring_store,
-            RefreshReason::Unauthorized,
+            RefreshReason::Unauthorized {
+                rejected_access_token,
+            },
             REFRESH_REQUEST_TIMEOUT,
         )
         .await
@@ -150,13 +165,6 @@ impl OAuthPersistor {
         reason: RefreshReason,
         refresh_request_timeout: Duration,
     ) -> Result<()> {
-        let local_access_token = {
-            let last_credentials = self.inner.last_credentials.lock().await;
-            last_credentials
-                .as_ref()
-                .map(|tokens| tokens.token_response.0.access_token().secret().to_string())
-        };
-
         let _lock =
             RefreshCredentialLock::acquire_for_server(&self.inner.server_name, &self.inner.url)
                 .await?;
@@ -180,15 +188,16 @@ impl OAuthPersistor {
         };
 
         let latest_access_token = latest.token_response.0.access_token().secret();
-        // Expiry refresh can adopt any reread that is now healthy. A 401 is different: an
-        // unexpired token is still rejected, so adopt only when another actor has already changed
-        // the access token; otherwise force one serialized provider refresh.
+        // Expiry refresh can adopt any reread that is now healthy. A 401 belongs to the access
+        // token sent with that specific request, not to this client's mutable current snapshot.
+        // If a delayed request rejected A after another request refreshed A to B, adopt B and let
+        // the caller retry instead of rotating B again.
         let should_adopt = !token_needs_refresh(latest.expires_at)
             && match reason {
                 RefreshReason::Expiry => true,
-                RefreshReason::Unauthorized => {
-                    local_access_token.as_deref() != Some(latest_access_token)
-                }
+                RefreshReason::Unauthorized {
+                    rejected_access_token,
+                } => rejected_access_token.secret() != latest_access_token,
             };
         if should_adopt {
             self.adopt_credentials(latest).await?;
@@ -264,10 +273,9 @@ impl OAuthPersistor {
     }
 }
 
-#[derive(Clone, Copy)]
 enum RefreshReason {
     Expiry,
-    Unauthorized,
+    Unauthorized { rejected_access_token: AccessToken },
 }
 #[expect(
     clippy::await_holding_invalid_type,

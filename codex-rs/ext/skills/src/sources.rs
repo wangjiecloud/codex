@@ -1,7 +1,12 @@
+use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 
+use codex_core_plugins::ResolvedSelectedCapabilityRoot;
+
+use crate::catalog::SkillAuthority;
 use crate::catalog::SkillCatalog;
+use crate::catalog::SkillPackageId;
 use crate::catalog::SkillProviderError;
 use crate::catalog::SkillProviderResult;
 use crate::catalog::SkillReadResult;
@@ -11,6 +16,29 @@ use crate::provider::SkillListQuery;
 use crate::provider::SkillProvider;
 use crate::provider::SkillReadRequest;
 use crate::provider::SkillSearchRequest;
+
+#[derive(Clone)]
+pub(crate) struct ResolvedExecutorSkillReader {
+    provider: Arc<dyn SkillProvider>,
+    selected_root: ResolvedSelectedCapabilityRoot,
+}
+
+impl ResolvedExecutorSkillReader {
+    pub(crate) async fn read(
+        &self,
+        request: SkillReadRequest,
+    ) -> SkillProviderResult<SkillReadResult> {
+        self.provider
+            .read_resolved_executor_skill(request, self.selected_root.clone())
+            .await
+    }
+}
+
+#[derive(Clone, Default)]
+pub(crate) struct ResolvedExecutorSkillCatalog {
+    pub(crate) catalog: SkillCatalog,
+    pub(crate) readers: HashMap<(SkillAuthority, SkillPackageId), ResolvedExecutorSkillReader>,
+}
 
 #[derive(Clone)]
 pub struct SkillProviderSource {
@@ -110,6 +138,43 @@ impl SkillProviders {
     pub(crate) async fn list_for_turn(&self, query: SkillListQuery) -> SkillCatalog {
         self.list_matching(&query, |source| source.should_list(&query))
             .await
+    }
+
+    pub(crate) async fn list_resolved_executor_root(
+        &self,
+        query: SkillListQuery,
+        selected_root: ResolvedSelectedCapabilityRoot,
+    ) -> ResolvedExecutorSkillCatalog {
+        let mut resolved = ResolvedExecutorSkillCatalog::default();
+        for source in self
+            .sources
+            .iter()
+            .filter(|source| source.kind == SkillSourceKind::Executor)
+        {
+            match source
+                .provider
+                .list_resolved_executor_root(query.clone(), selected_root.clone())
+                .await
+            {
+                Ok(source_catalog) => {
+                    for entry in &source_catalog.entries {
+                        resolved
+                            .readers
+                            .entry((entry.authority.clone(), entry.id.clone()))
+                            .or_insert_with(|| ResolvedExecutorSkillReader {
+                                provider: Arc::clone(&source.provider),
+                                selected_root: selected_root.clone(),
+                            });
+                    }
+                    resolved.catalog.extend(source_catalog);
+                }
+                Err(err) => resolved.catalog.warnings.push(format!(
+                    "{} skills unavailable: {}",
+                    source.label, err.message
+                )),
+            }
+        }
+        resolved
     }
 
     pub(crate) async fn list_orchestrator_for_turn(

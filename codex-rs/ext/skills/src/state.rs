@@ -19,6 +19,7 @@ use crate::catalog::SkillReadResult;
 use crate::catalog::SkillResourceId;
 use crate::catalog::SkillSourceKind;
 use crate::provider::SkillReadRequest;
+use crate::selected::SelectedExecutorSkillSnapshotState;
 use crate::sources::SkillProviders;
 
 const MAX_CACHED_ORCHESTRATOR_RESOURCES: usize = 100;
@@ -27,6 +28,7 @@ const MAX_CACHED_ORCHESTRATOR_CONTENT_BYTES: usize = 8 * 1024 * 1024;
 pub(crate) struct SkillsThreadState {
     config: Mutex<SkillsExtensionConfig>,
     selected_roots: Vec<SelectedCapabilityRoot>,
+    executor_snapshot: Option<Arc<SelectedExecutorSkillSnapshotState>>,
     orchestrator_skills_available: bool,
     orchestrator_cache: Mutex<Option<Arc<OrchestratorGenerationCache>>>,
 }
@@ -35,11 +37,13 @@ impl SkillsThreadState {
     pub(crate) fn new(
         config: SkillsExtensionConfig,
         selected_roots: Vec<SelectedCapabilityRoot>,
+        executor_snapshot: Option<Arc<SelectedExecutorSkillSnapshotState>>,
         orchestrator_skills_available: bool,
     ) -> Self {
         Self {
             config: Mutex::new(config),
             selected_roots,
+            executor_snapshot,
             orchestrator_skills_available,
             orchestrator_cache: Mutex::new(None),
         }
@@ -61,6 +65,12 @@ impl SkillsThreadState {
 
     pub(crate) fn selected_roots(&self) -> &[SelectedCapabilityRoot] {
         &self.selected_roots
+    }
+
+    pub(crate) fn executor_catalog_snapshot(&self) -> Option<SkillCatalog> {
+        self.executor_snapshot
+            .as_ref()
+            .map(|state| state.snapshot().catalog)
     }
 
     pub(crate) fn orchestrator_skills_enabled(&self) -> bool {
@@ -89,6 +99,12 @@ impl SkillsThreadState {
         providers: &SkillProviders,
         request: SkillReadRequest,
     ) -> SkillProviderResult<SkillReadResult> {
+        if request.authority.kind == SkillSourceKind::Executor
+            && let Some(executor_snapshot) = &self.executor_snapshot
+            && let Some(result) = executor_snapshot.read_skill(request.clone()).await
+        {
+            return result;
+        }
         if request.authority.kind != SkillSourceKind::Orchestrator {
             return providers.read(request).await;
         }

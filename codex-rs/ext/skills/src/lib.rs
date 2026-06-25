@@ -4,6 +4,7 @@ mod extension;
 mod fragments;
 pub mod provider;
 mod render;
+mod selected;
 mod selection;
 mod sources;
 mod state;

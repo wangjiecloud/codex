@@ -1,8 +1,10 @@
 use std::sync::Arc;
 
+use codex_core_plugins::ResolvedSelectedCapabilityRoot;
 use codex_core_skills::loader::EnvironmentSkillMetadata;
 use codex_core_skills::loader::load_environment_skills_from_root;
 use codex_exec_server::EnvironmentManager;
+use codex_exec_server::ExecutorFileSystem;
 use codex_protocol::capabilities::CapabilityRootLocation;
 use codex_protocol::protocol::Product;
 use codex_utils_path_uri::PathConvention;
@@ -39,6 +41,33 @@ impl ExecutorSkillProvider {
             restriction_product,
         }
     }
+
+    async fn catalog_for_selected_root(
+        &self,
+        selected_root_id: String,
+        environment_id: String,
+        path: codex_utils_path_uri::PathUri,
+        file_system: Arc<dyn ExecutorFileSystem>,
+    ) -> SkillCatalog {
+        let mut catalog = SkillCatalog::default();
+        let authority = SkillAuthority::new(SkillSourceKind::Executor, selected_root_id.clone());
+        let outcome = load_environment_skills_from_root(
+            file_system.as_ref(),
+            &path,
+            self.restriction_product,
+        )
+        .await;
+        catalog.warnings.extend(outcome.warnings);
+        for skill in outcome.skills {
+            catalog.push_entry(catalog_entry_from_skill(
+                &skill,
+                authority.clone(),
+                &selected_root_id,
+                &environment_id,
+            ));
+        }
+        catalog
+    }
 }
 
 impl SkillProvider for ExecutorSkillProvider {
@@ -51,8 +80,6 @@ impl SkillProvider for ExecutorSkillProvider {
                     environment_id,
                     path,
                 } = selected_root.location;
-                let authority =
-                    SkillAuthority::new(SkillSourceKind::Executor, selected_root_id.clone());
                 let Some(environment) = self.environment_manager.get_environment(&environment_id)
                 else {
                     catalog.warnings.push(format!(
@@ -60,25 +87,83 @@ impl SkillProvider for ExecutorSkillProvider {
                     ));
                     continue;
                 };
-                let file_system = environment.get_filesystem();
-                let outcome = load_environment_skills_from_root(
-                    file_system.as_ref(),
-                    &path,
-                    self.restriction_product,
-                )
-                .await;
-                catalog.warnings.extend(outcome.warnings);
-                for skill in outcome.skills {
-                    catalog.push_entry(catalog_entry_from_skill(
-                        &skill,
-                        authority.clone(),
-                        &selected_root_id,
-                        &environment_id,
-                    ));
-                }
+                catalog.extend(
+                    self.catalog_for_selected_root(
+                        selected_root_id,
+                        environment_id,
+                        path,
+                        environment.get_filesystem(),
+                    )
+                    .await,
+                );
             }
 
             Ok(catalog)
+        })
+    }
+
+    fn list_resolved_executor_root(
+        &self,
+        _query: SkillListQuery,
+        selected_root: ResolvedSelectedCapabilityRoot,
+    ) -> SkillProviderFuture<'_, SkillCatalog> {
+        Box::pin(async move {
+            let selected = selected_root.selected_root();
+            let CapabilityRootLocation::Environment {
+                environment_id,
+                path,
+            } = &selected.location;
+            Ok(self
+                .catalog_for_selected_root(
+                    selected.id.clone(),
+                    environment_id.clone(),
+                    path.clone(),
+                    selected_root.file_system(),
+                )
+                .await)
+        })
+    }
+
+    fn read_resolved_executor_skill(
+        &self,
+        request: SkillReadRequest,
+        selected_root: ResolvedSelectedCapabilityRoot,
+    ) -> SkillProviderFuture<'_, SkillReadResult> {
+        Box::pin(async move {
+            let selected = selected_root.selected_root();
+            if request.authority.id != selected.id {
+                return Err(SkillProviderError::new(format!(
+                    "executor skill authority `{}` does not match selected root `{}`",
+                    request.authority.id, selected.id
+                )));
+            }
+            let CapabilityRootLocation::Environment { environment_id, .. } = &selected.location;
+            let Some((resource_environment_id, resource_path)) =
+                request.resource.environment_path()
+            else {
+                return Err(SkillProviderError::new(
+                    "executor skill resource is not bound to an environment",
+                ));
+            };
+            if resource_environment_id != environment_id {
+                return Err(SkillProviderError::new(format!(
+                    "executor skill resource references environment `{resource_environment_id}` instead of `{environment_id}`"
+                )));
+            }
+            let contents = selected_root
+                .file_system()
+                .read_file_text(resource_path, /*sandbox*/ None)
+                .await
+                .map_err(|err| {
+                    SkillProviderError::new(format!(
+                        "failed to read executor skill resource {}: {err}",
+                        request.resource.as_str()
+                    ))
+                })?;
+            Ok(SkillReadResult {
+                resource: request.resource,
+                contents,
+            })
         })
     }
 

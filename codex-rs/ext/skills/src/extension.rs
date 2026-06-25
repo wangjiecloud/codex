@@ -38,6 +38,8 @@ use crate::render::MAX_SKILL_PATH_BYTES;
 use crate::render::available_skills_fragment;
 use crate::render::truncate_main_prompt_contents;
 use crate::render::truncate_utf8_to_bytes;
+use crate::selected::SelectedExecutorSkillSnapshotProvider;
+use crate::selected::SelectedExecutorSkillSnapshotState;
 use crate::selection::collect_explicit_skill_mentions;
 use crate::sources::SkillProviders;
 use crate::state::SkillsThreadState;
@@ -56,11 +58,18 @@ where
 {
     fn on_thread_start<'a>(&'a self, input: ThreadStartInput<'a, C>) -> ExtensionFuture<'a, ()> {
         Box::pin(async move {
-            let selected_roots = input
+            let executor_snapshot = input
                 .thread_store
-                .get::<Vec<SelectedCapabilityRoot>>()
-                .map(|selected_roots| selected_roots.as_ref().clone())
-                .unwrap_or_default();
+                .get::<SelectedExecutorSkillSnapshotState>();
+            let selected_roots = if executor_snapshot.is_some() {
+                Vec::new()
+            } else {
+                input
+                    .thread_store
+                    .get::<Vec<SelectedCapabilityRoot>>()
+                    .map(|selected_roots| selected_roots.as_ref().clone())
+                    .unwrap_or_default()
+            };
             let orchestrator_skills_available = !input
                 .environments
                 .iter()
@@ -68,6 +77,7 @@ where
             input.thread_store.insert(SkillsThreadState::new(
                 (self.config_from_host)(input.config),
                 selected_roots,
+                executor_snapshot,
                 orchestrator_skills_available,
             ));
         })
@@ -93,6 +103,7 @@ where
             thread_store.insert(SkillsThreadState::new(
                 next_config,
                 Vec::new(),
+                None,
                 orchestrator_skills_available,
             ));
         }
@@ -299,6 +310,9 @@ impl<C> SkillsExtension<C> {
         query.include_orchestrator_skills = false;
 
         let mut catalog = self.providers.list_for_turn(query).await;
+        if let Some(executor_catalog) = thread_state.executor_catalog_snapshot() {
+            catalog.extend(executor_catalog);
+        }
         if include_orchestrator_skills {
             let orchestrator_catalog = thread_state
                 .orchestrator_catalog_snapshot(
@@ -363,11 +377,16 @@ pub fn install_with_providers<C>(
 ) where
     C: Send + Sync + 'static,
 {
+    let selected_executor_skills = Arc::new(SelectedExecutorSkillSnapshotProvider::new(
+        providers.clone(),
+    ));
     let extension = Arc::new(SkillsExtension {
         providers,
         event_sink: registry.event_sink(),
         config_from_host: Arc::new(config_from_host),
     });
+    registry.thread_extension_init_contributor(selected_executor_skills.clone());
+    registry.runtime_snapshot_contributor(selected_executor_skills);
     registry.thread_lifecycle_contributor(extension.clone());
     registry.config_contributor(extension.clone());
     registry.prompt_contributor(extension.clone());

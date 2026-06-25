@@ -6,6 +6,7 @@ mod executor;
 mod host;
 mod orchestrator;
 
+use codex_core_plugins::ResolvedSelectedCapabilityRoot;
 use codex_core_skills::HostSkillsSnapshot;
 use codex_mcp::McpResourceClient;
 use codex_protocol::capabilities::SelectedCapabilityRoot;
@@ -59,6 +60,28 @@ pub type SkillProviderFuture<'a, T> =
 /// than converted into an ambient local path.
 pub trait SkillProvider: Send + Sync {
     fn list(&self, query: SkillListQuery) -> SkillProviderFuture<'_, SkillCatalog>;
+
+    /// Lists one root through the exact executor instance that bound it.
+    ///
+    /// Providers that do not depend on executor identity may use the default implementation.
+    fn list_resolved_executor_root(
+        &self,
+        query: SkillListQuery,
+        _selected_root: ResolvedSelectedCapabilityRoot,
+    ) -> SkillProviderFuture<'_, SkillCatalog> {
+        self.list(query)
+    }
+
+    /// Reads a resource through the same provider and executor binding used for listing.
+    ///
+    /// Providers that own opaque resources may use the default provider-routed implementation.
+    fn read_resolved_executor_skill(
+        &self,
+        request: SkillReadRequest,
+        _selected_root: ResolvedSelectedCapabilityRoot,
+    ) -> SkillProviderFuture<'_, SkillReadResult> {
+        self.read(request)
+    }
 
     fn read(&self, request: SkillReadRequest) -> SkillProviderFuture<'_, SkillReadResult>;
 

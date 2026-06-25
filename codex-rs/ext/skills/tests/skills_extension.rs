@@ -4,14 +4,18 @@ use std::sync::Mutex;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
+use codex_core_plugins::SelectedCapabilityActivation;
+use codex_core_plugins::SelectedCapabilityBindings;
 use codex_core_skills::HostSkillsSnapshot;
 use codex_core_skills::SKILLS_HOW_TO_USE_WITH_ABSOLUTE_PATHS;
 use codex_core_skills::SKILLS_INTRO_WITH_ABSOLUTE_PATHS;
 use codex_core_skills::SkillLoadOutcome;
 use codex_core_skills::SkillMetadata;
 use codex_core_skills::injection::InjectedHostSkillPrompts;
+use codex_exec_server::EnvironmentManager;
 use codex_extension_api::ConversationHistory;
 use codex_extension_api::ExtensionData;
+use codex_extension_api::ExtensionDataInit;
 use codex_extension_api::ExtensionEventSink;
 use codex_extension_api::ExtensionRegistryBuilder;
 use codex_extension_api::NoopTurnItemEmitter;
@@ -258,6 +262,127 @@ async fn selected_executor_catalog_is_context_and_selected_entrypoint_is_turn_in
 
     assert!(next_fragments.is_empty());
 
+    Ok(())
+}
+
+#[tokio::test]
+async fn selected_executor_catalog_publishes_only_with_the_runtime_snapshot() -> TestResult {
+    let list_calls = Arc::new(AtomicUsize::new(0));
+    let read_requests = Arc::new(Mutex::new(Vec::new()));
+    let executor_provider = Arc::new(StaticSkillProvider {
+        catalog: SkillCatalog {
+            entries: vec![test_entry(
+                SkillSourceKind::Executor,
+                "env-1",
+                "executor/lint-fix",
+                "lint-fix/SKILL.md",
+            )],
+            warnings: Vec::new(),
+        },
+        read_requests: Arc::clone(&read_requests),
+        list_calls: Some(Arc::clone(&list_calls)),
+        fail_first_list: false,
+    });
+    let providers = SkillProviders::new().with_executor_provider(executor_provider);
+    let mut builder = ExtensionRegistryBuilder::new();
+    install_with_providers(&mut builder, providers, skills_extension_config);
+    let registry = builder.build();
+
+    let selected_root_dir = test_codex_home();
+    std::fs::create_dir_all(&selected_root_dir)?;
+    let selected_root = SelectedCapabilityRoot {
+        id: "root-a".to_string(),
+        location: CapabilityRootLocation::Environment {
+            environment_id: "local".to_string(),
+            path: PathUri::from_host_native_path(&selected_root_dir)?,
+        },
+    };
+    let bindings = SelectedCapabilityBindings::new(
+        vec![selected_root],
+        Arc::new(EnvironmentManager::default_for_tests()),
+    );
+    let mut active = ExtensionDataInit::new();
+    active.insert(SelectedCapabilityActivation::new(
+        bindings.initial_snapshot(),
+    ));
+    registry.initialize_thread_data(&mut active).await;
+
+    let session_store = ExtensionData::new("session");
+    let thread_store = ExtensionData::new_with_init("thread", active.clone());
+    let session_source = SessionSource::Cli;
+    let config = default_config();
+    registry.thread_lifecycle_contributors()[0]
+        .on_thread_start(ThreadStartInput {
+            config: &config,
+            session_source: &session_source,
+            persistent_thread_state_available: true,
+            environments: &[],
+            session_store: &session_store,
+            thread_store: &thread_store,
+        })
+        .await;
+    assert!(
+        registry.context_contributors()[0]
+            .contribute_thread_context(&session_store, &thread_store)
+            .await
+            .is_empty()
+    );
+    let ready = bindings.resolve_all().await;
+    let mut candidate = active.clone();
+    candidate.insert(SelectedCapabilityActivation::new(ready.clone()));
+    registry.prepare_runtime_snapshot(&mut candidate).await;
+    assert_eq!(list_calls.load(Ordering::Relaxed), 1);
+    assert!(
+        registry.context_contributors()[0]
+            .contribute_thread_context(&session_store, &thread_store)
+            .await
+            .is_empty(),
+        "prepared skill declarations must stay hidden before commit"
+    );
+
+    active
+        .get::<SelectedCapabilityActivation>()
+        .expect("active selected capability generation")
+        .publish(ready.clone());
+    registry.commit_runtime_snapshot(&candidate, &active);
+    let fragments = registry.context_contributors()[0]
+        .contribute_thread_context(&session_store, &thread_store)
+        .await;
+    assert_eq!(fragments.len(), 1);
+    assert!(fragments[0].text().contains("lint-fix"));
+    let selected_fragments = registry.turn_input_contributors()[0]
+        .contribute(
+            TurnInputContext {
+                turn_id: "turn-1".to_string(),
+                user_input: vec![UserInput::Text {
+                    text: "$lint-fix please".to_string(),
+                    text_elements: Vec::new(),
+                }],
+                environments: Vec::new(),
+            },
+            &session_store,
+            &thread_store,
+            &ExtensionData::new("turn-1"),
+        )
+        .await;
+    assert_eq!(
+        selected_fragments
+            .iter()
+            .map(|fragment| fragment.role())
+            .collect::<Vec<_>>(),
+        vec!["user"]
+    );
+    assert!(selected_fragments[0].render().contains("# Lint Fix"));
+    assert_eq!(
+        read_request_keys(&read_requests),
+        vec![(
+            SkillAuthority::new(SkillSourceKind::Executor, "env-1"),
+            SkillPackageId("executor/lint-fix".to_string()),
+            SkillResourceId::new("lint-fix/SKILL.md"),
+        )]
+    );
+
+    std::fs::remove_dir_all(selected_root_dir)?;
     Ok(())
 }
 

@@ -1,0 +1,9 @@
+{
+  "name": "stock-web",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm --filter web dev",
+    "build": "pnpm --filter web build",
+    "data-service": "cd apps/data-service && uvicorn main:app --reload --port 8000"
+  }
+}

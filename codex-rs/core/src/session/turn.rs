@@ -177,7 +177,8 @@ pub(crate) async fn run_turn(
         .await;
         return Ok(None);
     }
-    let (inspected_input, blocked_input) = inspect_inputs(&sess, &turn_context, &input).await;
+    let (inspected_input, accepted_input, blocked_input) =
+        inspect_inputs(&sess, &turn_context, &input).await;
     if blocked_input {
         sess.record_context_updates_and_set_reference_context_item(turn_context.as_ref())
             .await;
@@ -218,8 +219,18 @@ pub(crate) async fn run_turn(
     )
     .await;
 
-    let Some((injection_items, explicitly_enabled_connectors)) =
-        build_skills_and_plugins(&sess, turn_context.as_ref(), &input, &cancellation_token).await
+    let Some(SkillsAndPlugins {
+        injection_items,
+        explicitly_enabled_connectors,
+        mut extension_user_input,
+        extension_contributors_initialized,
+    }) = build_skills_and_plugins(
+        &sess,
+        turn_context.as_ref(),
+        &accepted_input,
+        &cancellation_token,
+    )
+    .await
     else {
         record_inspected_inputs(&sess, &turn_context, inspected_input).await;
         return Ok(None);
@@ -269,9 +280,14 @@ pub(crate) async fn run_turn(
             Vec::new()
         };
 
-        if run_hooks_and_record_inputs(&sess, &turn_context, &pending_input).await {
+        let (accepted_pending_input, should_stop) =
+            run_hooks_and_record_inputs(&sess, &turn_context, &pending_input).await;
+        if should_stop {
             break;
         }
+        let pending_extension_user_input = user_input_from_turn_input(&accepted_pending_input);
+        let extension_input_advanced = !pending_extension_user_input.is_empty();
+        extension_user_input.extend(pending_extension_user_input);
 
         let window_id = sess.current_window_id().await;
         super::rollout_budget::maybe_record_reminder(
@@ -281,17 +297,36 @@ pub(crate) async fn run_turn(
         )
         .await;
 
+        let is_continuation = first_step_context.is_none();
+        if is_continuation {
+            sess.prepare_runtime_snapshot(
+                turn_context.as_ref(),
+                Some(sess.mcp_elicitation_reviewer()),
+            )
+            .await?;
+        }
+        if extension_contributors_initialized && (is_continuation || extension_input_advanced) {
+            let Some(runtime_context_items) = build_extension_turn_input_items(
+                &sess,
+                turn_context.as_ref(),
+                &extension_user_input,
+                TurnInputContributionPhase::RuntimeUpdate,
+                &cancellation_token,
+            )
+            .await
+            else {
+                break;
+            };
+            if !runtime_context_items.is_empty() {
+                sess.record_conversation_items(&turn_context, &runtime_context_items)
+                    .await;
+            }
+        }
+
         // Capture once so context, advertised tools, and tool calls share one request view.
         let step_context = match first_step_context.take() {
             Some(step_context) => step_context,
-            None => {
-                sess.prepare_runtime_snapshot(
-                    turn_context.as_ref(),
-                    Some(sess.mcp_elicitation_reviewer()),
-                )
-                .await?;
-                sess.capture_step_context(Arc::clone(&turn_context)).await
-            }
+            None => sess.capture_step_context(Arc::clone(&turn_context)).await,
         };
         let sampling_request_result: CodexResult<_> = async {
             super::time_reminder::maybe_record_current_time_reminder(
@@ -526,31 +561,43 @@ async fn run_hooks_and_record_inputs(
     sess: &Arc<Session>,
     turn_context: &Arc<TurnContext>,
     input: &[TurnInput],
-) -> bool {
-    let (inspected_input, blocked_input) = inspect_inputs(sess, turn_context, input).await;
+) -> (Vec<TurnInput>, bool) {
+    let (inspected_input, accepted_input, blocked_input) =
+        inspect_inputs(sess, turn_context, input).await;
     record_inspected_inputs(sess, turn_context, inspected_input).await;
-    blocked_input
+    (accepted_input, blocked_input)
 }
 
 async fn inspect_inputs<'a>(
     sess: &Arc<Session>,
     turn_context: &Arc<TurnContext>,
     input: &'a [TurnInput],
-) -> (Vec<(&'a TurnInput, HookRuntimeOutcome)>, bool) {
+) -> (
+    Vec<(&'a TurnInput, HookRuntimeOutcome)>,
+    Vec<TurnInput>,
+    bool,
+) {
     let mut blocked_input = false;
     let mut accepted_user_input = false;
+    let mut accepted_input = Vec::with_capacity(input.len());
     let mut inspected_input = Vec::with_capacity(input.len());
     for input_item in input {
         let hook_outcome = inspect_pending_input(sess, turn_context, input_item).await;
         if hook_outcome.should_stop {
             blocked_input = true;
-        } else if matches!(input_item, TurnInput::UserInput { content, .. } if !content.is_empty())
-        {
-            accepted_user_input = true;
+        } else {
+            if matches!(input_item, TurnInput::UserInput { content, .. } if !content.is_empty()) {
+                accepted_user_input = true;
+            }
+            accepted_input.push(input_item.clone());
         }
         inspected_input.push((input_item, hook_outcome));
     }
-    (inspected_input, blocked_input && !accepted_user_input)
+    (
+        inspected_input,
+        accepted_input,
+        blocked_input && !accepted_user_input,
+    )
 }
 
 async fn record_inspected_inputs(
@@ -573,20 +620,8 @@ async fn record_inspected_inputs(
     }
 }
 
-#[instrument(level = "trace", skip_all)]
-async fn build_skills_and_plugins(
-    sess: &Arc<Session>,
-    turn_context: &TurnContext,
-    input: &[TurnInput],
-    cancellation_token: &CancellationToken,
-) -> Option<(Vec<ResponseItem>, HashSet<String>)> {
-    // Guardian input embeds the parent transcript as untrusted evidence. Do not interpret skill or
-    // plugin mentions from that generated prompt as requests to inject additional instructions.
-    if crate::guardian::is_guardian_reviewer_source(&turn_context.session_source) {
-        return Some((Vec::new(), HashSet::new()));
-    }
-
-    let user_input = input
+fn user_input_from_turn_input(input: &[TurnInput]) -> Vec<UserInput> {
+    input
         .iter()
         .filter_map(|item| match item {
             TurnInput::UserInput { content, .. } => Some(content.as_slice()),
@@ -594,7 +629,28 @@ async fn build_skills_and_plugins(
         })
         .flatten()
         .cloned()
-        .collect::<Vec<_>>();
+        .collect()
+}
+
+#[instrument(level = "trace", skip_all)]
+async fn build_skills_and_plugins(
+    sess: &Arc<Session>,
+    turn_context: &TurnContext,
+    input: &[TurnInput],
+    cancellation_token: &CancellationToken,
+) -> Option<SkillsAndPlugins> {
+    // Guardian input embeds the parent transcript as untrusted evidence. Do not interpret skill or
+    // plugin mentions from that generated prompt as requests to inject additional instructions.
+    if crate::guardian::is_guardian_reviewer_source(&turn_context.session_source) {
+        return Some(SkillsAndPlugins {
+            injection_items: Vec::new(),
+            explicitly_enabled_connectors: HashSet::new(),
+            extension_user_input: Vec::new(),
+            extension_contributors_initialized: false,
+        });
+    }
+
+    let user_input = user_input_from_turn_input(input);
     let tracking = build_track_events_context(
         turn_context.model_info.slug.clone(),
         sess.thread_id.to_string(),
@@ -649,9 +705,14 @@ async fn build_skills_and_plugins(
     };
     let skills_outcome = turn_context.turn_skills.snapshot.outcome();
     let connector_slug_counts = build_connector_slug_counts(&available_connectors);
-    let extension_injection_items =
-        build_extension_turn_input_items(sess, turn_context, &user_input, cancellation_token)
-            .await?;
+    let extension_injection_items = build_extension_turn_input_items(
+        sess,
+        turn_context,
+        &user_input,
+        TurnInputContributionPhase::Initial,
+        cancellation_token,
+    )
+    .await?;
     let skill_name_counts_lower =
         build_skill_name_counts(&skills_outcome.skills, &skills_outcome.disabled_paths).1;
     let mentioned_skills = collect_explicit_skill_mentions(
@@ -743,7 +804,25 @@ async fn build_skills_and_plugins(
     };
     injection_items.extend(plugin_items);
     injection_items.extend(extension_injection_items);
-    Some((injection_items, explicitly_enabled_connectors))
+    Some(SkillsAndPlugins {
+        injection_items,
+        explicitly_enabled_connectors,
+        extension_user_input: user_input,
+        extension_contributors_initialized: true,
+    })
+}
+
+struct SkillsAndPlugins {
+    injection_items: Vec<ResponseItem>,
+    explicitly_enabled_connectors: HashSet<String>,
+    extension_user_input: Vec<UserInput>,
+    extension_contributors_initialized: bool,
+}
+
+#[derive(Clone, Copy)]
+enum TurnInputContributionPhase {
+    Initial,
+    RuntimeUpdate,
 }
 
 #[tracing::instrument(
@@ -755,6 +834,7 @@ async fn build_extension_turn_input_items(
     sess: &Arc<Session>,
     turn_context: &TurnContext,
     user_input: &[UserInput],
+    phase: TurnInputContributionPhase,
     cancellation_token: &CancellationToken,
 ) -> Option<Vec<ResponseItem>> {
     let contributors = sess.services.extensions.turn_input_contributors().to_vec();
@@ -786,16 +866,21 @@ async fn build_extension_turn_input_items(
 
     let mut items = Vec::new();
     for contributor in contributors {
-        let contributed_fragments = contributor
-            .contribute(
+        let contribution = match phase {
+            TurnInputContributionPhase::Initial => contributor.contribute(
                 input.clone(),
                 &sess.services.session_extension_data,
                 &sess.services.thread_extension_data,
                 turn_context.extension_data.as_ref(),
-            )
-            .or_cancel(cancellation_token)
-            .await
-            .ok()?;
+            ),
+            TurnInputContributionPhase::RuntimeUpdate => contributor.contribute_runtime_update(
+                input.clone(),
+                &sess.services.session_extension_data,
+                &sess.services.thread_extension_data,
+                turn_context.extension_data.as_ref(),
+            ),
+        };
+        let contributed_fragments = contribution.or_cancel(cancellation_token).await.ok()?;
         items.extend(
             contributed_fragments
                 .into_iter()

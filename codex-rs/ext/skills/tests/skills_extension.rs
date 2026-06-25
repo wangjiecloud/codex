@@ -271,19 +271,49 @@ async fn selected_executor_catalog_publishes_only_with_the_runtime_snapshot() ->
     let read_requests = Arc::new(Mutex::new(Vec::new()));
     let executor_provider = Arc::new(StaticSkillProvider {
         catalog: SkillCatalog {
-            entries: vec![test_entry(
-                SkillSourceKind::Executor,
-                "env-1",
-                "executor/lint-fix",
-                "lint-fix/SKILL.md",
-            )],
+            entries: vec![
+                test_entry(
+                    SkillSourceKind::Executor,
+                    "env-1",
+                    "executor/lint-fix",
+                    "lint-fix/SKILL.md",
+                ),
+                test_entry(
+                    SkillSourceKind::Executor,
+                    "env-1",
+                    "executor/format-fix",
+                    "format-fix/SKILL.md",
+                ),
+                test_entry(
+                    SkillSourceKind::Executor,
+                    "env-1",
+                    "executor/deploy",
+                    "deploy/SKILL.md",
+                ),
+            ],
             warnings: Vec::new(),
         },
         read_requests: Arc::clone(&read_requests),
         list_calls: Some(Arc::clone(&list_calls)),
         fail_first_list: false,
     });
-    let providers = SkillProviders::new().with_executor_provider(executor_provider);
+    let host_provider = Arc::new(StaticSkillProvider {
+        catalog: SkillCatalog {
+            entries: vec![test_entry(
+                SkillSourceKind::Host,
+                "host",
+                "host/deploy",
+                "host/deploy/SKILL.md",
+            )],
+            warnings: Vec::new(),
+        },
+        read_requests: Arc::clone(&read_requests),
+        list_calls: None,
+        fail_first_list: false,
+    });
+    let providers = SkillProviders::new()
+        .with_host_provider(host_provider)
+        .with_executor_provider(executor_provider);
     let mut builder = ExtensionRegistryBuilder::new();
     install_with_providers(&mut builder, providers, skills_extension_config);
     let registry = builder.build();
@@ -321,6 +351,30 @@ async fn selected_executor_catalog_publishes_only_with_the_runtime_snapshot() ->
             thread_store: &thread_store,
         })
         .await;
+    let turn_store = ExtensionData::new("turn-1");
+    let turn_input = TurnInputContext {
+        turn_id: "turn-1".to_string(),
+        user_input: vec![UserInput::Text {
+            text: "$lint-fix please".to_string(),
+            text_elements: Vec::new(),
+        }],
+        environments: Vec::new(),
+    };
+    let initial_fragments = registry.turn_input_contributors()[0]
+        .contribute(
+            turn_input.clone(),
+            &session_store,
+            &thread_store,
+            &turn_store,
+        )
+        .await;
+    assert_eq!(
+        initial_fragments
+            .iter()
+            .map(|fragment| fragment.role())
+            .collect::<Vec<_>>(),
+        vec!["developer"]
+    );
     assert!(
         registry.context_contributors()[0]
             .contribute_thread_context(&session_store, &thread_store)
@@ -351,18 +405,11 @@ async fn selected_executor_catalog_publishes_only_with_the_runtime_snapshot() ->
     assert_eq!(fragments.len(), 1);
     assert!(fragments[0].text().contains("lint-fix"));
     let selected_fragments = registry.turn_input_contributors()[0]
-        .contribute(
-            TurnInputContext {
-                turn_id: "turn-1".to_string(),
-                user_input: vec![UserInput::Text {
-                    text: "$lint-fix please".to_string(),
-                    text_elements: Vec::new(),
-                }],
-                environments: Vec::new(),
-            },
+        .contribute_runtime_update(
+            turn_input.clone(),
             &session_store,
             &thread_store,
-            &ExtensionData::new("turn-1"),
+            &turn_store,
         )
         .await;
     assert_eq!(
@@ -370,16 +417,96 @@ async fn selected_executor_catalog_publishes_only_with_the_runtime_snapshot() ->
             .iter()
             .map(|fragment| fragment.role())
             .collect::<Vec<_>>(),
+        vec!["developer", "user"]
+    );
+    assert!(selected_fragments[0].render().contains("lint-fix"));
+    assert!(selected_fragments[1].render().contains("# Lint Fix"));
+    let pending_turn_input = TurnInputContext {
+        user_input: vec![
+            turn_input.user_input[0].clone(),
+            UserInput::Text {
+                text: "$format-fix please".to_string(),
+                text_elements: Vec::new(),
+            },
+        ],
+        ..turn_input
+    };
+    let pending_fragments = registry.turn_input_contributors()[0]
+        .contribute_runtime_update(
+            pending_turn_input.clone(),
+            &session_store,
+            &thread_store,
+            &turn_store,
+        )
+        .await;
+    assert_eq!(
+        pending_fragments
+            .iter()
+            .map(|fragment| fragment.role())
+            .collect::<Vec<_>>(),
         vec!["user"]
     );
-    assert!(selected_fragments[0].render().contains("# Lint Fix"));
+    assert!(
+        pending_fragments[0]
+            .render()
+            .contains("<name>format-fix</name>")
+    );
+    let deploy_turn_input = TurnInputContext {
+        user_input: pending_turn_input
+            .user_input
+            .iter()
+            .cloned()
+            .chain([UserInput::Text {
+                text: "$deploy please".to_string(),
+                text_elements: Vec::new(),
+            }])
+            .collect(),
+        ..pending_turn_input
+    };
+    let deploy_fragments = registry.turn_input_contributors()[0]
+        .contribute_runtime_update(
+            deploy_turn_input.clone(),
+            &session_store,
+            &thread_store,
+            &turn_store,
+        )
+        .await;
+    assert_eq!(deploy_fragments.len(), 1);
+    assert!(
+        deploy_fragments[0]
+            .render()
+            .contains("<path>skill://host/deploy/SKILL.md</path>")
+    );
+    assert!(
+        registry.turn_input_contributors()[0]
+            .contribute_runtime_update(
+                deploy_turn_input,
+                &session_store,
+                &thread_store,
+                &turn_store,
+            )
+            .await
+            .is_empty()
+    );
     assert_eq!(
         read_request_keys(&read_requests),
-        vec![(
-            SkillAuthority::new(SkillSourceKind::Executor, "env-1"),
-            SkillPackageId("executor/lint-fix".to_string()),
-            SkillResourceId::new("lint-fix/SKILL.md"),
-        )]
+        vec![
+            (
+                SkillAuthority::new(SkillSourceKind::Executor, "env-1"),
+                SkillPackageId("executor/lint-fix".to_string()),
+                SkillResourceId::new("lint-fix/SKILL.md"),
+            ),
+            (
+                SkillAuthority::new(SkillSourceKind::Executor, "env-1"),
+                SkillPackageId("executor/format-fix".to_string()),
+                SkillResourceId::new("format-fix/SKILL.md"),
+            ),
+            (
+                SkillAuthority::new(SkillSourceKind::Host, "host"),
+                SkillPackageId("host/deploy".to_string()),
+                SkillResourceId::new("host/deploy/SKILL.md"),
+            )
+        ]
     );
 
     std::fs::remove_dir_all(selected_root_dir)?;

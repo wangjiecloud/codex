@@ -287,10 +287,130 @@ where
                 selected_entries,
                 warnings,
                 main_prompts_injected,
+                selected_capability_generation: thread_state.executor_snapshot_generation(),
+                processed_user_input_count: input.user_input.len(),
             });
             if !injected_host_skill_prompts.is_empty() {
                 turn_store.insert(injected_host_skill_prompts);
             }
+
+            fragments
+        })
+    }
+
+    fn contribute_runtime_update<'a>(
+        &'a self,
+        input: TurnInputContext,
+        session_store: &'a ExtensionData,
+        thread_store: &'a ExtensionData,
+        turn_store: &'a ExtensionData,
+    ) -> ExtensionFuture<'a, Vec<Box<dyn ContextualUserFragment + Send>>> {
+        Box::pin(async move {
+            let Some(thread_state) = thread_store.get::<SkillsThreadState>() else {
+                return Vec::new();
+            };
+            let Some(turn_state) = turn_store.get::<SkillsTurnState>() else {
+                return Vec::new();
+            };
+            let Some((generation, executor_catalog)) = thread_state.executor_catalog_snapshot()
+            else {
+                return Vec::new();
+            };
+            if turn_state.selected_capability_generation == Some(generation)
+                && turn_state.processed_user_input_count == input.user_input.len()
+            {
+                return Vec::new();
+            }
+
+            let new_entries = executor_catalog
+                .entries
+                .into_iter()
+                .filter(|candidate| {
+                    !turn_state.catalog.entries.iter().any(|existing| {
+                        existing.authority == candidate.authority && existing.id == candidate.id
+                    })
+                })
+                .collect::<Vec<_>>();
+            let new_warnings = executor_catalog
+                .warnings
+                .into_iter()
+                .filter(|warning| !turn_state.warnings.contains(warning))
+                .collect::<Vec<_>>();
+            for warning in &new_warnings {
+                self.emit_warning(&input.turn_id, warning.clone());
+            }
+
+            let incremental_catalog = SkillCatalog {
+                entries: new_entries,
+                warnings: new_warnings.clone(),
+            };
+            let mut catalog = turn_state.catalog.clone();
+            catalog.extend(incremental_catalog.clone());
+            let selected_entries = collect_explicit_skill_mentions(&input.user_input, &catalog)
+                .into_iter()
+                .filter(|candidate| {
+                    !turn_state.selected_entries.iter().any(|existing| {
+                        existing.authority == candidate.authority && existing.id == candidate.id
+                    })
+                })
+                .collect::<Vec<_>>();
+            let config = thread_state.config();
+            let mut fragments: Vec<Box<dyn ContextualUserFragment + Send>> = Vec::new();
+            if config.include_instructions
+                && let Some(fragment) = available_skills_fragment(&incremental_catalog)
+            {
+                fragments.push(Box::new(fragment));
+            }
+
+            let host_snapshot = turn_store.get::<HostSkillsSnapshot>();
+            let mut warnings = turn_state.warnings.clone();
+            warnings.extend(new_warnings);
+            let mut main_prompts_injected = turn_state.main_prompts_injected;
+            for entry in &selected_entries {
+                match self
+                    .read_main_prompt(entry, host_snapshot.clone(), session_store, &thread_state)
+                    .await
+                {
+                    Ok(read_result) => {
+                        let (contents, truncated) =
+                            truncate_main_prompt_contents(read_result.contents.as_str());
+                        if truncated {
+                            let warning = format!(
+                                "Skill `{}` exceeded the main prompt context limit and was truncated.",
+                                entry.name
+                            );
+                            self.emit_warning(&input.turn_id, warning.clone());
+                            warnings.push(warning);
+                        }
+                        fragments.push(Box::new(SkillInstructions {
+                            name: truncate_utf8_to_bytes(&entry.name, MAX_SKILL_NAME_BYTES).0,
+                            path: truncate_utf8_to_bytes(
+                                entry.rendered_path(),
+                                MAX_SKILL_PATH_BYTES,
+                            )
+                            .0,
+                            contents,
+                        }));
+                        main_prompts_injected = true;
+                    }
+                    Err(message) => {
+                        let warning = format!("Failed to load skill `{}`: {message}", entry.name);
+                        self.emit_warning(&input.turn_id, warning.clone());
+                        warnings.push(warning);
+                    }
+                }
+            }
+
+            let mut all_selected_entries = turn_state.selected_entries.clone();
+            all_selected_entries.extend(selected_entries);
+            turn_store.insert(SkillsTurnState {
+                catalog,
+                selected_entries: all_selected_entries,
+                warnings,
+                main_prompts_injected,
+                selected_capability_generation: Some(generation),
+                processed_user_input_count: input.user_input.len(),
+            });
 
             fragments
         })
@@ -310,7 +430,7 @@ impl<C> SkillsExtension<C> {
         query.include_orchestrator_skills = false;
 
         let mut catalog = self.providers.list_for_turn(query).await;
-        if let Some(executor_catalog) = thread_state.executor_catalog_snapshot() {
+        if let Some((_, executor_catalog)) = thread_state.executor_catalog_snapshot() {
             catalog.extend(executor_catalog);
         }
         if include_orchestrator_skills {

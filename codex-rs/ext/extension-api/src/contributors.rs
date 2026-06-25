@@ -216,6 +216,24 @@ pub trait TurnInputContributor: Send + Sync {
         thread_store: &'a ExtensionData,
         turn_store: &'a ExtensionData,
     ) -> ExtensionFuture<'a, Vec<Box<dyn ContextualUserFragment + Send>>>;
+
+    /// Polls for incremental context after runtime preparation and before a sampling step.
+    ///
+    /// The host may call this when the extension's runtime state is unchanged. Implementations
+    /// must track their own published generation and processed turn input, returning no fragments
+    /// unless model-visible state or newly accepted input advanced.
+    fn contribute_runtime_update<'a>(
+        &'a self,
+        _input: TurnInputContext,
+        _session_store: &'a ExtensionData,
+        _thread_store: &'a ExtensionData,
+        _turn_store: &'a ExtensionData,
+    ) -> ExtensionFuture<'a, Vec<Box<dyn ContextualUserFragment + Send>>> {
+        Box::pin(async move {
+            let _self = self;
+            Vec::new()
+        })
+    }
 }
 
 /// Contributor for host-owned configuration changes.

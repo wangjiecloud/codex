@@ -22,6 +22,7 @@ use crate::sources::SkillProviders;
 
 #[derive(Clone, Default)]
 pub(crate) struct SelectedExecutorSkillSnapshot {
+    generation: u64,
     pub(crate) catalog: SkillCatalog,
     readers: HashMap<
         (
@@ -33,6 +34,10 @@ pub(crate) struct SelectedExecutorSkillSnapshot {
 }
 
 impl SelectedExecutorSkillSnapshot {
+    pub(crate) fn generation(&self) -> u64 {
+        self.generation
+    }
+
     async fn read_skill(
         &self,
         request: SkillReadRequest,
@@ -135,7 +140,11 @@ impl SelectedExecutorSkillSnapshotProvider {
                 readers.entry(key.clone()).or_insert_with(|| reader.clone());
             }
         }
-        SelectedExecutorSkillSnapshot { catalog, readers }
+        SelectedExecutorSkillSnapshot {
+            generation: selected_capabilities.generation(),
+            catalog,
+            readers,
+        }
     }
 }
 

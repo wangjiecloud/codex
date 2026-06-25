@@ -67,10 +67,17 @@ impl SkillsThreadState {
         &self.selected_roots
     }
 
-    pub(crate) fn executor_catalog_snapshot(&self) -> Option<SkillCatalog> {
+    pub(crate) fn executor_catalog_snapshot(&self) -> Option<(u64, SkillCatalog)> {
+        self.executor_snapshot.as_ref().map(|state| {
+            let snapshot = state.snapshot();
+            (snapshot.generation(), snapshot.catalog)
+        })
+    }
+
+    pub(crate) fn executor_snapshot_generation(&self) -> Option<u64> {
         self.executor_snapshot
             .as_ref()
-            .map(|state| state.snapshot().catalog)
+            .map(|state| state.snapshot().generation())
     }
 
     pub(crate) fn orchestrator_skills_enabled(&self) -> bool {
@@ -219,4 +226,6 @@ pub(crate) struct SkillsTurnState {
     pub(crate) selected_entries: Vec<SkillCatalogEntry>,
     pub(crate) warnings: Vec<String>,
     pub(crate) main_prompts_injected: bool,
+    pub(crate) selected_capability_generation: Option<u64>,
+    pub(crate) processed_user_input_count: usize,
 }

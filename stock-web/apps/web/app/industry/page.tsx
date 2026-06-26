@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import {
   Plus,
@@ -14,7 +14,6 @@ import {
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { themeStyles } from "@/lib/theme-utils";
 
 interface Industry {
   id: string;
@@ -26,119 +25,6 @@ interface Industry {
   representatives: string[];
 }
 
-const DEFAULT_INDUSTRIES: Industry[] = [
-  {
-    id: "overview",
-    name: "AI算力产业链全景概览",
-    description:
-      "从AI芯片到数据中心运营，覆盖GPU/存储/PCB/MLCC/光模块/光纤/液冷/供电/铜缆/IDC全产业链。一张图串联所有环节，点击各产业集群节点可深入查看详细供应链",
-    icon: "cpu",
-    companyCount: 120,
-    lastAnalyzed: "今天",
-    representatives: ["英伟达", "中际旭创", "英维克", "长飞光纤"],
-  },
-  {
-    id: "aigpu",
-    name: "AI算力芯片（GPU/NPU）",
-    description:
-      "AI算力芯片是整条产业链的核心驱动力。英伟达H100/B200主导训练市场，国产替代加速推进，寒武纪/海光信息/景嘉微等布局云端AI芯片，华为昇腾生态持续扩张",
-    icon: "cpu",
-    companyCount: 16,
-    lastAnalyzed: "今天",
-    representatives: ["寒武纪", "海光信息", "景嘉微", "华大九天"],
-  },
-  {
-    id: "pcb",
-    name: "PCB（印制电路板）",
-    description:
-      "印制电路板是电子元器件的支撑体和电气连接的提供者，广泛应用于通信、消费电子、汽车电子等领域",
-    icon: "cpu",
-    companyCount: 24,
-    lastAnalyzed: "2天前",
-    representatives: ["深南电路", "胜宏科技", "沪电股份", "奥士康"],
-  },
-  {
-    id: "mlcc",
-    name: "MLCC（积层陶瓷电容器）",
-    description:
-      "多层陶瓷电容器是用量最大的被动元件之一，广泛用于手机、汽车、工业设备等各类电子产品",
-    icon: "layers",
-    companyCount: 18,
-    lastAnalyzed: "5天前",
-    representatives: ["风华高科", "三环集团", "顺络电子", "国瓷材料"],
-  },
-  {
-    id: "memory",
-    name: "存储芯片（HBM/DRAM/NAND）",
-    description:
-      "存储芯片是AI算力基础设施的核心组件，HBM高带宽内存需求随大模型爆发式增长，A股相关企业覆盖靶材、硅片、封测、模组等全产业链",
-    icon: "cpu",
-    companyCount: 20,
-    lastAnalyzed: "1天前",
-    representatives: ["兆易创新", "佰维存储", "江波龙", "澜起科技"],
-  },
-  {
-    id: "optics",
-    name: "光模块与CPO（共封装光学）",
-    description:
-      "AI数据中心GPU互联对高速光模块需求爆发式增长，800G→1.6T升级加速，CPO共封装光学将光引擎与交换芯片共封装，功耗降低50%，英伟达已指定天孚通信为CPO光引擎一供",
-    icon: "cpu",
-    companyCount: 16,
-    lastAnalyzed: "今天",
-    representatives: ["中际旭创", "天孚通信", "新易盛", "光迅科技"],
-  },
-  {
-    id: "fiber",
-    name: "光纤光缆",
-    description:
-      "AI数据中心内部光互联+5G/6G建设双轮驱动，G.654.E超低损耗光纤需求激增，光纤预制棒-光纤-光缆全产业链一体化龙头具备显著成本优势",
-    icon: "layers",
-    companyCount: 12,
-    lastAnalyzed: "1天前",
-    representatives: ["长飞光纤", "亨通光电", "中天科技", "烽火通信"],
-  },
-  {
-    id: "liquidcool",
-    name: "液冷散热",
-    description:
-      "AI芯片功耗突破1.2kW，液冷从可选变必选。冷板式/浸没式液冷市场2025年中国规模达33.9亿美元，年复合增速48%，英伟达GB300全面液冷化",
-    icon: "layers",
-    companyCount: 15,
-    lastAnalyzed: "今天",
-    representatives: ["英维克", "高澜股份", "申菱环境", "曙光数创"],
-  },
-  {
-    id: "aipower",
-    name: "AI供配电（PSU/BBU/HVDC）",
-    description:
-      "GB200/GB300引入BBU电池备电替代UPS，HVDC高压直流供电效率更高，单机柜功率突破130kW，供配电系统价值量占数据中心建设成本10-15%",
-    icon: "cpu",
-    companyCount: 14,
-    lastAnalyzed: "2天前",
-    representatives: ["麦格米特", "欧陆通", "中恒电气", "蔚蓝锂芯"],
-  },
-  {
-    id: "coppercable",
-    name: "高速铜连接（DAC/AEC）",
-    description:
-      "AI机柜内GPU-Switch短距互联以铜缆为主，800G→1.6T升级带动需求爆发，单GB200 NVL72机柜铜缆价值量超10万美元，A股已形成完整供应链",
-    icon: "layers",
-    companyCount: 10,
-    lastAnalyzed: "2天前",
-    representatives: ["沃尔核材", "兆龙互连", "神宇股份", "鼎通科技"],
-  },
-  {
-    id: "idc",
-    name: "智算中心/IDC运营",
-    description:
-      "智能算力中心是所有AI硬件的最终载体。随算力需求爆发，IDC建设提速，算力租赁毛利率超60%，润泽科技/奥飞数据等布局AI专属智算中心，国内三大运营商大规模建设算网一体化",
-    icon: "factory",
-    companyCount: 14,
-    lastAnalyzed: "1天前",
-    representatives: ["润泽科技", "奥飞数据", "光环新网", "数据港"],
-  },
-];
-
 const ICONS = {
   cpu: Cpu,
   layers: Layers,
@@ -147,7 +33,7 @@ const ICONS = {
 
 export default function IndustryPage() {
   const router = useRouter();
-  const [industries, setIndustries] = useState<Industry[]>(DEFAULT_INDUSTRIES);
+  const [industries, setIndustries] = useState<Industry[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formData, setFormData] = useState({ name: "", description: "" });
@@ -173,17 +59,31 @@ export default function IndustryPage() {
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    fetch("http://localhost:8000/api/industry/list")
+      .then((r) => r.json())
+      .then((data: { industries: Industry[] }) => {
+        setIndustries(data.industries);
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
     Promise.all([
       fetch("http://localhost:8000/api/industry/stocks").then((r) => r.json()),
       fetch("http://localhost:8000/api/industry/stock-industry-map").then((r) =>
         r.json(),
       ),
+      fetch("http://localhost:8000/api/industry/list").then((r) => r.json()),
     ])
       .then(
-        ([quotesData, mappingData]: [
+        ([quotesData, mappingData, listData]: [
           { quotes: Record<string, { code: string; name: string }> },
           { mapping: Record<string, string[]> },
+          { industries: Industry[] },
         ]) => {
+          const industryById = Object.fromEntries(
+            listData.industries.map((i) => [i.id, i]),
+          );
           const stocks: Array<{
             code: string;
             name: string;
@@ -194,9 +94,7 @@ export default function IndustryPage() {
           Object.values(quotesData.quotes).forEach((stock) => {
             const industryIds = mappingData.mapping[stock.code] || [];
             industryIds.forEach((industryId) => {
-              const industry = DEFAULT_INDUSTRIES.find(
-                (i) => i.id === industryId,
-              );
+              const industry = industryById[industryId];
               if (industry) {
                 stocks.push({
                   code: stock.code,
@@ -587,7 +485,7 @@ export default function IndustryPage() {
                   "flex-1 py-2.5 rounded-lg text-sm font-medium transition-colors",
                   formData.name.trim()
                     ? "bg-[#f5a623] hover:bg-[#e8961a] text-black"
-                    : "text-gray-600 cursor-not-allowed",
+                    : "text-[var(--text-tertiary)] cursor-not-allowed",
                 )}
                 style={
                   !formData.name.trim()

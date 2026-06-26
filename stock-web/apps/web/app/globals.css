@@ -4,7 +4,10 @@
   --bg-primary: #0f1117;
   --bg-secondary: #151821;
   --bg-tertiary: #1e2332;
+  --bg-deep: #0d1018;
+  --bg-hover: #1a1f2e;
   --border-color: #2a3142;
+  --border-secondary: #2a3045;
   --text-primary: #ffffff;
   --text-secondary: #9ca3af;
   --text-tertiary: #6b7280;
@@ -18,7 +21,10 @@
   --bg-primary: #ffffff;
   --bg-secondary: #f9fafb;
   --bg-tertiary: #f3f4f6;
+  --bg-deep: #f0f2f5;
+  --bg-hover: #e9ecf0;
   --border-color: #e5e7eb;
+  --border-secondary: #d1d5db;
   --text-primary: #111827;
   --text-secondary: #4b5563;
   --text-tertiary: #6b7280;

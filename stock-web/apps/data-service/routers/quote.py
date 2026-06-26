@@ -3,11 +3,20 @@ from sqlalchemy.orm import Session
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from datetime import datetime, date, timedelta
 
-from db import get_db, SessionLocal, StockQuote
+from db import get_db, SessionLocal, StockQuote, StockMeta
 from bs_session import get_bs, reset_bs
-from stock_names import get_stock_name
 
 router = APIRouter()
+
+
+def get_stock_name(code: str) -> str:
+    """Get stock name from DB."""
+    db = SessionLocal()
+    try:
+        row = db.query(StockMeta).filter(StockMeta.code == code).first()
+        return row.name if row else ""
+    finally:
+        db.close()
 
 
 def _to_bs_code(code: str) -> str:

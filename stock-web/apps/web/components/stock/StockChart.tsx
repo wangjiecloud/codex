@@ -1,14 +1,14 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import {
   createChart,
   IChartApi,
-  ISeriesApi,
   CandlestickSeries,
   HistogramSeries,
   LineSeries,
 } from "lightweight-charts";
+import { useTheme } from "@/app/theme-provider";
 
 interface KLineBar {
   time: string;
@@ -156,7 +156,14 @@ function calcBOLL(
   }[];
 }
 
+function getCssVar(name: string): string {
+  return getComputedStyle(document.documentElement)
+    .getPropertyValue(name)
+    .trim();
+}
+
 export function StockChart({ data, activeIndicators }: StockChartProps) {
+  const { theme } = useTheme();
   const mainRef = useRef<HTMLDivElement>(null);
   const subRef = useRef<HTMLDivElement>(null);
   const sub2Ref = useRef<HTMLDivElement>(null);
@@ -165,15 +172,19 @@ export function StockChart({ data, activeIndicators }: StockChartProps) {
   useEffect(() => {
     if (!mainRef.current || data.length === 0) return;
 
+    const bgColor = getCssVar("--bg-primary");
+    const textColor = getCssVar("--text-secondary");
+    const borderColor = getCssVar("--border-color");
+
     const opts = {
-      layout: { background: { color: "#0f1117" }, textColor: "#9ca3af" },
+      layout: { background: { color: bgColor }, textColor },
       grid: {
-        vertLines: { color: "#1e2332" },
-        horzLines: { color: "#1e2332" },
+        vertLines: { color: borderColor },
+        horzLines: { color: borderColor },
       },
       crosshair: { mode: 1 },
-      timeScale: { borderColor: "#1e2332", timeVisible: true },
-      rightPriceScale: { borderColor: "#1e2332" },
+      timeScale: { borderColor, timeVisible: true },
+      rightPriceScale: { borderColor },
     };
 
     // Main chart
@@ -220,7 +231,7 @@ export function StockChart({ data, activeIndicators }: StockChartProps) {
         bollData.map((d) => ({ time: d.time, value: d.upper })),
       );
       const middleLine = main.addSeries(LineSeries, {
-        color: "#9ca3af",
+        color: "var(--text-secondary)",
         lineWidth: 1,
         priceLineVisible: false,
         lastValueVisible: false,
@@ -343,12 +354,12 @@ export function StockChart({ data, activeIndicators }: StockChartProps) {
       kdjChart?.remove();
       volChart?.remove();
     };
-  }, [data, activeIndicators]);
+  }, [data, activeIndicators, theme]);
 
   return (
     <div className="flex flex-col">
       {/* MA indicators header */}
-      <div className="flex items-center gap-3 px-3 py-1.5 text-xs border-b border-[#1e2332]">
+      <div className="flex items-center gap-3 px-3 py-1.5 text-xs border-b border-[var(--border-color)]">
         {[
           { period: 5, color: "#f5a623" },
           { period: 10, color: "#4ade80" },
@@ -364,8 +375,8 @@ export function StockChart({ data, activeIndicators }: StockChartProps) {
       <div ref={mainRef} className="w-full" />
       {activeIndicators.includes("MACD") && (
         <>
-          <div className="flex items-center gap-3 px-3 py-1 text-xs border-t border-[#1e2332] bg-[#0f1117]">
-            <span className="text-gray-500">MACD(10,20,7)</span>
+          <div className="flex items-center gap-3 px-3 py-1 text-xs border-t border-[var(--border-color)] bg-[var(--bg-primary)]">
+            <span className="text-[var(--text-tertiary)]">MACD(10,20,7)</span>
             <span className="text-blue-400">MACD</span>
             <span className="text-yellow-400">DEA</span>
           </div>
@@ -374,8 +385,8 @@ export function StockChart({ data, activeIndicators }: StockChartProps) {
       )}
       {activeIndicators.includes("KDJ") && (
         <>
-          <div className="flex items-center gap-3 px-3 py-1 text-xs border-t border-[#1e2332] bg-[#0f1117]">
-            <span className="text-gray-500">KDJ(9,3,3)</span>
+          <div className="flex items-center gap-3 px-3 py-1 text-xs border-t border-[var(--border-color)] bg-[var(--bg-primary)]">
+            <span className="text-[var(--text-tertiary)]">KDJ(9,3,3)</span>
             <span className="text-yellow-400">K</span>
             <span className="text-blue-400">D</span>
             <span className="text-purple-400">J</span>
@@ -385,8 +396,8 @@ export function StockChart({ data, activeIndicators }: StockChartProps) {
       )}
       {activeIndicators.includes("VOL") && (
         <>
-          <div className="flex items-center gap-2 px-3 py-1 text-xs border-t border-[#1e2332] bg-[#0f1117]">
-            <span className="text-gray-500">成交量</span>
+          <div className="flex items-center gap-2 px-3 py-1 text-xs border-t border-[var(--border-color)] bg-[var(--bg-primary)]">
+            <span className="text-[var(--text-tertiary)]">成交量</span>
           </div>
           <div ref={volRef} className="w-full" />
         </>

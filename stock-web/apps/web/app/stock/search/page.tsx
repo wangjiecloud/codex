@@ -75,15 +75,15 @@ export default function StockSearchPage() {
     <div className="min-h-full p-6 max-w-5xl mx-auto">
       {/* Header */}
       <div className="mb-8">
-        <h1 className="text-2xl font-bold text-white mb-1">选股</h1>
-        <p className="text-gray-500 text-sm">搜索 A 股股票，获取 AI 智能分析</p>
+        <h1 className="text-2xl font-bold text-[var(--text-primary)] mb-1">选股</h1>
+        <p className="text-[var(--text-tertiary)] text-sm">搜索 A 股股票，获取 AI 智能分析</p>
       </div>
 
       {/* Search bar */}
       <form onSubmit={handleSearch} className="mb-8">
         <div className="relative">
           <Search
-            className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500"
+            className="absolute left-4 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)]"
             size={18}
           />
           <input
@@ -91,7 +91,7 @@ export default function StockSearchPage() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="输入股票代码或名称，如：600519 或 贵州茅台"
-            className="w-full pl-12 pr-4 py-4 bg-[#151821] border border-[#1e2332] rounded-xl text-white placeholder-gray-600 focus:outline-none focus:border-[#f5a623]/50 focus:ring-1 focus:ring-[#f5a623]/30 text-base transition-all"
+            className="w-full pl-12 pr-4 py-4 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-xl text-[var(--text-primary)] placeholder-[var(--text-tertiary)] focus:outline-none focus:border-[#f5a623]/50 focus:ring-1 focus:ring-[#f5a623]/30 text-base transition-all"
           />
           <button
             type="submit"
@@ -106,13 +106,13 @@ export default function StockSearchPage() {
       <div className="mb-8">
         <div className="flex items-center gap-2 mb-3">
           <TrendingUp size={16} className="text-[#f5a623]" />
-          <h2 className="text-sm font-medium text-gray-400">热门板块</h2>
+          <h2 className="text-sm font-medium text-[var(--text-secondary)]">热门板块</h2>
         </div>
         <div className="flex flex-wrap gap-2">
           {HOT_SECTORS.map((sector) => (
             <button
               key={sector}
-              className="px-3 py-1.5 bg-[#151821] border border-[#1e2332] rounded-lg text-sm text-gray-400 hover:text-white hover:border-[#f5a623]/50 transition-all"
+              className="px-3 py-1.5 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[#f5a623]/50 transition-all"
             >
               {sector}
             </button>
@@ -124,31 +124,31 @@ export default function StockSearchPage() {
       <div className="mb-8">
         <div className="flex items-center gap-2 mb-3">
           <Star size={16} className="text-[#f5a623]" />
-          <h2 className="text-sm font-medium text-gray-400">热门股票</h2>
+          <h2 className="text-sm font-medium text-[var(--text-secondary)]">热门股票</h2>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
           {HOT_STOCKS.map((stock) => (
             <button
               key={stock.code}
               onClick={() => handleStockClick(stock.code)}
-              className="p-4 bg-[#151821] border border-[#1e2332] rounded-xl text-left hover:border-[#f5a623]/40 hover:bg-[#1a1f2e] transition-all group"
+              className="p-4 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-xl text-left hover:border-[#f5a623]/40 hover:bg-[var(--bg-hover)] transition-all group"
             >
               <div className="flex items-start justify-between mb-2">
                 <div>
-                  <div className="text-white font-medium text-sm">
+                  <div className="text-[var(--text-primary)] font-medium text-sm">
                     {stock.name}
                   </div>
-                  <div className="text-gray-600 text-xs mt-0.5">
+                  <div className="text-[var(--text-tertiary)] text-xs mt-0.5">
                     {stock.code}
                   </div>
                 </div>
                 <ChevronRight
                   size={14}
-                  className="text-gray-600 group-hover:text-[#f5a623] mt-0.5 transition-colors"
+                  className="text-[var(--text-tertiary)] group-hover:text-[#f5a623] mt-0.5 transition-colors"
                 />
               </div>
               <div className="flex items-baseline justify-between">
-                <span className="text-white font-mono text-base">
+                <span className="text-[var(--text-primary)] font-mono text-base">
                   ¥{stock.price}
                 </span>
                 <span
@@ -169,30 +169,30 @@ export default function StockSearchPage() {
       <div>
         <div className="flex items-center gap-2 mb-3">
           <Clock size={16} className="text-[#f5a623]" />
-          <h2 className="text-sm font-medium text-gray-400">最近分析记录</h2>
+          <h2 className="text-sm font-medium text-[var(--text-secondary)]">最近分析记录</h2>
         </div>
-        <div className="bg-[#151821] border border-[#1e2332] rounded-xl overflow-hidden">
+        <div className="bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-xl overflow-hidden">
           {RECENT_ANALYSIS.map((item, idx) => (
             <button
               key={item.code}
               onClick={() => handleStockClick(item.code)}
               className={cn(
-                "w-full flex items-center justify-between px-4 py-3 hover:bg-[#1a1f2e] transition-colors text-left",
-                idx < RECENT_ANALYSIS.length - 1 && "border-b border-[#1e2332]",
+                "w-full flex items-center justify-between px-4 py-3 hover:bg-[var(--bg-hover)] transition-colors text-left",
+                idx < RECENT_ANALYSIS.length - 1 && "border-b border-[var(--border-color)]",
               )}
             >
               <div className="flex items-center gap-3">
                 <div>
-                  <span className="text-white text-sm font-medium">
+                  <span className="text-[var(--text-primary)] text-sm font-medium">
                     {item.name}
                   </span>
-                  <span className="text-gray-600 text-xs ml-2">
+                  <span className="text-[var(--text-tertiary)] text-xs ml-2">
                     {item.code}
                   </span>
                 </div>
               </div>
               <div className="flex items-center gap-3">
-                <span className="text-gray-600 text-xs">{item.time}</span>
+                <span className="text-[var(--text-tertiary)] text-xs">{item.time}</span>
                 <span
                   className={cn(
                     "text-xs px-2 py-0.5 rounded-full font-medium",
@@ -201,7 +201,7 @@ export default function StockSearchPage() {
                 >
                   {item.advice}
                 </span>
-                <ChevronRight size={14} className="text-gray-600" />
+                <ChevronRight size={14} className="text-[var(--text-tertiary)]" />
               </div>
             </button>
           ))}

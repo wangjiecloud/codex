@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, Plus, Star } from "lucide-react";
+import { ArrowLeft, ExternalLink, Plus, Star, X } from "lucide-react";
 import { StockChart, generateMockData } from "@/components/stock/StockChart";
 import { AgentPanel } from "@/components/agents/AgentPanel";
 import { cn, getPriceColor, formatPercent } from "@/lib/utils";
@@ -42,19 +42,22 @@ interface NewsItem {
 }
 
 interface GubaItem {
+  post_id: string;
   title: string;
   author: string;
   time: string;
+  post_date: string;
   reads: string;
   replies: string;
   url: string;
   category: string;
 }
 
-interface GubaData {
-  announcement: GubaItem[];
-  research: GubaItem[];
-  news: GubaItem[];
+interface GubaPageData {
+  items: GubaItem[];
+  total: number;
+  total_pages: number;
+  syncing: boolean;
 }
 
 const DEFAULT_QUOTE: QuoteData = {
@@ -122,6 +125,15 @@ function addToRecentlyViewed(code: string, name: string) {
   } catch {}
 }
 
+function removeFromRecentlyViewed(code: string) {
+  if (typeof window === "undefined") return;
+  try {
+    const recent = getRecentlyViewed();
+    const updated = recent.filter((item) => item.code !== code);
+    localStorage.setItem(WATCHLIST_KEY, JSON.stringify(updated));
+  } catch {}
+}
+
 const WATCHLIST = [
   { code: "600519", name: "贵州茅台" },
   { code: "300750", name: "宁德时代" },
@@ -132,7 +144,14 @@ const WATCHLIST = [
 
 const INDICATORS = ["VOL", "MACD", "KDJ", "BOLL", "RSI", "DMI", "CCI", "W&R"];
 const PERIODS = ["日K", "周K", "月K"];
-const BOTTOM_TABS = ["公告", "研报", "资讯", "AI分析"];
+const BOTTOM_TABS = ["全部", "公告", "研报", "资讯", "AI分析"];
+
+const TAB_CATEGORY_MAP: Record<string, string> = {
+  全部: "all",
+  公告: "announcement",
+  研报: "research",
+  资讯: "news",
+};
 
 const PERIOD_MAP: Record<string, string> = {
   日K: "daily",
@@ -162,22 +181,27 @@ export default function StockDetailPage() {
     generateMockData(code),
   );
   const [news, setNews] = useState<NewsItem[]>([]);
-  const [gubaData, setGubaData] = useState<GubaData>({
-    announcement: [],
-    research: [],
-    news: [],
+  const [gubaPage, setGubaPage] = useState<GubaPageData>({
+    items: [],
+    total: 0,
+    total_pages: 1,
+    syncing: false,
   });
+  const [gubaCurrentPage, setGubaCurrentPage] = useState(1);
   const [activeIndicators, setActiveIndicators] = useState([
     "VOL",
     "MACD",
     "KDJ",
   ]);
   const [activePeriod, setActivePeriod] = useState("日K");
-  const [activeTab, setActiveTab] = useState("公告");
+  const [activeTab, setActiveTab] = useState("全部");
   const [isStarred, setIsStarred] = useState(false);
   const [watchlist, setWatchlist] = useState<
     Array<{ code: string; name: string }>
   >([]);
+  const [selectedPost, setSelectedPost] = useState<GubaItem | null>(null);
+  const [postContent, setPostContent] = useState<string | null>(null);
+  const [postLoading, setPostLoading] = useState(false);
 
   useEffect(() => {
     setWatchlist(getRecentlyViewed());
@@ -219,15 +243,33 @@ export default function StockDetailPage() {
   }, [code]);
 
   useEffect(() => {
-    fetch(`http://localhost:8000/api/guba/${code}`)
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.data) {
-          setGubaData(data.data);
-        }
-      })
-      .catch(() => {});
-  }, [code]);
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const fetchGuba = (pg: number) => {
+      const category = TAB_CATEGORY_MAP[activeTab] ?? "all";
+      fetch(
+        `http://localhost:8000/api/guba/${code}?category=${category}&page=${pg}&page_size=20`,
+      )
+        .then((r) => r.json())
+        .then((data) => {
+          setGubaPage({
+            items: data.items ?? [],
+            total: data.total ?? 0,
+            total_pages: data.total_pages ?? 1,
+            syncing: data.syncing ?? false,
+          });
+          if (data.syncing) {
+            timer = setTimeout(() => fetchGuba(pg), 3000);
+          }
+        })
+        .catch(() => {});
+    };
+
+    fetchGuba(gubaCurrentPage);
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
+  }, [code, activeTab, gubaCurrentPage]);
 
   const toggleIndicator = (ind: string) => {
     setActiveIndicators((prev) =>
@@ -235,26 +277,28 @@ export default function StockDetailPage() {
     );
   };
 
-  const orderBookRows = Array.from({ length: 5 }, (_, i) => ({
-    sell: {
-      price: (quote.price + (5 - i) * 0.001).toFixed(3),
-      vol: Math.floor(Math.random() * 5000 + 500),
-    },
-    buy: {
-      price: (quote.price - (i + 1) * 0.001).toFixed(3),
-      vol: Math.floor(Math.random() * 5000 + 500),
-    },
-  }));
+  const orderBookRows = Array.from({ length: 5 }, (_, i) => {
+    const seed =
+      Math.abs(Math.sin((quote.price * 1000 + i + 1) * 9301 + 49297)) * 233280;
+    const vol = Math.floor((seed % 4500) + 500);
+    const seed2 =
+      Math.abs(Math.sin((quote.price * 1000 + i + 6) * 9301 + 49297)) * 233280;
+    const vol2 = Math.floor((seed2 % 4500) + 500);
+    return {
+      sell: { price: (quote.price + (5 - i) * 0.001).toFixed(3), vol },
+      buy: { price: (quote.price - (i + 1) * 0.001).toFixed(3), vol: vol2 },
+    };
+  });
 
   const displayName = quote.name || `股票${code}`;
 
   return (
     <div className="flex flex-col h-full text-xs overflow-hidden">
       {/* Top toolbar */}
-      <div className="flex items-center gap-1 px-3 py-1.5 border-b border-[#1e2332] bg-[#151821] shrink-0 overflow-x-auto">
+      <div className="flex items-center gap-1 px-3 py-1.5 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] shrink-0 overflow-x-auto">
         <button
           onClick={() => router.push("/stock/search")}
-          className="flex items-center gap-1 text-gray-500 hover:text-white mr-2 shrink-0"
+          className="flex items-center gap-1 text-[var(--text-tertiary)] hover:text-[var(--text-primary)] mr-2 shrink-0"
         >
           <ArrowLeft size={13} />
         </button>
@@ -264,7 +308,7 @@ export default function StockDetailPage() {
             "flex items-center gap-1 px-2 py-1 rounded border mr-2 shrink-0 transition-colors",
             isStarred
               ? "border-[#f5a623]/50 text-[#f5a623] bg-[#f5a623]/10"
-              : "border-[#1e2332] text-gray-500",
+              : "border-[var(--border-color)] text-[var(--text-tertiary)]",
           )}
         >
           <Star size={12} fill={isStarred ? "currentColor" : "none"} />
@@ -278,7 +322,7 @@ export default function StockDetailPage() {
               "px-2 py-1 rounded whitespace-nowrap transition-colors shrink-0",
               activePeriod === p
                 ? "text-[#f5a623] bg-[#f5a623]/10"
-                : "text-gray-500 hover:text-white",
+                : "text-[var(--text-tertiary)] hover:text-[var(--text-primary)]",
             )}
           >
             {p}
@@ -288,35 +332,66 @@ export default function StockDetailPage() {
 
       <div className="flex flex-1 overflow-hidden">
         {/* Watchlist */}
-        <div className="w-[140px] border-r border-[#1e2332] bg-[#0d1018] flex flex-col shrink-0 overflow-hidden">
-          <div className="flex items-center justify-between px-2 py-1.5 border-b border-[#1e2332]">
-            <span className="text-gray-600 text-[10px]">名称</span>
-            <span className="text-gray-600 text-[10px]">代码</span>
+        <div className="w-[140px] border-r border-[var(--border-color)] bg-[var(--bg-deep)] flex flex-col shrink-0 overflow-hidden">
+          <div className="flex items-center justify-between px-2 py-1.5 border-b border-[var(--border-color)]">
+            <span className="text-[var(--text-tertiary)] text-[10px]">
+              名称
+            </span>
+            <span className="text-[var(--text-tertiary)] text-[10px]">
+              代码
+            </span>
           </div>
           <div className="flex-1 overflow-y-auto">
             {(watchlist.length > 0 ? watchlist : WATCHLIST).map((s) => (
-              <button
+              <div
                 key={s.code}
-                onClick={() => router.push(`/stock/${s.code}`)}
                 className={cn(
-                  "w-full flex items-center justify-between px-2 py-1.5 border-b border-[#1a1f2e] hover:bg-[#1a1f2e] transition-colors",
-                  s.code === code && "bg-[#1e2332]",
+                  "group relative w-full flex items-center justify-between border-b border-[var(--border-color)] hover:bg-[var(--bg-hover)] transition-colors",
+                  s.code === code && "bg-[var(--bg-tertiary)]",
                 )}
               >
-                <div className="text-left">
-                  <div
-                    className={cn(
-                      "text-[11px] font-medium",
-                      s.code === code ? "text-white" : "text-gray-300",
-                    )}
-                  >
-                    {s.name}
+                <button
+                  onClick={() => router.push(`/stock/${s.code}`)}
+                  className="flex-1 flex items-center justify-between px-2 py-1.5"
+                >
+                  <div className="text-left">
+                    <div
+                      className={cn(
+                        "text-[11px] font-medium",
+                        s.code === code
+                          ? "text-[var(--text-primary)]"
+                          : "text-[var(--text-secondary)]",
+                      )}
+                    >
+                      {s.name}
+                    </div>
+                    <div className="text-[10px] text-[var(--text-tertiary)]">
+                      {s.code}
+                    </div>
                   </div>
-                  <div className="text-[10px] text-gray-600">{s.code}</div>
-                </div>
-              </button>
+                </button>
+                {watchlist.length > 0 && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      removeFromRecentlyViewed(s.code);
+                      const updated = watchlist.filter(
+                        (item) => item.code !== s.code,
+                      );
+                      setWatchlist(updated);
+                      if (s.code === code && updated.length > 0) {
+                        router.push(`/stock/${updated[0].code}`);
+                      }
+                    }}
+                    className="absolute right-1 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-[var(--bg-secondary)] text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
+                    title="删除"
+                  >
+                    <X size={10} />
+                  </button>
+                )}
+              </div>
             ))}
-            <button className="w-full flex items-center gap-1 justify-center py-2 text-gray-600 hover:text-gray-400 text-[10px]">
+            <button className="w-full flex items-center gap-1 justify-center py-2 text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] text-[10px]">
               <Plus size={10} /> 添加股票
             </button>
           </div>
@@ -325,13 +400,13 @@ export default function StockDetailPage() {
         {/* Main chart area */}
         <div className="flex-1 flex flex-col overflow-hidden">
           {/* Stock header */}
-          <div className="flex items-start justify-between px-4 py-2 border-b border-[#1e2332] bg-[#0f1117] shrink-0">
+          <div className="flex items-start justify-between px-4 py-2 border-b border-[var(--border-color)] bg-[var(--bg-primary)] shrink-0">
             <div>
               <div className="flex items-baseline gap-3">
-                <span className="text-lg font-bold text-white">
+                <span className="text-lg font-bold text-[var(--text-primary)]">
                   {displayName}
                 </span>
-                <span className="text-gray-600">({code})</span>
+                <span className="text-[var(--text-tertiary)]">({code})</span>
               </div>
               <div className="flex items-baseline gap-2 mt-0.5">
                 <span
@@ -372,8 +447,10 @@ export default function StockDetailPage() {
                 ],
               ].map(([label, val]) => (
                 <div key={label} className="flex gap-2 justify-end text-[11px]">
-                  <span className="text-gray-600">{label}</span>
-                  <span className="text-gray-300 font-mono">{val}</span>
+                  <span className="text-[var(--text-tertiary)]">{label}</span>
+                  <span className="text-[var(--text-secondary)] font-mono">
+                    {val}
+                  </span>
                 </div>
               ))}
             </div>
@@ -385,7 +462,7 @@ export default function StockDetailPage() {
           </div>
 
           {/* Indicator selector */}
-          <div className="flex items-center gap-1 px-3 py-1.5 border-t border-[#1e2332] bg-[#0d1018] shrink-0 overflow-x-auto">
+          <div className="flex items-center gap-1 px-3 py-1.5 border-t border-[var(--border-color)] bg-[var(--bg-deep)] shrink-0 overflow-x-auto">
             {INDICATORS.map((ind) => (
               <button
                 key={ind}
@@ -394,7 +471,7 @@ export default function StockDetailPage() {
                   "px-2.5 py-1 rounded text-[11px] whitespace-nowrap transition-colors",
                   activeIndicators.includes(ind)
                     ? "bg-[#f5a623]/20 text-[#f5a623] border border-[#f5a623]/40"
-                    : "text-gray-500 hover:text-gray-300 border border-transparent hover:border-[#1e2332]",
+                    : "text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] border border-transparent hover:border-[var(--border-color)]",
                 )}
               >
                 {ind}
@@ -403,180 +480,135 @@ export default function StockDetailPage() {
           </div>
 
           {/* Bottom tabs */}
-          <div className="flex items-center border-t border-[#1e2332] bg-[#151821] shrink-0">
+          <div className="flex items-center border-t border-[var(--border-color)] bg-[var(--bg-secondary)] shrink-0">
             {BOTTOM_TABS.map((tab) => (
               <button
                 key={tab}
-                onClick={() => setActiveTab(tab)}
+                onClick={() => {
+                  setActiveTab(tab);
+                  setGubaCurrentPage(1);
+                  if (tab !== "AI分析") {
+                    fetch(`http://localhost:8000/api/guba/sync/${code}`, {
+                      method: "POST",
+                    }).catch(() => {});
+                  }
+                }}
                 className={cn(
                   "px-4 py-2 text-[11px] whitespace-nowrap transition-colors border-b-2",
                   activeTab === tab
                     ? "text-[#f5a623] border-[#f5a623]"
-                    : "text-gray-500 border-transparent hover:text-gray-300",
+                    : "text-[var(--text-tertiary)] border-transparent hover:text-[var(--text-secondary)]",
                 )}
               >
                 {tab}
               </button>
             ))}
+            {gubaPage.syncing && (
+              <span className="ml-auto mr-3 text-[10px] text-[var(--text-tertiary)] animate-pulse">
+                加载中…
+              </span>
+            )}
           </div>
 
           {/* Tab content */}
           {activeTab !== "AI分析" && (
-            <div className="h-32 overflow-y-auto bg-[#0f1117] text-[11px]">
-              {activeTab === "公告" && (
-                <div className="w-full">
-                  {gubaData.announcement.length > 0 ? (
-                    <table className="w-full">
-                      <thead className="sticky top-0 bg-[#151821] border-b border-[#1e2332]">
-                        <tr className="text-gray-500 text-[10px]">
-                          <th className="px-2 py-1 text-center w-16">阅读</th>
-                          <th className="px-2 py-1 text-center w-16">评论</th>
-                          <th className="px-2 py-1 text-left">标题</th>
-                          <th className="px-2 py-1 text-left w-24">作者</th>
-                          <th className="px-2 py-1 text-center w-20">更新</th>
+            <div className="flex flex-col" style={{ height: "180px" }}>
+              <div className="flex-1 overflow-y-auto bg-[var(--bg-primary)] text-[11px]">
+                {gubaPage.items.length > 0 ? (
+                  <table className="w-full">
+                    <thead className="sticky top-0 bg-[var(--bg-secondary)] border-b border-[var(--border-color)]">
+                      <tr className="text-[var(--text-tertiary)] text-[10px]">
+                        <th className="px-2 py-1 text-center w-16">阅读</th>
+                        <th className="px-2 py-1 text-center w-16">评论</th>
+                        <th className="px-2 py-1 text-left">标题</th>
+                        <th className="px-2 py-1 text-left w-24">作者</th>
+                        <th className="px-2 py-1 text-center w-20">时间</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {gubaPage.items.map((item, i) => (
+                        <tr
+                          key={i}
+                          className="border-b border-[var(--border-color)] hover:bg-[var(--bg-hover)] transition-colors"
+                        >
+                          <td className="px-2 py-1.5 text-center text-[var(--text-tertiary)]">
+                            {item.reads}
+                          </td>
+                          <td className="px-2 py-1.5 text-center text-[var(--text-tertiary)]">
+                            {item.replies}
+                          </td>
+                          <td className="px-2 py-1.5">
+                            <button
+                              onClick={() => {
+                                setSelectedPost(item);
+                                setPostContent(null);
+                                setPostLoading(true);
+                                fetch(
+                                  `http://localhost:8000/api/guba/post/${item.post_id}`,
+                                )
+                                  .then((r) => r.json())
+                                  .then((d) => {
+                                    setPostContent(d.content || "");
+                                    setPostLoading(false);
+                                  })
+                                  .catch(() => {
+                                    setPostContent("");
+                                    setPostLoading(false);
+                                  });
+                              }}
+                              className="text-left text-[var(--text-secondary)] hover:text-[#f5a623] line-clamp-1 w-full text-[11px]"
+                            >
+                              {item.title}
+                            </button>
+                          </td>
+                          <td className="px-2 py-1.5 text-[var(--text-tertiary)] truncate">
+                            {item.author}
+                          </td>
+                          <td className="px-2 py-1.5 text-center text-[var(--text-tertiary)] text-[10px]">
+                            {item.time}
+                          </td>
                         </tr>
-                      </thead>
-                      <tbody>
-                        {gubaData.announcement.map((item, i) => (
-                          <tr
-                            key={i}
-                            className="border-b border-[#1e2332] hover:bg-[#1a1f2e] transition-colors"
-                          >
-                            <td className="px-2 py-1.5 text-center text-gray-500">
-                              {item.reads}
-                            </td>
-                            <td className="px-2 py-1.5 text-center text-gray-500">
-                              {item.replies}
-                            </td>
-                            <td className="px-2 py-1.5">
-                              <a
-                                href={item.url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-gray-400 hover:text-[#f5a623] line-clamp-1"
-                              >
-                                {item.title}
-                              </a>
-                            </td>
-                            <td className="px-2 py-1.5 text-gray-500 truncate">
-                              {item.author}
-                            </td>
-                            <td className="px-2 py-1.5 text-center text-gray-600 text-[10px]">
-                              {item.time}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  ) : (
-                    <div className="text-center text-gray-600 py-8">
-                      暂无公告数据
-                    </div>
-                  )}
-                </div>
-              )}
-              {activeTab === "研报" && (
-                <div className="w-full">
-                  {gubaData.research.length > 0 ? (
-                    <table className="w-full">
-                      <thead className="sticky top-0 bg-[#151821] border-b border-[#1e2332]">
-                        <tr className="text-gray-500 text-[10px]">
-                          <th className="px-2 py-1 text-center w-16">阅读</th>
-                          <th className="px-2 py-1 text-center w-16">评论</th>
-                          <th className="px-2 py-1 text-left">标题</th>
-                          <th className="px-2 py-1 text-left w-24">作者</th>
-                          <th className="px-2 py-1 text-center w-20">更新</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {gubaData.research.map((item, i) => (
-                          <tr
-                            key={i}
-                            className="border-b border-[#1e2332] hover:bg-[#1a1f2e] transition-colors"
-                          >
-                            <td className="px-2 py-1.5 text-center text-gray-500">
-                              {item.reads}
-                            </td>
-                            <td className="px-2 py-1.5 text-center text-gray-500">
-                              {item.replies}
-                            </td>
-                            <td className="px-2 py-1.5">
-                              <a
-                                href={item.url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-gray-400 hover:text-[#f5a623] line-clamp-1"
-                              >
-                                {item.title}
-                              </a>
-                            </td>
-                            <td className="px-2 py-1.5 text-gray-500 truncate">
-                              {item.author}
-                            </td>
-                            <td className="px-2 py-1.5 text-center text-gray-600 text-[10px]">
-                              {item.time}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  ) : (
-                    <div className="text-center text-gray-600 py-8">
-                      暂无研报数据
-                    </div>
-                  )}
-                </div>
-              )}
-              {activeTab === "资讯" && (
-                <div className="w-full">
-                  {gubaData.news.length > 0 ? (
-                    <table className="w-full">
-                      <thead className="sticky top-0 bg-[#151821] border-b border-[#1e2332]">
-                        <tr className="text-gray-500 text-[10px]">
-                          <th className="px-2 py-1 text-center w-16">阅读</th>
-                          <th className="px-2 py-1 text-center w-16">评论</th>
-                          <th className="px-2 py-1 text-left">标题</th>
-                          <th className="px-2 py-1 text-left w-24">作者</th>
-                          <th className="px-2 py-1 text-center w-20">更新</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {gubaData.news.map((item, i) => (
-                          <tr
-                            key={i}
-                            className="border-b border-[#1e2332] hover:bg-[#1a1f2e] transition-colors"
-                          >
-                            <td className="px-2 py-1.5 text-center text-gray-500">
-                              {item.reads}
-                            </td>
-                            <td className="px-2 py-1.5 text-center text-gray-500">
-                              {item.replies}
-                            </td>
-                            <td className="px-2 py-1.5">
-                              <a
-                                href={item.url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-gray-400 hover:text-[#f5a623] line-clamp-1"
-                              >
-                                {item.title}
-                              </a>
-                            </td>
-                            <td className="px-2 py-1.5 text-gray-500 truncate">
-                              {item.author}
-                            </td>
-                            <td className="px-2 py-1.5 text-center text-gray-600 text-[10px]">
-                              {item.time}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  ) : (
-                    <div className="text-center text-gray-600 py-8">
-                      暂无资讯数据
-                    </div>
-                  )}
+                      ))}
+                    </tbody>
+                  </table>
+                ) : (
+                  <div className="text-center text-[var(--text-tertiary)] py-6">
+                    {gubaPage.syncing ? "正在抓取数据…" : "暂无数据"}
+                  </div>
+                )}
+              </div>
+
+              {/* Pagination */}
+              {gubaPage.total_pages > 1 && (
+                <div className="flex items-center justify-between px-3 py-1 border-t border-[var(--border-color)] bg-[var(--bg-secondary)] shrink-0">
+                  <span className="text-[10px] text-[var(--text-tertiary)]">
+                    共 {gubaPage.total} 条
+                  </span>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() =>
+                        setGubaCurrentPage((p) => Math.max(1, p - 1))
+                      }
+                      disabled={gubaCurrentPage === 1}
+                      className="px-2 py-0.5 text-[10px] rounded border border-[var(--border-color)] text-[var(--text-tertiary)] disabled:opacity-30 hover:text-[var(--text-primary)] transition-colors"
+                    >
+                      上一页
+                    </button>
+                    <span className="text-[10px] text-[var(--text-tertiary)] px-1">
+                      {gubaCurrentPage}/{gubaPage.total_pages}
+                    </span>
+                    <button
+                      onClick={() =>
+                        setGubaCurrentPage((p) =>
+                          Math.min(gubaPage.total_pages, p + 1),
+                        )
+                      }
+                      disabled={gubaCurrentPage === gubaPage.total_pages}
+                      className="px-2 py-0.5 text-[10px] rounded border border-[var(--border-color)] text-[var(--text-tertiary)] disabled:opacity-30 hover:text-[var(--text-primary)] transition-colors"
+                    >
+                      下一页
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
@@ -584,7 +616,7 @@ export default function StockDetailPage() {
         </div>
 
         {/* Right panel: order book + AI */}
-        <div className="w-[200px] border-l border-[#1e2332] bg-[#0d1018] flex flex-col shrink-0 overflow-hidden">
+        <div className="w-[200px] border-l border-[var(--border-color)] bg-[var(--bg-deep)] flex flex-col shrink-0 overflow-hidden">
           {activeTab === "AI分析" ? (
             <div className="flex-1 overflow-hidden">
               <AgentPanel code={code} stockName={displayName} />
@@ -592,8 +624,8 @@ export default function StockDetailPage() {
           ) : (
             <>
               {/* Order book */}
-              <div className="px-2 py-1.5 border-b border-[#1e2332]">
-                <div className="flex justify-between text-[10px] text-gray-600 mb-1">
+              <div className="px-2 py-1.5 border-b border-[var(--border-color)]">
+                <div className="flex justify-between text-[10px] text-[var(--text-tertiary)] mb-1">
                   <span>委比</span>
                 </div>
                 {orderBookRows.reverse().map((row, i) => (
@@ -601,23 +633,27 @@ export default function StockDetailPage() {
                     key={`sell-${i}`}
                     className="flex justify-between py-0.5"
                   >
-                    <span className="text-[10px] text-gray-600">卖{5 - i}</span>
+                    <span className="text-[10px] text-[var(--text-tertiary)]">
+                      卖{5 - i}
+                    </span>
                     <span className="text-[11px] text-[#09d464] font-mono">
                       {row.sell.price}
                     </span>
-                    <span className="text-[10px] text-gray-600 font-mono">
+                    <span className="text-[10px] text-[var(--text-tertiary)] font-mono">
                       {row.sell.vol}
                     </span>
                   </div>
                 ))}
-                <div className="my-1 border-t border-[#1e2332]" />
+                <div className="my-1 border-t border-[var(--border-color)]" />
                 {[...orderBookRows].reverse().map((row, i) => (
                   <div key={`buy-${i}`} className="flex justify-between py-0.5">
-                    <span className="text-[10px] text-gray-600">买{i + 1}</span>
+                    <span className="text-[10px] text-[var(--text-tertiary)]">
+                      买{i + 1}
+                    </span>
                     <span className="text-[11px] text-[#e84444] font-mono">
                       {row.buy.price}
                     </span>
-                    <span className="text-[10px] text-gray-600 font-mono">
+                    <span className="text-[10px] text-[var(--text-tertiary)] font-mono">
                       {row.buy.vol}
                     </span>
                   </div>
@@ -625,8 +661,8 @@ export default function StockDetailPage() {
               </div>
 
               {/* Quote stats */}
-              <div className="px-2 py-1.5 border-b border-[#1e2332]">
-                <div className="text-[10px] text-gray-500 font-medium mb-1">
+              <div className="px-2 py-1.5 border-b border-[var(--border-color)]">
+                <div className="text-[10px] text-[var(--text-tertiary)] font-medium mb-1">
                   行情数据
                 </div>
                 {[
@@ -649,8 +685,10 @@ export default function StockDetailPage() {
                   ],
                 ].map(([label, val]) => (
                   <div key={label} className="flex justify-between py-0.5">
-                    <span className="text-[10px] text-gray-600">{label}</span>
-                    <span className="text-[11px] text-gray-300 font-mono">
+                    <span className="text-[10px] text-[var(--text-tertiary)]">
+                      {label}
+                    </span>
+                    <span className="text-[11px] text-[var(--text-secondary)] font-mono">
                       {val}
                     </span>
                   </div>
@@ -670,6 +708,74 @@ export default function StockDetailPage() {
           )}
         </div>
       </div>
+
+      {/* Post detail modal */}
+      {selectedPost && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+          onClick={() => setSelectedPost(null)}
+        >
+          <div
+            className="relative w-[660px] max-w-[92vw] max-h-[82vh] flex flex-col rounded-xl border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-2xl overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-[var(--border-color)] bg-[var(--bg-secondary)]">
+              <div className="flex-1 min-w-0">
+                <div className="text-[13px] font-semibold text-[var(--text-primary)] leading-snug">
+                  {selectedPost.title}
+                </div>
+                <div className="flex items-center gap-3 mt-1.5 text-[11px] text-[var(--text-tertiary)]">
+                  <span>{selectedPost.author}</span>
+                  <span>{selectedPost.time}</span>
+                  <span>阅读 {selectedPost.reads}</span>
+                  <span>评论 {selectedPost.replies}</span>
+                  <span className="px-1.5 py-0.5 rounded text-[10px] border border-[var(--border-color)]">
+                    {selectedPost.category === "announcement"
+                      ? "公告"
+                      : selectedPost.category === "research"
+                        ? "研报"
+                        : selectedPost.category === "news"
+                          ? "资讯"
+                          : "全部"}
+                  </span>
+                </div>
+              </div>
+              <button
+                onClick={() => setSelectedPost(null)}
+                className="shrink-0 p-1.5 rounded-lg hover:bg-[var(--bg-hover)] text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-5 py-4 text-[12px] text-[var(--text-secondary)] leading-relaxed">
+              {postLoading ? (
+                <div className="text-center text-[var(--text-tertiary)] py-8 animate-pulse">
+                  正在加载内容…
+                </div>
+              ) : postContent ? (
+                <div className="whitespace-pre-wrap">{postContent}</div>
+              ) : (
+                <div className="text-center text-[var(--text-tertiary)] py-8">
+                  暂无正文内容
+                </div>
+              )}
+            </div>
+
+            <div className="px-5 py-3 border-t border-[var(--border-color)] bg-[var(--bg-secondary)] flex justify-end">
+              <a
+                href={selectedPost.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#f5a623]/10 hover:bg-[#f5a623]/20 border border-[#f5a623]/40 text-[#f5a623] text-[12px] font-medium transition-colors"
+              >
+                <ExternalLink size={13} />
+                查看原文
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

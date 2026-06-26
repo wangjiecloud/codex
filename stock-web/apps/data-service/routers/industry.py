@@ -12,32 +12,72 @@ from db import (
     StockKline,
     StockFundamental,
     StockNews,
+    StockMeta,
     IndustryNode,
     IndustryEdge,
+    IndustryMeta,
+    IndustryList,
 )
-from industry_stocks import INDUSTRY_A_SHARES, NON_A_SHARE_SYMBOLS
 from bs_session import get_bs, reset_bs
-from stock_names import get_stock_name
 
 router = APIRouter()
 
-INDUSTRY_META: dict[str, dict] = {
-    "pcb":         {"title": "PCB 企业供应链",         "subtitle": "以英伟达为核心的高端PCB产业企业关系图谱",                         "layerLabels": ["L0 原材料企业","L1 覆铜板/钻针企业","L2 PCB制造企业","L3 组装/测试企业","L4 终端客户"]},
-    "mlcc":        {"title": "MLCC 企业供应链",        "subtitle": "以英伟达为核心的被动元件产业企业关系图谱",                         "layerLabels": ["L0 材料企业","L1 关键部件企业","L2 核心器件企业","L3 组装/分销企业","L4 终端客户"]},
-    "memory":      {"title": "存储芯片企业供应链",      "subtitle": "以英伟达HBM需求为核心的存储芯片产业企业关系图谱",                   "layerLabels": ["L0 原材料企业","L1 关键材料企业","L2 核心制造企业","L3 封测/模组/设备","L4 终端客户"]},
-    "optics":      {"title": "光模块与CPO供应链",      "subtitle": "以英伟达CPO交换机为核心的光模块/共封装光学产业链图谱",              "layerLabels": ["L0 光芯片/硅光材料","L1 光器件/组件","L2 高速光模块","L3 终端客户"]},
-    "fiber":       {"title": "光纤光缆供应链",         "subtitle": "从光纤预制棒到光缆的全产业链图谱（AI数据中心+5G/6G驱动）",          "layerLabels": ["L0 原材料","L1 光纤预制棒","L2 光纤/光缆制造","L3 终端客户"]},
-    "liquidcool":  {"title": "液冷散热供应链",         "subtitle": "AI芯片功耗突破1.2kW驱动液冷从可选变必选的产业链图谱",              "layerLabels": ["L0 液冷材料/管路","L1 冷板/CDU组件","L2 液冷系统集成","L3 终端交付"]},
-    "aipower":     {"title": "AI供配电供应链",         "subtitle": "GB200/GB300机柜供配电体系（PSU/BBU/HVDC）产业图谱",             "layerLabels": ["L0 核心原材料","L1 关键电源模块","L2 供配电系统集成","L3 终端客户"]},
-    "coppercable": {"title": "高速铜连接供应链",        "subtitle": "AI机柜内GPU-Switch短距互联铜缆（DAC/AEC）产业图谱",              "layerLabels": ["L0 原材料","L1 线缆/连接器制造","L2 高速互联模组","L3 终端客户"]},
-    "aigpu":       {"title": "AI算力芯片供应链",        "subtitle": "以英伟达GPU为核心、国产替代加速推进的AI算力芯片产业链图谱",           "layerLabels": ["L0 EDA/制程/封装","L1 核心算力芯片","L2 AI算力系统","L3 算力应用"]},
-    "idc":         {"title": "智算中心/IDC供应链",     "subtitle": "AI算力基础设施载体——智算中心建设与运营产业链图谱",                "layerLabels": ["L0 基础设施建设","L1 机房配套设备","L2 智算中心运营","L3 算力服务客户"]},
-    "overview":    {"title": "AI算力产业链全景概览",    "subtitle": "从芯片到数据中心——AI算力全产业链关系图谱",                         "layerLabels": []},
-}
 
+def _get_industry_meta(db: Session) -> dict[str, dict]:
+    """Load industry meta (title/subtitle/layerLabels) from DB."""
+    rows = db.query(IndustryMeta).all()
+    return {
+        r.industry_id: {
+            "title": r.title,
+            "subtitle": r.subtitle,
+            "layerLabels": json.loads(r.layer_labels or "[]"),
+        }
+        for r in rows
+    }
+
+
+def _get_a_shares(db: Session) -> list[str]:
+    """Return sorted list of A-share codes from stock_meta."""
+    import re
+
+    rows = db.query(StockMeta.code).filter(StockMeta.market == "A股").all()
+    return sorted({r.code for r in rows if re.match(r"^[036]\d{5}$", r.code)})
+
+
+def _get_non_a_shares(db: Session) -> list[dict]:
+    """Return non-A-share symbol list from stock_meta."""
+    rows = db.query(StockMeta).filter(StockMeta.market != "A股").all()
+    return [{"code": r.code, "name": r.name, "market": r.market} for r in rows]
+
+
+def get_stock_name(code: str, db: Session | None = None) -> str:
+    """Get stock name from DB; fall back to empty string."""
+    if db is None:
+        db = SessionLocal()
+        try:
+            row = db.query(StockMeta).filter(StockMeta.code == code).first()
+            return row.name if row else ""
+        finally:
+            db.close()
+    row = db.query(StockMeta).filter(StockMeta.code == code).first()
+    return row.name if row else ""
 
 
 _sync_running = False
+
+
+def sync_all_data():
+    """Full sync: quotes + daily klines for all A-shares. Called by scheduler."""
+    print("[sync_all_data] starting full sync...")
+    _sync_all_quotes()
+    db = SessionLocal()
+    try:
+        codes = _get_a_shares(db)
+    finally:
+        db.close()
+    for code in codes:
+        _sync_klines(code, "daily")
+    print(f"[sync_all_data] done — {len(codes)} stocks updated")
 
 
 def _to_bs_code(code: str) -> str:
@@ -64,7 +104,7 @@ def _sync_all_quotes():
         yesterday = (date.today() - timedelta(days=5)).strftime("%Y-%m-%d")
         fields = "date,code,open,high,low,close,preclose,volume,amount,turn,pctChg,peTTM,pbMRQ"
         count = 0
-        for raw_code in INDUSTRY_A_SHARES:
+        for raw_code in _get_a_shares(db):
             bs_code = _to_bs_code(raw_code)
             try:
                 rs = bs.query_history_k_data_plus(
@@ -129,6 +169,8 @@ def _sync_all_quotes():
             )
             db.execute(stmt)
             count += 1
+            if count % 50 == 0:
+                db.commit()
 
         db.commit()
         print(f"[sync_quotes] done, saved {count} rows")
@@ -304,7 +346,7 @@ async def get_industry_quotes(
     code_list = (
         [c.strip() for c in codes.split(",") if c.strip()]
         if codes
-        else INDUSTRY_A_SHARES
+        else _get_a_shares(db)
     )
     rows = db.query(StockQuote).filter(StockQuote.code.in_(code_list)).all()
     result = {}
@@ -332,11 +374,13 @@ async def get_industry_quotes(
 
 
 @router.post("/sync")
-async def trigger_sync(background_tasks: BackgroundTasks):
+async def trigger_sync(
+    background_tasks: BackgroundTasks, db: Session = Depends(get_db)
+):
     if _sync_running:
         return {"status": "already_running"}
     background_tasks.add_task(_sync_all_quotes)
-    return {"status": "started", "codes": len(INDUSTRY_A_SHARES)}
+    return {"status": "started", "codes": len(_get_a_shares(db))}
 
 
 @router.post("/sync/kline/{code}")
@@ -344,8 +388,9 @@ async def sync_kline(
     code: str,
     period: str = Query("daily"),
     background_tasks: BackgroundTasks = None,
+    db: Session = Depends(get_db),
 ):
-    if code not in INDUSTRY_A_SHARES:
+    if code not in _get_a_shares(db):
         raise HTTPException(status_code=400, detail="Not an industry stock")
     background_tasks.add_task(_sync_klines, code, period)
     return {"status": "started", "code": code, "period": period}
@@ -355,8 +400,9 @@ async def sync_kline(
 async def sync_fundamental(
     code: str,
     background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
 ):
-    if code not in INDUSTRY_A_SHARES:
+    if code not in _get_a_shares(db):
         raise HTTPException(status_code=400, detail="Not an industry stock")
     background_tasks.add_task(_sync_fundamental, code)
     return {"status": "started", "code": code}
@@ -380,7 +426,7 @@ async def get_industry_news(
     code_list = (
         [c.strip() for c in codes.split(",") if c.strip()]
         if codes
-        else INDUSTRY_A_SHARES
+        else _get_a_shares(db)
     )
     rows = (
         db.query(StockNews)
@@ -404,144 +450,21 @@ async def get_industry_news(
 
 
 @router.get("/non-a-shares")
-async def get_non_a_share_info():
-    return {"symbols": NON_A_SHARE_SYMBOLS}
+async def get_non_a_share_info(db: Session = Depends(get_db)):
+    return {"symbols": _get_non_a_shares(db)}
 
 
 @router.get("/stock-industry-map")
-async def get_stock_industry_map():
-    industry_map = {
-        "pcb": [
-            "600176",
-            "603256",
-            "601208",
-            "688300",
-            "688388",
-            "301217",
-            "301511",
-            "600549",
-            "600183",
-            "688183",
-            "603186",
-            "688519",
-            "301377",
-            "000657",
-            "002916",
-            "002436",
-            "002463",
-            "300476",
-            "002938",
-            "601138",
-            "002475",
-            "688082",
-            "688003",
-            "688630",
-            "002594",
-        ],
-        "mlcc": [
-            "300285",
-            "002601",
-            "601899",
-            "000878",
-            "000636",
-            "300408",
-            "002138",
-            "002859",
-            "601138",
-            "002475",
-            "688686",
-            "002594",
-        ],
-        "memory": [
-            "600206",
-            "300666",
-            "002409",
-            "688268",
-            "688126",
-            "688300",
-            "688019",
-            "300054",
-            "603986",
-            "688008",
-            "688525",
-            "301308",
-            "300475",
-            "688627",
-            "688361",
-            "601138",
-            "000977",
-        ],
-        "optics": [
-            "002281",
-            "688498",
-            "688048",
-            "688313",
-            "600703",
-            "300394",
-            "300620",
-            "300570",
-            "300548",
-            "300308",
-            "300502",
-            "000988",
-            "603083",
-        ],
-        "fiber": [
-            "300395",
-            "688268",
-            "002064",
-            "601869",
-            "600487",
-            "600522",
-            "600498",
-        ],
-        "liquidcool": [
-            "300547",
-            "601992",
-            "605288",
-            "300602",
-            "301018",
-            "300499",
-            "002837",
-            "688861",
-            "300249",
-            "601138",
-        ],
-        "aipower": [
-            "600563",
-            "002245",
-            "688601",
-            "603290",
-            "688396",
-            "600089",
-            "002851",
-            "002364",
-            "002335",
-            "300870",
-            "002518",
-            "688676",
-        ],
-        "coppercable": ["000630", "600110", "002130", "300913", "603465", "603659"],
-        "aigpu": [
-            "301269",
-            "688521",
-            "600584",
-            "688256",
-            "688041",
-            "300474",
-            "603019",
-            "000977",
-        ],
-        "idc": ["000063", "002518", "002837", "603912", "300442", "300738", "300383"],
-    }
-
+async def get_stock_industry_map(db: Session = Depends(get_db)):
+    """Derive stock→industries mapping dynamically from industry_node.stocks in DB."""
+    nodes = db.query(IndustryNode).filter(IndustryNode.stocks != "[]").all()
     stock_to_industries: dict[str, list[str]] = {}
-    for industry_id, codes in industry_map.items():
+    for node in nodes:
+        codes = json.loads(node.stocks or "[]")
         for code in codes:
             stock_to_industries.setdefault(code, [])
-            if industry_id not in stock_to_industries[code]:
-                stock_to_industries[code].append(industry_id)
-
+            if node.industry_id not in stock_to_industries[code]:
+                stock_to_industries[code].append(node.industry_id)
     return {"mapping": stock_to_industries}
 
 
@@ -606,21 +529,45 @@ async def get_node_stocks(db: Session = Depends(get_db)):
     rows = db.query(IndustryNode).filter(IndustryNode.stocks != "[]").all()
     result: dict[str, dict[str, list[str]]] = {}
     for row in rows:
-        result.setdefault(row.industry_id, {})[row.node_id] = json.loads(row.stocks or "[]")
+        result.setdefault(row.industry_id, {})[row.node_id] = json.loads(
+            row.stocks or "[]"
+        )
     return {"nodeStocks": result}
+
+
+@router.get("/list")
+async def get_industry_list(db: Session = Depends(get_db)):
+    """Return ordered industry list with card metadata for the list page."""
+    rows = db.query(IndustryList).order_by(IndustryList.sort_order).all()
+    return {
+        "industries": [
+            {
+                "id": r.industry_id,
+                "name": r.name,
+                "description": r.description,
+                "icon": r.icon,
+                "companyCount": r.company_count,
+                "lastAnalyzed": r.last_analyzed,
+                "representatives": json.loads(r.representatives or "[]"),
+            }
+            for r in rows
+        ]
+    }
 
 
 @router.get("/graph/{industry_id}")
 async def get_industry_graph(industry_id: str, db: Session = Depends(get_db)):
     nodes = db.query(IndustryNode).filter(IndustryNode.industry_id == industry_id).all()
     edges = db.query(IndustryEdge).filter(IndustryEdge.industry_id == industry_id).all()
-    if not nodes and industry_id not in INDUSTRY_META:
+    meta_row = (
+        db.query(IndustryMeta).filter(IndustryMeta.industry_id == industry_id).first()
+    )
+    if not nodes and not meta_row:
         raise HTTPException(status_code=404, detail="Industry not found")
-    meta = INDUSTRY_META.get(industry_id, {})
     return {
-        "title": meta.get("title", industry_id),
-        "subtitle": meta.get("subtitle", ""),
-        "layerLabels": meta.get("layerLabels", []),
+        "title": meta_row.title if meta_row else industry_id,
+        "subtitle": meta_row.subtitle if meta_row else "",
+        "layerLabels": json.loads(meta_row.layer_labels or "[]") if meta_row else [],
         "nodes": [
             {
                 "id": n.node_id,

@@ -13,7 +13,20 @@ from datetime import datetime
 
 DATABASE_URL = "sqlite:///./stock_data.db"
 
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+engine = create_engine(
+    DATABASE_URL,
+    connect_args={"check_same_thread": False, "timeout": 60},
+)
+
+from sqlalchemy import event
+
+
+@event.listens_for(engine, "connect")
+def set_wal_mode(dbapi_conn, connection_record):
+    dbapi_conn.execute("PRAGMA journal_mode=WAL")
+    dbapi_conn.execute("PRAGMA synchronous=NORMAL")
+
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
@@ -103,8 +116,11 @@ class GubaPost(Base):
     read_count = Column(Integer, default=0)
     comment_count = Column(Integer, default=0)
     post_time = Column(String(30))
+    post_date = Column(String(20), index=True, default="")
     url = Column(Text)
     category = Column(String(20), index=True)
+    content = Column(Text, default="")
+    content_fetched = Column(Integer, default=0)
     updated_at = Column(DateTime, default=datetime.utcnow)
     __table_args__ = (UniqueConstraint("code", "post_id"),)
 
@@ -134,6 +150,33 @@ class IndustryEdge(Base):
     target = Column(String(60))
     layer = Column(String(20))
     label = Column(String(100))
+    updated_at = Column(DateTime, default=datetime.utcnow)
+
+
+class IndustryMeta(Base):
+    """产业元信息：title / subtitle / layerLabels / sort_order"""
+
+    __tablename__ = "industry_meta"
+    industry_id = Column(String(30), primary_key=True)
+    title = Column(String(100))
+    subtitle = Column(Text)
+    layer_labels = Column(Text, default="[]")  # JSON list
+    sort_order = Column(Integer, default=0)
+    updated_at = Column(DateTime, default=datetime.utcnow)
+
+
+class IndustryList(Base):
+    """产业列表页卡片数据"""
+
+    __tablename__ = "industry_list"
+    industry_id = Column(String(30), primary_key=True)
+    name = Column(String(100))
+    description = Column(Text)
+    icon = Column(String(20), default="cpu")
+    company_count = Column(Integer, default=0)
+    last_analyzed = Column(String(20), default="未分析")
+    representatives = Column(Text, default="[]")  # JSON list of company names
+    sort_order = Column(Integer, default=0)
     updated_at = Column(DateTime, default=datetime.utcnow)
 
 

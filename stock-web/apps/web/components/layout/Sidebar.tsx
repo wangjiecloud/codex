@@ -46,7 +46,7 @@ export function Sidebar() {
     >
       <div className="mb-6 flex flex-col items-center">
         <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-[#f5a623] to-[#e8831a] flex items-center justify-center">
-          <TrendingUp size={20} className="text-white" />
+          <TrendingUp size={20} className="text-[var(--text-primary)]" />
         </div>
       </div>
 
@@ -59,7 +59,9 @@ export function Sidebar() {
               href={item.href}
               className={cn(
                 "w-full flex flex-col items-center gap-1 py-2 px-1 rounded-lg text-[10px] transition-all",
-                active ? "text-[#f5a623]" : "hover:text-gray-300",
+                active
+                  ? "text-[var(--accent)]"
+                  : "hover:text-[var(--text-secondary)]",
               )}
               style={active ? { background: "var(--bg-tertiary)" } : undefined}
             >

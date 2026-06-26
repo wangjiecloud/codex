@@ -176,19 +176,19 @@ export function AgentPanel({ code, stockName }: AgentPanelProps) {
   };
 
   return (
-    <div className="flex flex-col h-full bg-[#0f1117]">
+    <div className="flex flex-col h-full bg-[var(--bg-primary)]">
       {/* Top: Team analysis control */}
-      <div className="p-4 border-b border-[#1e2332]">
+      <div className="p-4 border-b border-[var(--border-color)]">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
             <Bot size={16} className="text-[#f5a623]" />
-            <span className="text-sm font-medium text-white">AI Team 分析</span>
+            <span className="text-sm font-medium text-[var(--text-primary)]">AI Team 分析</span>
           </div>
           <div className="flex gap-2">
             {(running || finalAdvice) && (
               <button
                 onClick={resetAgents}
-                className="p-1.5 text-gray-500 hover:text-white rounded hover:bg-[#1e2332] transition-all"
+                className="p-1.5 text-[var(--text-tertiary)] hover:text-[var(--text-primary)] rounded hover:bg-[var(--bg-tertiary)] transition-all"
               >
                 <RefreshCw size={13} />
               </button>
@@ -199,7 +199,7 @@ export function AgentPanel({ code, stockName }: AgentPanelProps) {
               className={cn(
                 "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all",
                 running
-                  ? "bg-[#1e2332] text-gray-500 cursor-not-allowed"
+                  ? "bg-[var(--bg-tertiary)] text-[var(--text-tertiary)] cursor-not-allowed"
                   : "bg-[#f5a623] hover:bg-[#e8961a] text-black",
               )}
             >
@@ -218,7 +218,7 @@ export function AgentPanel({ code, stockName }: AgentPanelProps) {
           {agents.map((agent) => (
             <div
               key={agent.id}
-              className="flex items-start gap-2 p-2 rounded-lg bg-[#151821] border border-[#1e2332]"
+              className="flex items-start gap-2 p-2 rounded-lg bg-[var(--bg-secondary)] border border-[var(--border-color)]"
             >
               <div className="flex items-center gap-1.5 shrink-0 mt-0.5">
                 {agent.status === "done" ? (
@@ -226,14 +226,14 @@ export function AgentPanel({ code, stockName }: AgentPanelProps) {
                 ) : agent.status === "running" ? (
                   <Loader2 size={14} className="text-[#f5a623] animate-spin" />
                 ) : (
-                  <Circle size={14} className="text-gray-700" />
+                  <Circle size={14} className="text-[var(--text-tertiary)]" />
                 )}
-                <span className="text-xs text-gray-400">
+                <span className="text-xs text-[var(--text-secondary)]">
                   {agent.emoji} {agent.label}
                 </span>
               </div>
               {agent.result && (
-                <p className="text-xs text-gray-500 ml-auto text-right leading-relaxed line-clamp-2 flex-1">
+                <p className="text-xs text-[var(--text-tertiary)] ml-auto text-right leading-relaxed line-clamp-2 flex-1">
                   {agent.result}
                 </p>
               )}
@@ -253,7 +253,7 @@ export function AgentPanel({ code, stockName }: AgentPanelProps) {
             <div className="text-xs font-medium text-[#f5a623] mb-1">
               💡 投资建议
             </div>
-            <p className="text-xs text-gray-300 leading-relaxed">
+            <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
               {finalAdvice}
             </p>
           </div>
@@ -263,9 +263,9 @@ export function AgentPanel({ code, stockName }: AgentPanelProps) {
       {/* Chat with single agent */}
       {activeAgent && (
         <div className="flex flex-col flex-1 overflow-hidden">
-          <div className="flex items-center gap-2 px-4 py-2 border-b border-[#1e2332] bg-[#151821]">
+          <div className="flex items-center gap-2 px-4 py-2 border-b border-[var(--border-color)] bg-[var(--bg-secondary)]">
             <MessageSquare size={13} className="text-[#f5a623]" />
-            <span className="text-xs text-gray-400">
+            <span className="text-xs text-[var(--text-secondary)]">
               与 {INITIAL_AGENTS.find((a) => a.id === activeAgent)?.label} Agent
               对话
             </span>
@@ -274,7 +274,7 @@ export function AgentPanel({ code, stockName }: AgentPanelProps) {
                 setActiveAgent(null);
                 setChatMessages([]);
               }}
-              className="ml-auto text-xs text-gray-600 hover:text-gray-400"
+              className="ml-auto text-xs text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]"
             >
               关闭
             </button>
@@ -293,7 +293,7 @@ export function AgentPanel({ code, stockName }: AgentPanelProps) {
                     "max-w-[85%] text-xs rounded-lg px-3 py-2 leading-relaxed",
                     msg.role === "user"
                       ? "bg-[#f5a623] text-black"
-                      : "bg-[#1e2332] text-gray-300",
+                      : "bg-[var(--bg-tertiary)] text-[var(--text-secondary)]",
                   )}
                 >
                   {msg.content}
@@ -302,14 +302,14 @@ export function AgentPanel({ code, stockName }: AgentPanelProps) {
             ))}
             {chatLoading && (
               <div className="flex justify-start">
-                <div className="bg-[#1e2332] rounded-lg px-3 py-2">
+                <div className="bg-[var(--bg-tertiary)] rounded-lg px-3 py-2">
                   <Loader2 size={12} className="text-[#f5a623] animate-spin" />
                 </div>
               </div>
             )}
             <div ref={messagesEndRef} />
           </div>
-          <div className="p-3 border-t border-[#1e2332]">
+          <div className="p-3 border-t border-[var(--border-color)]">
             <div className="flex gap-2">
               <input
                 type="text"
@@ -317,12 +317,12 @@ export function AgentPanel({ code, stockName }: AgentPanelProps) {
                 onChange={(e) => setChatInput(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && sendChatMessage()}
                 placeholder="输入问题..."
-                className="flex-1 bg-[#151821] border border-[#1e2332] rounded-lg px-3 py-2 text-xs text-white placeholder-gray-600 focus:outline-none focus:border-[#f5a623]/50"
+                className="flex-1 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg px-3 py-2 text-xs text-[var(--text-primary)] placeholder-[var(--text-tertiary)] focus:outline-none focus:border-[#f5a623]/50"
               />
               <button
                 onClick={sendChatMessage}
                 disabled={!chatInput.trim() || chatLoading}
-                className="p-2 bg-[#f5a623] hover:bg-[#e8961a] disabled:bg-[#1e2332] disabled:text-gray-600 text-black rounded-lg transition-colors"
+                className="p-2 bg-[#f5a623] hover:bg-[#e8961a] disabled:bg-[var(--bg-tertiary)] disabled:text-[var(--text-tertiary)] text-black rounded-lg transition-colors"
               >
                 <Send size={13} />
               </button>

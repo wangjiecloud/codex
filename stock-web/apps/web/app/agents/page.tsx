@@ -171,10 +171,10 @@ export default function AgentsPage() {
       {/* Left: Agent grid */}
       <div className="flex-1 p-6 overflow-y-auto">
         <div className="mb-6">
-          <h1 className="text-2xl font-bold text-white mb-1">
+          <h1 className="text-2xl font-bold text-[var(--text-primary)] mb-1">
             AI Agent 工具箱
           </h1>
-          <p className="text-gray-500 text-sm">
+          <p className="text-[var(--text-tertiary)] text-sm">
             选择一个 Agent 直接对话，或在个股详情页使用 Team 全量分析
           </p>
         </div>
@@ -191,7 +191,7 @@ export default function AgentsPage() {
                   "p-5 rounded-xl text-left border transition-all group",
                   isActive
                     ? "border-[#f5a623]/50 bg-[#f5a623]/5"
-                    : "border-[#1e2332] bg-[#151821] hover:border-[#f5a623]/30 hover:bg-[#1a1f2e]",
+                    : "border-[var(--border-color)] bg-[var(--bg-secondary)] hover:border-[#f5a623]/30 hover:bg-[var(--bg-hover)]",
                 )}
               >
                 <div className="flex items-start justify-between mb-3">
@@ -205,8 +205,8 @@ export default function AgentsPage() {
                     <span className="w-2 h-2 bg-[#f5a623] rounded-full mt-1" />
                   )}
                 </div>
-                <div className="font-medium text-white mb-1">{agent.label}</div>
-                <p className="text-xs text-gray-500 leading-relaxed">
+                <div className="font-medium text-[var(--text-primary)] mb-1">{agent.label}</div>
+                <p className="text-xs text-[var(--text-tertiary)] leading-relaxed">
                   {agent.description}
                 </p>
                 <div
@@ -222,14 +222,14 @@ export default function AgentsPage() {
         </div>
 
         {/* Team shortcut */}
-        <div className="mt-6 p-5 bg-[#151821] border border-[#f5a623]/20 rounded-xl">
+        <div className="mt-6 p-5 bg-[var(--bg-secondary)] border border-[#f5a623]/20 rounded-xl">
           <div className="flex items-start gap-4">
             <div className="w-10 h-10 rounded-lg bg-[#f5a623]/10 flex items-center justify-center shrink-0">
               <Zap size={20} className="text-[#f5a623]" />
             </div>
             <div>
-              <div className="text-white font-medium mb-1">Team 协同分析</div>
-              <p className="text-xs text-gray-500 leading-relaxed">
+              <div className="text-[var(--text-primary)] font-medium mb-1">Team 协同分析</div>
+              <p className="text-xs text-[var(--text-tertiary)] leading-relaxed">
                 以上所有 Agent 将并行运行，由 Orchestrator 主控调度，聚合所有子
                 Agent 的输出，给出综合分析报告。请前往个股详情页的「AI分析」Tab
                 使用全量分析功能。
@@ -241,29 +241,29 @@ export default function AgentsPage() {
 
       {/* Right: Chat panel */}
       {activeAgent && activeChat && (
-        <div className="w-[380px] border-l border-[#1e2332] bg-[#0d1018] flex flex-col">
+        <div className="w-[380px] border-l border-[var(--border-color)] bg-[var(--bg-deep)] flex flex-col">
           {/* Chat header */}
-          <div className="flex items-center justify-between px-4 py-3 border-b border-[#1e2332] bg-[#151821]">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border-color)] bg-[var(--bg-secondary)]">
             <div className="flex items-center gap-2">
               <span className="text-lg">{activeAgent.emoji}</span>
               <div>
-                <div className="text-white text-sm font-medium">
+                <div className="text-[var(--text-primary)] text-sm font-medium">
                   {activeAgent.label} Agent
                 </div>
-                <div className="text-gray-600 text-[10px]">独立对话模式</div>
+                <div className="text-[var(--text-tertiary)] text-[10px]">独立对话模式</div>
               </div>
             </div>
             <div className="flex gap-1">
               <button
                 onClick={() => resetChat(activeAgent.id)}
-                className="p-1.5 text-gray-600 hover:text-white rounded hover:bg-[#1e2332] transition-all"
+                className="p-1.5 text-[var(--text-tertiary)] hover:text-[var(--text-primary)] rounded hover:bg-[var(--bg-tertiary)] transition-all"
                 title="重置对话"
               >
                 <RefreshCw size={13} />
               </button>
               <button
                 onClick={() => setActiveAgentId(null)}
-                className="p-1.5 text-gray-600 hover:text-white rounded hover:bg-[#1e2332] transition-all"
+                className="p-1.5 text-[var(--text-tertiary)] hover:text-[var(--text-primary)] rounded hover:bg-[var(--bg-tertiary)] transition-all"
               >
                 ✕
               </button>
@@ -293,7 +293,7 @@ export default function AgentsPage() {
                     "max-w-[80%] rounded-xl px-4 py-2.5 text-sm leading-relaxed",
                     msg.role === "user"
                       ? "bg-[#f5a623] text-black"
-                      : "bg-[#1e2332] text-gray-300",
+                      : "bg-[var(--bg-tertiary)] text-[var(--text-secondary)]",
                   )}
                 >
                   <pre className="whitespace-pre-wrap font-sans">
@@ -310,7 +310,7 @@ export default function AgentsPage() {
                 >
                   {activeAgent.emoji}
                 </div>
-                <div className="bg-[#1e2332] rounded-xl px-4 py-2.5">
+                <div className="bg-[var(--bg-tertiary)] rounded-xl px-4 py-2.5">
                   <Loader2 size={14} className="text-[#f5a623] animate-spin" />
                 </div>
               </div>
@@ -319,7 +319,7 @@ export default function AgentsPage() {
           </div>
 
           {/* Input */}
-          <div className="p-4 border-t border-[#1e2332]">
+          <div className="p-4 border-t border-[var(--border-color)]">
             <div className="flex gap-2">
               <input
                 type="text"
@@ -337,12 +337,12 @@ export default function AgentsPage() {
                   e.key === "Enter" && sendMessage(activeAgent.id)
                 }
                 placeholder="输入股票代码或分析问题..."
-                className="flex-1 bg-[#1e2332] border border-[#2a3045] rounded-lg px-3 py-2.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-[#f5a623]/50 transition-all"
+                className="flex-1 bg-[var(--bg-tertiary)] border border-[var(--border-secondary)] rounded-lg px-3 py-2.5 text-sm text-[var(--text-primary)] placeholder-[var(--text-tertiary)] focus:outline-none focus:border-[#f5a623]/50 transition-all"
               />
               <button
                 onClick={() => sendMessage(activeAgent.id)}
                 disabled={!activeChat.input.trim() || activeChat.loading}
-                className="p-2.5 bg-[#f5a623] hover:bg-[#e8961a] disabled:bg-[#1e2332] disabled:text-gray-600 text-black rounded-lg transition-colors"
+                className="p-2.5 bg-[#f5a623] hover:bg-[#e8961a] disabled:bg-[var(--bg-tertiary)] disabled:text-[var(--text-tertiary)] text-black rounded-lg transition-colors"
               >
                 <Send size={15} />
               </button>

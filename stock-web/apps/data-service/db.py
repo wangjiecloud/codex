@@ -109,6 +109,34 @@ class GubaPost(Base):
     __table_args__ = (UniqueConstraint("code", "post_id"),)
 
 
+class IndustryNode(Base):
+    __tablename__ = "industry_node"
+    industry_id = Column(String(30), primary_key=True)
+    node_id = Column(String(60), primary_key=True)
+    x = Column(Integer)
+    y = Column(Integer)
+    label = Column(String(100))
+    icon = Column(String(10))
+    desc = Column(Text)
+    layer = Column(String(20))
+    ticker = Column(String(20))
+    market = Column(String(10))
+    group_name = Column(String(50))
+    stocks = Column(Text, default="[]")
+    updated_at = Column(DateTime, default=datetime.utcnow)
+
+
+class IndustryEdge(Base):
+    __tablename__ = "industry_edge"
+    industry_id = Column(String(30), primary_key=True)
+    edge_id = Column(String(100), primary_key=True)
+    source = Column(String(60))
+    target = Column(String(60))
+    layer = Column(String(20))
+    label = Column(String(100))
+    updated_at = Column(DateTime, default=datetime.utcnow)
+
+
 def get_db():
     db = SessionLocal()
     try:

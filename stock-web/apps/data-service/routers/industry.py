@@ -12,12 +12,30 @@ from db import (
     StockKline,
     StockFundamental,
     StockNews,
+    IndustryNode,
+    IndustryEdge,
 )
 from industry_stocks import INDUSTRY_A_SHARES, NON_A_SHARE_SYMBOLS
 from bs_session import get_bs, reset_bs
 from stock_names import get_stock_name
 
 router = APIRouter()
+
+INDUSTRY_META: dict[str, dict] = {
+    "pcb":         {"title": "PCB 企业供应链",         "subtitle": "以英伟达为核心的高端PCB产业企业关系图谱",                         "layerLabels": ["L0 原材料企业","L1 覆铜板/钻针企业","L2 PCB制造企业","L3 组装/测试企业","L4 终端客户"]},
+    "mlcc":        {"title": "MLCC 企业供应链",        "subtitle": "以英伟达为核心的被动元件产业企业关系图谱",                         "layerLabels": ["L0 材料企业","L1 关键部件企业","L2 核心器件企业","L3 组装/分销企业","L4 终端客户"]},
+    "memory":      {"title": "存储芯片企业供应链",      "subtitle": "以英伟达HBM需求为核心的存储芯片产业企业关系图谱",                   "layerLabels": ["L0 原材料企业","L1 关键材料企业","L2 核心制造企业","L3 封测/模组/设备","L4 终端客户"]},
+    "optics":      {"title": "光模块与CPO供应链",      "subtitle": "以英伟达CPO交换机为核心的光模块/共封装光学产业链图谱",              "layerLabels": ["L0 光芯片/硅光材料","L1 光器件/组件","L2 高速光模块","L3 终端客户"]},
+    "fiber":       {"title": "光纤光缆供应链",         "subtitle": "从光纤预制棒到光缆的全产业链图谱（AI数据中心+5G/6G驱动）",          "layerLabels": ["L0 原材料","L1 光纤预制棒","L2 光纤/光缆制造","L3 终端客户"]},
+    "liquidcool":  {"title": "液冷散热供应链",         "subtitle": "AI芯片功耗突破1.2kW驱动液冷从可选变必选的产业链图谱",              "layerLabels": ["L0 液冷材料/管路","L1 冷板/CDU组件","L2 液冷系统集成","L3 终端交付"]},
+    "aipower":     {"title": "AI供配电供应链",         "subtitle": "GB200/GB300机柜供配电体系（PSU/BBU/HVDC）产业图谱",             "layerLabels": ["L0 核心原材料","L1 关键电源模块","L2 供配电系统集成","L3 终端客户"]},
+    "coppercable": {"title": "高速铜连接供应链",        "subtitle": "AI机柜内GPU-Switch短距互联铜缆（DAC/AEC）产业图谱",              "layerLabels": ["L0 原材料","L1 线缆/连接器制造","L2 高速互联模组","L3 终端客户"]},
+    "aigpu":       {"title": "AI算力芯片供应链",        "subtitle": "以英伟达GPU为核心、国产替代加速推进的AI算力芯片产业链图谱",           "layerLabels": ["L0 EDA/制程/封装","L1 核心算力芯片","L2 AI算力系统","L3 算力应用"]},
+    "idc":         {"title": "智算中心/IDC供应链",     "subtitle": "AI算力基础设施载体——智算中心建设与运营产业链图谱",                "layerLabels": ["L0 基础设施建设","L1 机房配套设备","L2 智算中心运营","L3 算力服务客户"]},
+    "overview":    {"title": "AI算力产业链全景概览",    "subtitle": "从芯片到数据中心——AI算力全产业链关系图谱",                         "layerLabels": []},
+}
+
+
 
 _sync_running = False
 
@@ -581,3 +599,52 @@ async def get_stock_performance(db: Session = Depends(get_db)):
             "m5": m5,
         }
     return {"perf": result}
+
+
+@router.get("/node-stocks")
+async def get_node_stocks(db: Session = Depends(get_db)):
+    rows = db.query(IndustryNode).filter(IndustryNode.stocks != "[]").all()
+    result: dict[str, dict[str, list[str]]] = {}
+    for row in rows:
+        result.setdefault(row.industry_id, {})[row.node_id] = json.loads(row.stocks or "[]")
+    return {"nodeStocks": result}
+
+
+@router.get("/graph/{industry_id}")
+async def get_industry_graph(industry_id: str, db: Session = Depends(get_db)):
+    nodes = db.query(IndustryNode).filter(IndustryNode.industry_id == industry_id).all()
+    edges = db.query(IndustryEdge).filter(IndustryEdge.industry_id == industry_id).all()
+    if not nodes and industry_id not in INDUSTRY_META:
+        raise HTTPException(status_code=404, detail="Industry not found")
+    meta = INDUSTRY_META.get(industry_id, {})
+    return {
+        "title": meta.get("title", industry_id),
+        "subtitle": meta.get("subtitle", ""),
+        "layerLabels": meta.get("layerLabels", []),
+        "nodes": [
+            {
+                "id": n.node_id,
+                "x": n.x,
+                "y": n.y,
+                "label": n.label,
+                "icon": n.icon,
+                "desc": n.desc,
+                "layer": n.layer,
+                "ticker": n.ticker,
+                "market": n.market,
+                "group": n.group_name,
+                "stocks": json.loads(n.stocks or "[]"),
+            }
+            for n in nodes
+        ],
+        "edges": [
+            {
+                "id": e.edge_id,
+                "source": e.source,
+                "target": e.target,
+                "layer": e.layer,
+                "label": e.label,
+            }
+            for e in edges
+        ],
+    }

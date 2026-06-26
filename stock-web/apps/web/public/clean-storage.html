@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>清理localStorage</title>
+</head>
+<body>
+    <h1>清理最近浏览记录</h1>
+    <button onclick="showCurrent()">查看当前数据</button>
+    <button onclick="cleanDuplicates()">清理重复数据</button>
+    <button onclick="removeStock('000001')">删除平安银行(000001)</button>
+    <button onclick="removeStock('688208')">删除旧东材科技(688208)</button>
+    <button onclick="clearAll()">清空所有</button>
+    <pre id="output"></pre>
+
+    <script>
+        const KEY = 'stock_recently_viewed';
+        const output = document.getElementById('output');
+
+        function showCurrent() {
+            const data = localStorage.getItem(KEY);
+            if (data) {
+                const parsed = JSON.parse(data);
+                output.textContent = '当前数据:\n' + JSON.stringify(parsed, null, 2);
+            } else {
+                output.textContent = '无数据';
+            }
+        }
+
+        function cleanDuplicates() {
+            const data = localStorage.getItem(KEY);
+            if (!data) {
+                output.textContent = '无数据';
+                return;
+            }
+
+            const parsed = JSON.parse(data);
+            const seen = new Set();
+            const cleaned = parsed.filter(item => {
+                if (seen.has(item.code)) return false;
+                seen.add(item.code);
+                return true;
+            });
+
+            localStorage.setItem(KEY, JSON.stringify(cleaned));
+            output.textContent = '清理完成!\n去重前: ' + parsed.length + ' 条\n去重后: ' + cleaned.length + ' 条\n\n' + JSON.stringify(cleaned, null, 2);
+        }
+
+        function removeStock(code) {
+            const data = localStorage.getItem(KEY);
+            if (!data) {
+                output.textContent = '无数据';
+                return;
+            }
+
+            const parsed = JSON.parse(data);
+            const filtered = parsed.filter(item => item.code !== code);
+            
+            localStorage.setItem(KEY, JSON.stringify(filtered));
+            output.textContent = '删除 ' + code + ' 完成!\n删除前: ' + parsed.length + ' 条\n删除后: ' + filtered.length + ' 条\n\n' + JSON.stringify(filtered, null, 2);
+        }
+
+        function clearAll() {
+            localStorage.removeItem(KEY);
+            output.textContent = '已清空所有数据';
+        }
+
+        showCurrent();
+    </script>
+</body>
+</html>

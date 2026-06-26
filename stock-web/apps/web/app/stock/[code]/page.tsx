@@ -7,132 +7,227 @@ import { StockChart, generateMockData } from "@/components/stock/StockChart";
 import { AgentPanel } from "@/components/agents/AgentPanel";
 import { cn, getPriceColor, formatPercent } from "@/lib/utils";
 
-const MOCK_QUOTES: Record<
-  string,
-  {
-    name: string;
-    price: number;
-    change: number;
-    changeAmt: number;
-    open: number;
-    prevClose: number;
-    high: number;
-    low: number;
-    volume: string;
-    turnover: string;
-    marketCap: string;
-    pe: string;
-  }
-> = {
-  "600519": {
-    name: "贵州茅台",
-    price: 1642.0,
-    change: 1.23,
-    changeAmt: 19.9,
-    open: 1625.0,
-    prevClose: 1622.1,
-    high: 1655.0,
-    low: 1620.0,
-    volume: "3.2万手",
-    turnover: "52.4亿",
-    marketCap: "20680亿",
-    pe: "28.5",
-  },
-  "000001": {
-    name: "平安银行",
-    price: 12.45,
-    change: 1.88,
-    changeAmt: 0.23,
-    open: 12.3,
-    prevClose: 12.22,
-    high: 12.51,
-    low: 12.28,
-    volume: "3.2亿手",
-    turnover: "39.8亿",
-    marketCap: "2415亿",
-    pe: "5.2",
-  },
-  "300750": {
-    name: "宁德时代",
-    price: 238.5,
-    change: -0.85,
-    changeAmt: -2.04,
-    open: 240.0,
-    prevClose: 240.54,
-    high: 242.1,
-    low: 236.8,
-    volume: "1.8亿手",
-    turnover: "43.2亿",
-    marketCap: "5552亿",
-    pe: "22.1",
-  },
-  "688981": {
-    name: "中芯国际",
-    price: 87.3,
-    change: 2.14,
-    changeAmt: 1.83,
-    open: 85.8,
-    prevClose: 85.47,
-    high: 88.5,
-    low: 85.2,
-    volume: "0.9亿手",
-    turnover: "79.1亿",
-    marketCap: "6921亿",
-    pe: "45.8",
-  },
+interface QuoteData {
+  name: string;
+  price: number;
+  change: number;
+  changeAmt: number;
+  open: number;
+  prevClose: number;
+  high: number;
+  low: number;
+  volume: number;
+  turnover: number;
+  marketCap: number;
+  pe: number;
+  pb: number;
+  turnoverRate: number;
+}
+
+interface KLineBar {
+  time: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
+
+interface NewsItem {
+  code: string;
+  title: string;
+  url: string;
+  source: string;
+  pubTime: string;
+}
+
+interface GubaItem {
+  title: string;
+  author: string;
+  time: string;
+  reads: string;
+  replies: string;
+  url: string;
+  category: string;
+}
+
+interface GubaData {
+  announcement: GubaItem[];
+  research: GubaItem[];
+  news: GubaItem[];
+}
+
+const DEFAULT_QUOTE: QuoteData = {
+  name: "",
+  price: 0,
+  change: 0,
+  changeAmt: 0,
+  open: 0,
+  prevClose: 0,
+  high: 0,
+  low: 0,
+  volume: 0,
+  turnover: 0,
+  marketCap: 0,
+  pe: 0,
+  pb: 0,
+  turnoverRate: 0,
 };
 
+const WATCHLIST_KEY = "stock_recently_viewed";
+
+function getRecentlyViewed(): Array<{ code: string; name: string }> {
+  if (typeof window === "undefined") return [];
+  try {
+    const stored = localStorage.getItem(WATCHLIST_KEY);
+    if (!stored) return [];
+
+    const parsed = JSON.parse(stored);
+    const seen = new Set<string>();
+    const deduped = parsed.filter((item: { code: string; name: string }) => {
+      if (seen.has(item.code)) return false;
+      if (item.code === "000001") return false;
+      if (item.code === "688208") return false;
+      seen.add(item.code);
+      return true;
+    });
+
+    if (deduped.length !== parsed.length) {
+      localStorage.setItem(WATCHLIST_KEY, JSON.stringify(deduped));
+    }
+
+    return deduped;
+  } catch {
+    return [];
+  }
+}
+
+function addToRecentlyViewed(code: string, name: string) {
+  if (typeof window === "undefined") return;
+  try {
+    const recent = getRecentlyViewed();
+    const exists = recent.some((item) => item.code === code);
+
+    if (!exists) {
+      const updated = [{ code, name }, ...recent];
+      localStorage.setItem(WATCHLIST_KEY, JSON.stringify(updated));
+    } else if (
+      recent.length > 0 &&
+      recent[0].code === code &&
+      recent[0].name !== name
+    ) {
+      recent[0].name = name;
+      localStorage.setItem(WATCHLIST_KEY, JSON.stringify(recent));
+    }
+  } catch {}
+}
+
 const WATCHLIST = [
-  { code: "600519", name: "贵州茅台", price: 1642.0, change: 1.23 },
-  { code: "000001", name: "平安银行", price: 12.45, change: 1.88 },
-  { code: "300750", name: "宁德时代", price: 238.5, change: -0.85 },
-  { code: "002594", name: "比亚迪", price: 328.0, change: -1.32 },
-  { code: "688981", name: "中芯国际", price: 87.3, change: 2.14 },
+  { code: "600519", name: "贵州茅台" },
+  { code: "300750", name: "宁德时代" },
+  { code: "002594", name: "比亚迪" },
+  { code: "688981", name: "中芯国际" },
+  { code: "601208", name: "东材科技" },
 ];
 
 const INDICATORS = ["VOL", "MACD", "KDJ", "BOLL", "RSI", "DMI", "CCI", "W&R"];
-const PERIODS = [
-  "分时",
-  "日K",
-  "周K",
-  "月K",
-  "120分",
-  "60分",
-  "30分",
-  "15分",
-  "5分",
-];
-const BOTTOM_TABS = ["新闻资讯", "持仓股", "快捷交易", "股市便签", "AI分析"];
+const PERIODS = ["日K", "周K", "月K"];
+const BOTTOM_TABS = ["公告", "研报", "资讯", "AI分析"];
+
+const PERIOD_MAP: Record<string, string> = {
+  日K: "daily",
+  周K: "weekly",
+  月K: "monthly",
+};
+
+function formatVolume(vol: number): string {
+  if (vol >= 1e8) return (vol / 1e8).toFixed(2) + "亿手";
+  if (vol >= 1e4) return (vol / 1e4).toFixed(2) + "万手";
+  return vol.toFixed(0) + "手";
+}
+
+function formatAmount(amt: number): string {
+  if (amt >= 1e8) return (amt / 1e8).toFixed(2) + "亿";
+  if (amt >= 1e4) return (amt / 1e4).toFixed(2) + "万";
+  return amt.toFixed(0);
+}
 
 export default function StockDetailPage() {
   const params = useParams();
   const router = useRouter();
   const code = params.code as string;
 
-  const quote = MOCK_QUOTES[code] ?? {
-    name: `股票${code}`,
-    price: 10.0,
-    change: 0,
-    changeAmt: 0,
-    open: 10.0,
-    prevClose: 10.0,
-    high: 10.5,
-    low: 9.8,
-    volume: "0",
-    turnover: "0",
-    marketCap: "0",
-    pe: "0",
-  };
-
-  const [klineData] = useState(() => generateMockData(code));
+  const [quote, setQuote] = useState<QuoteData>(DEFAULT_QUOTE);
+  const [klineData, setKlineData] = useState<KLineBar[]>(() =>
+    generateMockData(code),
+  );
+  const [news, setNews] = useState<NewsItem[]>([]);
+  const [gubaData, setGubaData] = useState<GubaData>({
+    announcement: [],
+    research: [],
+    news: [],
+  });
   const [activeIndicators, setActiveIndicators] = useState([
     "VOL",
     "MACD",
     "KDJ",
   ]);
   const [activePeriod, setActivePeriod] = useState("日K");
-  const [activeTab, setActiveTab] = useState("新闻资讯");
+  const [activeTab, setActiveTab] = useState("公告");
   const [isStarred, setIsStarred] = useState(false);
+  const [watchlist, setWatchlist] = useState<
+    Array<{ code: string; name: string }>
+  >([]);
+
+  useEffect(() => {
+    setWatchlist(getRecentlyViewed());
+  }, []);
+
+  useEffect(() => {
+    if (quote.name) {
+      addToRecentlyViewed(code, quote.name);
+    }
+  }, [code, quote.name]);
+
+  useEffect(() => {
+    fetch(`http://localhost:8000/api/quote/${code}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.price !== undefined) setQuote(data as QuoteData);
+      })
+      .catch(() => {});
+  }, [code]);
+
+  useEffect(() => {
+    const period = PERIOD_MAP[activePeriod];
+    if (!period) return;
+    fetch(`http://localhost:8000/api/kline/${code}?period=${period}&count=120`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.bars && data.bars.length > 0) setKlineData(data.bars);
+      })
+      .catch(() => {});
+  }, [code, activePeriod]);
+
+  useEffect(() => {
+    fetch(`http://localhost:8000/api/news/${code}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.news) setNews(data.news);
+      })
+      .catch(() => {});
+  }, [code]);
+
+  useEffect(() => {
+    fetch(`http://localhost:8000/api/guba/${code}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.data) {
+          setGubaData(data.data);
+        }
+      })
+      .catch(() => {});
+  }, [code]);
 
   const toggleIndicator = (ind: string) => {
     setActiveIndicators((prev) =>
@@ -150,6 +245,8 @@ export default function StockDetailPage() {
       vol: Math.floor(Math.random() * 5000 + 500),
     },
   }));
+
+  const displayName = quote.name || `股票${code}`;
 
   return (
     <div className="flex flex-col h-full text-xs overflow-hidden">
@@ -194,10 +291,10 @@ export default function StockDetailPage() {
         <div className="w-[140px] border-r border-[#1e2332] bg-[#0d1018] flex flex-col shrink-0 overflow-hidden">
           <div className="flex items-center justify-between px-2 py-1.5 border-b border-[#1e2332]">
             <span className="text-gray-600 text-[10px]">名称</span>
-            <span className="text-gray-600 text-[10px]">涨幅/现价</span>
+            <span className="text-gray-600 text-[10px]">代码</span>
           </div>
           <div className="flex-1 overflow-y-auto">
-            {WATCHLIST.map((s) => (
+            {(watchlist.length > 0 ? watchlist : WATCHLIST).map((s) => (
               <button
                 key={s.code}
                 onClick={() => router.push(`/stock/${s.code}`)}
@@ -217,14 +314,6 @@ export default function StockDetailPage() {
                   </div>
                   <div className="text-[10px] text-gray-600">{s.code}</div>
                 </div>
-                <div className="text-right">
-                  <div className={cn("text-[11px]", getPriceColor(s.change))}>
-                    {formatPercent(s.change)}
-                  </div>
-                  <div className="text-[11px] text-gray-400 font-mono">
-                    {s.price}
-                  </div>
-                </div>
               </button>
             ))}
             <button className="w-full flex items-center gap-1 justify-center py-2 text-gray-600 hover:text-gray-400 text-[10px]">
@@ -240,9 +329,9 @@ export default function StockDetailPage() {
             <div>
               <div className="flex items-baseline gap-3">
                 <span className="text-lg font-bold text-white">
-                  {quote.name}
+                  {displayName}
                 </span>
-                <span className="text-gray-600">{code}</span>
+                <span className="text-gray-600">({code})</span>
               </div>
               <div className="flex items-baseline gap-2 mt-0.5">
                 <span
@@ -251,25 +340,36 @@ export default function StockDetailPage() {
                     getPriceColor(quote.change),
                   )}
                 >
-                  {quote.price.toFixed(3)}
+                  {quote.price > 0 ? quote.price.toFixed(3) : "--"}
                 </span>
                 <span className={cn("text-sm", getPriceColor(quote.change))}>
                   {quote.changeAmt >= 0 ? "+" : ""}
-                  {quote.changeAmt.toFixed(3)}
+                  {quote.price > 0 ? quote.changeAmt.toFixed(3) : "--"}
                 </span>
                 <span className={cn("text-sm", getPriceColor(quote.change))}>
-                  {formatPercent(quote.change)}
+                  {quote.price > 0 ? formatPercent(quote.change) : "--"}
                 </span>
               </div>
             </div>
             <div className="grid grid-cols-2 gap-x-6 gap-y-0.5 text-right mt-1">
               {[
-                ["今开", quote.open.toFixed(3)],
-                ["最高", quote.high.toFixed(3)],
-                ["昨收", quote.prevClose.toFixed(3)],
-                ["最低", quote.low.toFixed(3)],
-                ["成交量", quote.volume],
-                ["换手率", "1.2%"],
+                ["今开", quote.open > 0 ? quote.open.toFixed(3) : "--"],
+                ["最高", quote.high > 0 ? quote.high.toFixed(3) : "--"],
+                [
+                  "昨收",
+                  quote.prevClose > 0 ? quote.prevClose.toFixed(3) : "--",
+                ],
+                ["最低", quote.low > 0 ? quote.low.toFixed(3) : "--"],
+                [
+                  "成交量",
+                  quote.volume > 0 ? formatVolume(quote.volume) : "--",
+                ],
+                [
+                  "换手率",
+                  quote.turnoverRate > 0
+                    ? quote.turnoverRate.toFixed(2) + "%"
+                    : "--",
+                ],
               ].map(([label, val]) => (
                 <div key={label} className="flex gap-2 justify-end text-[11px]">
                   <span className="text-gray-600">{label}</span>
@@ -322,32 +422,161 @@ export default function StockDetailPage() {
 
           {/* Tab content */}
           {activeTab !== "AI分析" && (
-            <div className="h-32 overflow-y-auto p-3 bg-[#0f1117] text-gray-500 text-[11px]">
-              {activeTab === "新闻资讯" && (
-                <div className="space-y-2">
-                  {[
-                    `${quote.name}发布2025年三季报，净利润同比增长12.3%`,
-                    `机构调研 ${quote.name}，多家券商维持买入评级`,
-                    `${quote.name} 入选沪深300指数成分股调整名单`,
-                  ].map((news, i) => (
-                    <div
-                      key={i}
-                      className="flex items-start gap-2 py-1 border-b border-[#1e2332]"
-                    >
-                      <span className="text-gray-700 shrink-0">
-                        {new Date(Date.now() - i * 3600000).toLocaleTimeString(
-                          "zh-CN",
-                          { hour: "2-digit", minute: "2-digit" },
-                        )}
-                      </span>
-                      <span className="text-gray-400">{news}</span>
+            <div className="h-32 overflow-y-auto bg-[#0f1117] text-[11px]">
+              {activeTab === "公告" && (
+                <div className="w-full">
+                  {gubaData.announcement.length > 0 ? (
+                    <table className="w-full">
+                      <thead className="sticky top-0 bg-[#151821] border-b border-[#1e2332]">
+                        <tr className="text-gray-500 text-[10px]">
+                          <th className="px-2 py-1 text-center w-16">阅读</th>
+                          <th className="px-2 py-1 text-center w-16">评论</th>
+                          <th className="px-2 py-1 text-left">标题</th>
+                          <th className="px-2 py-1 text-left w-24">作者</th>
+                          <th className="px-2 py-1 text-center w-20">更新</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {gubaData.announcement.map((item, i) => (
+                          <tr
+                            key={i}
+                            className="border-b border-[#1e2332] hover:bg-[#1a1f2e] transition-colors"
+                          >
+                            <td className="px-2 py-1.5 text-center text-gray-500">
+                              {item.reads}
+                            </td>
+                            <td className="px-2 py-1.5 text-center text-gray-500">
+                              {item.replies}
+                            </td>
+                            <td className="px-2 py-1.5">
+                              <a
+                                href={item.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-gray-400 hover:text-[#f5a623] line-clamp-1"
+                              >
+                                {item.title}
+                              </a>
+                            </td>
+                            <td className="px-2 py-1.5 text-gray-500 truncate">
+                              {item.author}
+                            </td>
+                            <td className="px-2 py-1.5 text-center text-gray-600 text-[10px]">
+                              {item.time}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <div className="text-center text-gray-600 py-8">
+                      暂无公告数据
                     </div>
-                  ))}
+                  )}
                 </div>
               )}
-              {activeTab !== "新闻资讯" && (
-                <div className="flex items-center justify-center h-full text-gray-700">
-                  {activeTab} 功能开发中...
+              {activeTab === "研报" && (
+                <div className="w-full">
+                  {gubaData.research.length > 0 ? (
+                    <table className="w-full">
+                      <thead className="sticky top-0 bg-[#151821] border-b border-[#1e2332]">
+                        <tr className="text-gray-500 text-[10px]">
+                          <th className="px-2 py-1 text-center w-16">阅读</th>
+                          <th className="px-2 py-1 text-center w-16">评论</th>
+                          <th className="px-2 py-1 text-left">标题</th>
+                          <th className="px-2 py-1 text-left w-24">作者</th>
+                          <th className="px-2 py-1 text-center w-20">更新</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {gubaData.research.map((item, i) => (
+                          <tr
+                            key={i}
+                            className="border-b border-[#1e2332] hover:bg-[#1a1f2e] transition-colors"
+                          >
+                            <td className="px-2 py-1.5 text-center text-gray-500">
+                              {item.reads}
+                            </td>
+                            <td className="px-2 py-1.5 text-center text-gray-500">
+                              {item.replies}
+                            </td>
+                            <td className="px-2 py-1.5">
+                              <a
+                                href={item.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-gray-400 hover:text-[#f5a623] line-clamp-1"
+                              >
+                                {item.title}
+                              </a>
+                            </td>
+                            <td className="px-2 py-1.5 text-gray-500 truncate">
+                              {item.author}
+                            </td>
+                            <td className="px-2 py-1.5 text-center text-gray-600 text-[10px]">
+                              {item.time}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <div className="text-center text-gray-600 py-8">
+                      暂无研报数据
+                    </div>
+                  )}
+                </div>
+              )}
+              {activeTab === "资讯" && (
+                <div className="w-full">
+                  {gubaData.news.length > 0 ? (
+                    <table className="w-full">
+                      <thead className="sticky top-0 bg-[#151821] border-b border-[#1e2332]">
+                        <tr className="text-gray-500 text-[10px]">
+                          <th className="px-2 py-1 text-center w-16">阅读</th>
+                          <th className="px-2 py-1 text-center w-16">评论</th>
+                          <th className="px-2 py-1 text-left">标题</th>
+                          <th className="px-2 py-1 text-left w-24">作者</th>
+                          <th className="px-2 py-1 text-center w-20">更新</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {gubaData.news.map((item, i) => (
+                          <tr
+                            key={i}
+                            className="border-b border-[#1e2332] hover:bg-[#1a1f2e] transition-colors"
+                          >
+                            <td className="px-2 py-1.5 text-center text-gray-500">
+                              {item.reads}
+                            </td>
+                            <td className="px-2 py-1.5 text-center text-gray-500">
+                              {item.replies}
+                            </td>
+                            <td className="px-2 py-1.5">
+                              <a
+                                href={item.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-gray-400 hover:text-[#f5a623] line-clamp-1"
+                              >
+                                {item.title}
+                              </a>
+                            </td>
+                            <td className="px-2 py-1.5 text-gray-500 truncate">
+                              {item.author}
+                            </td>
+                            <td className="px-2 py-1.5 text-center text-gray-600 text-[10px]">
+                              {item.time}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <div className="text-center text-gray-600 py-8">
+                      暂无资讯数据
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -358,18 +587,15 @@ export default function StockDetailPage() {
         <div className="w-[200px] border-l border-[#1e2332] bg-[#0d1018] flex flex-col shrink-0 overflow-hidden">
           {activeTab === "AI分析" ? (
             <div className="flex-1 overflow-hidden">
-              <AgentPanel code={code} stockName={quote.name} />
+              <AgentPanel code={code} stockName={displayName} />
             </div>
           ) : (
             <>
               {/* Order book */}
               <div className="px-2 py-1.5 border-b border-[#1e2332]">
                 <div className="flex justify-between text-[10px] text-gray-600 mb-1">
-                  <span>
-                    委比 <span className="text-[#e84444]">-11.90%</span>
-                  </span>
+                  <span>委比</span>
                 </div>
-                {/* Sell side */}
                 {orderBookRows.reverse().map((row, i) => (
                   <div
                     key={`sell-${i}`}
@@ -385,7 +611,6 @@ export default function StockDetailPage() {
                   </div>
                 ))}
                 <div className="my-1 border-t border-[#1e2332]" />
-                {/* Buy side */}
                 {[...orderBookRows].reverse().map((row, i) => (
                   <div key={`buy-${i}`} className="flex justify-between py-0.5">
                     <span className="text-[10px] text-gray-600">买{i + 1}</span>
@@ -405,12 +630,23 @@ export default function StockDetailPage() {
                   行情数据
                 </div>
                 {[
-                  ["昨收", quote.prevClose.toFixed(3)],
-                  ["今开", quote.open.toFixed(3)],
-                  ["最高", quote.high.toFixed(3)],
-                  ["最低", quote.low.toFixed(3)],
-                  ["市值", quote.marketCap],
-                  ["市盈率", quote.pe],
+                  [
+                    "昨收",
+                    quote.prevClose > 0 ? quote.prevClose.toFixed(3) : "--",
+                  ],
+                  ["今开", quote.open > 0 ? quote.open.toFixed(3) : "--"],
+                  ["最高", quote.high > 0 ? quote.high.toFixed(3) : "--"],
+                  ["最低", quote.low > 0 ? quote.low.toFixed(3) : "--"],
+                  [
+                    "市值",
+                    quote.marketCap > 0 ? formatAmount(quote.marketCap) : "--",
+                  ],
+                  ["市盈率", quote.pe > 0 ? quote.pe.toFixed(2) : "--"],
+                  ["市净率", quote.pb > 0 ? quote.pb.toFixed(2) : "--"],
+                  [
+                    "成交额",
+                    quote.turnover > 0 ? formatAmount(quote.turnover) : "--",
+                  ],
                 ].map(([label, val]) => (
                   <div key={label} className="flex justify-between py-0.5">
                     <span className="text-[10px] text-gray-600">{label}</span>
@@ -427,7 +663,7 @@ export default function StockDetailPage() {
                   onClick={() => setActiveTab("AI分析")}
                   className="w-full py-2 bg-[#f5a623]/10 hover:bg-[#f5a623]/20 border border-[#f5a623]/30 text-[#f5a623] rounded-lg text-[11px] font-medium transition-colors"
                 >
-                  🤖 启动 AI 分析
+                  启动 AI 分析
                 </button>
               </div>
             </>

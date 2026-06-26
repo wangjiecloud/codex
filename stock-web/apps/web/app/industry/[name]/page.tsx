@@ -1,7 +1,7 @@
 "use client";
 
-import { useParams, useRouter } from "next/navigation";
-import { useCallback, useRef, useState } from "react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useRef, useState } from "react";
 import React from "react";
 import {
   ReactFlow,
@@ -38,6 +38,26 @@ interface StockEntry {
   name: string;
   price: number;
   change: number;
+}
+
+interface LiveQuote {
+  code: string;
+  name: string;
+  price: number;
+  change: number;
+  changeAmt: number;
+  open: number;
+  prevClose: number;
+  high: number;
+  low: number;
+  volume: number;
+  turnover: number;
+  marketCap: number;
+  pe: number;
+  pb: number;
+  turnoverRate: number;
+  amplitude: number;
+  updatedAt: string | null;
 }
 
 interface ComponentData extends Record<string, unknown> {
@@ -330,8 +350,8 @@ const PCB_NODES: ComponentNode[] = [
     "🧪",
     "低损耗碳氢树脂/半固化片 · 高频AI服务器板材",
     "upstream",
-    [{ code: "688208", name: "东材科技", price: 21.8, change: 0.7 }],
-    "688208",
+    [{ code: "601208", name: "东材科技", price: 21.8, change: 0.7 }],
+    "601208",
     "A股",
     undefined,
     "树脂材料",
@@ -354,12 +374,12 @@ const PCB_NODES: ComponentNode[] = [
     "gdjy",
     940,
     0,
-    "广东嘉元",
+    "嘉元科技",
     "🟧",
     "电解铜箔 · HDI/高多层PCB核心材料",
     "upstream",
-    [{ code: "002683", name: "广东嘉元", price: 18.9, change: 0.7 }],
-    "002683",
+    [{ code: "688388", name: "嘉元科技", price: 18.9, change: 0.7 }],
+    "688388",
     "A股",
     undefined,
     "电解铜箔",
@@ -443,8 +463,8 @@ const PCB_NODES: ComponentNode[] = [
     "🔬",
     "高频高速CCL · 5G/AI服务器板材 · Rogers替代",
     "upstream",
-    [{ code: "002694", name: "华正新材", price: 31.7, change: 0.9 }],
-    "002694",
+    [{ code: "603186", name: "华正新材", price: 31.7, change: 0.9 }],
+    "603186",
     "A股",
     undefined,
     "覆铜板 CCL",
@@ -528,8 +548,8 @@ const PCB_NODES: ComponentNode[] = [
     "🏆",
     "ABF封装基板国产龙头 · AI芯片封装基板国产化突破 · FC-BGA载板量产",
     "core",
-    [{ code: "002937", name: "兴森科技", price: 22.8, change: 1.5 }],
-    "002937",
+    [{ code: "002436", name: "兴森科技", price: 22.8, change: 1.5 }],
+    "002436",
     "A股",
     undefined,
     "ABF封装基板",
@@ -542,8 +562,8 @@ const PCB_NODES: ComponentNode[] = [
     "🗂️",
     "AI服务器高端多层板 · 英特尔/英伟达主板供应商",
     "core",
-    [{ code: "002075", name: "沪电股份", price: 19.8, change: 1.4 }],
-    "002075",
+    [{ code: "002463", name: "沪电股份", price: 19.8, change: 1.4 }],
+    "002463",
     "A股",
     undefined,
     "AI服务器PCB",
@@ -966,8 +986,8 @@ const MLCC_NODES: ComponentNode[] = [
     "👁️",
     "AOI视觉检测 · MLCC外观/尺寸检测 · 进入AI供应链",
     "downstream",
-    [{ code: "688218", name: "奥普特", price: 88.5, change: 2.8 }],
-    "688218",
+    [{ code: "688686", name: "奥普特", price: 88.5, change: 2.8 }],
+    "688686",
     "A股",
     undefined,
     "AOI检测设备",
@@ -1082,8 +1102,8 @@ const MEMORY_NODES: ComponentNode[] = [
     "🔩",
     "高纯溅射靶材（钨/钴/钛） · 供应全球主要晶圆厂 · HBM制程必备",
     "upstream",
-    [{ code: "688496", name: "江丰电子", price: 52.4, change: 2.3 }],
-    "688496",
+    [{ code: "300666", name: "江丰电子", price: 52.4, change: 2.3 }],
+    "300666",
     "A股",
     undefined,
     "溅射靶材",
@@ -1295,8 +1315,8 @@ const MEMORY_NODES: ComponentNode[] = [
     "📡",
     "HBM存储转销/二次销售 · HBM概念涨幅王 · 覆盖AI服务器存储需求",
     "downstream",
-    [{ code: "688593", name: "香农芯创", price: 125.4, change: 8.6 }],
-    "688593",
+    [{ code: "300475", name: "香农芯创", price: 125.4, change: 8.6 }],
+    "300475",
     "A股",
     undefined,
     "HBM分发",
@@ -1309,8 +1329,8 @@ const MEMORY_NODES: ComponentNode[] = [
     "🔭",
     "HBM测试设备 · HBM高温老化/电性测试 · 涨幅298%，国内稀缺标的",
     "downstream",
-    [{ code: "688686", name: "精智达", price: 186.3, change: 4.5 }],
-    "688686",
+    [{ code: "688627", name: "精智达", price: 186.3, change: 4.5 }],
+    "688627",
     "A股",
     undefined,
     "存储测试设备",
@@ -1549,11 +1569,11 @@ const OPTICS_NODES: ComponentNode[] = [
     "op_boa",
     980,
     210,
-    "博创科技",
+    "长芯博创",
     "🔧",
     "光芯片→光器件→光模块垂直整合·SFP/QSFP系列·CPO技术探索",
     "core",
-    [{ code: "300548", name: "博创科技", price: 32.6, change: 1.8 }],
+    [{ code: "300548", name: "长芯博创", price: 32.6, change: 1.8 }],
     "300548",
     "A股",
     undefined,
@@ -1915,8 +1935,8 @@ const FIBER_NODES: ComponentNode[] = [
     "🌊",
     "跨洋骨干网建设·华海通信/亨通海洋·2025年全球海缆建设投入超60亿美元",
     "application",
-    [{ code: "301516", name: "华海通信", price: 28.6, change: 3.2 }],
-    "301516",
+    [{ code: "600487", name: "亨通光电", price: 28.6, change: 3.2 }],
+    "600487",
     "A股",
   ),
 ];
@@ -2018,7 +2038,7 @@ const LIQUIDCOOL_NODES: ComponentNode[] = [
     "🟠",
     "精密铜管·冷板式液冷换热管·数据中心专用高导热铜管",
     "upstream",
-    [{ code: "601992", name: "金龙铜管", price: 18.4, change: 0.6 }],
+    [{ code: "601992", name: "金隅集团", price: 18.4, change: 0.6 }],
     "601992",
     "A股",
     undefined,
@@ -2032,7 +2052,7 @@ const LIQUIDCOOL_NODES: ComponentNode[] = [
     "⚙️",
     "液冷循环泵/阀件·冷却液驱动系统·服务器液冷回路核心部件",
     "upstream",
-    [{ code: "605288", name: "腾龙股份", price: 32.1, change: 3.8 }],
+    [{ code: "605288", name: "凯迪股份", price: 32.1, change: 3.8 }],
     "605288",
     "A股",
     undefined,
@@ -2244,7 +2264,7 @@ const AIPOWER_NODES: ComponentNode[] = [
     "💠",
     "SiC碳化硅衬底片·N型4H-SiC单晶 · 国内SiC衬底龙头 · 供斯达半导/华润微等",
     "upstream",
-    [{ code: "688601", name: "天科合达", price: 68.5, change: 1.8 }],
+    [{ code: "688601", name: "力芯微", price: 68.5, change: 1.8 }],
     "688601",
     "A股",
     undefined,
@@ -2587,7 +2607,7 @@ const COPPER_NODES: ComponentNode[] = [
     "🔧",
     "精密连接器·AI服务器背板连接·SFP/QSFP高速连接器",
     "downstream",
-    [{ code: "603659", name: "鼎通科技", price: 45.6, change: 3.5 }],
+    [{ code: "603659", name: "璞泰来", price: 45.6, change: 3.5 }],
     "603659",
     "A股",
     undefined,
@@ -3038,8 +3058,8 @@ const IDC_NODES: ComponentNode[] = [
     "📦",
     "数据中心机柜/微模块·AI专用高密机柜·液冷机柜一体化解决方案",
     "upstream",
-    [{ code: "300242", name: "佳力图", price: 18.6, change: 2.8 }],
-    "300242",
+    [{ code: "603912", name: "佳力图", price: 18.6, change: 2.8 }],
+    "603912",
     "A股",
     undefined,
     "AI专用机柜",
@@ -3368,11 +3388,13 @@ function ProcessFlowView({
   selectedId,
   onSelect,
   layerLabels,
+  perfData,
 }: {
   nodes: ComponentNode[];
   selectedId: string | null;
   onSelect: (id: string) => void;
   layerLabels: string[];
+  perfData: Record<string, { ytd: number | null; m5: number | null }>;
 }) {
   const [tick, setTick] = React.useState(0);
   const [zoom, setZoom] = React.useState(1);
@@ -3686,6 +3708,93 @@ function ProcessFlowView({
                               >
                                 {nd.data.desc}
                               </div>
+                              {nd.data.stocks.length > 0 && (
+                                <div
+                                  style={{
+                                    display: "flex",
+                                    flexDirection: "column",
+                                    gap: 3,
+                                    width: "100%",
+                                  }}
+                                >
+                                  {nd.data.stocks.map((stock) => {
+                                    const perf = perfData[stock.code];
+                                    const fmtPct = (
+                                      v: number | null | undefined,
+                                    ) => {
+                                      if (v == null) return null;
+                                      const sign = v >= 0 ? "+" : "";
+                                      return `${sign}${v.toFixed(2)}%`;
+                                    };
+                                    const ytdStr = fmtPct(perf?.ytd);
+                                    const m5Str = fmtPct(perf?.m5);
+                                    const ytdColor =
+                                      perf?.ytd != null
+                                        ? perf.ytd >= 0
+                                          ? "#ef4444"
+                                          : "#22c55e"
+                                        : "#6b7280";
+                                    const m5Color =
+                                      perf?.m5 != null
+                                        ? perf.m5 >= 0
+                                          ? "#ef4444"
+                                          : "#22c55e"
+                                        : "#6b7280";
+                                    return (
+                                      <div
+                                        key={stock.code}
+                                        style={{
+                                          display: "flex",
+                                          alignItems: "center",
+                                          gap: 4,
+                                          flexWrap: "wrap",
+                                        }}
+                                      >
+                                        <span
+                                          style={{
+                                            fontSize: 10,
+                                            color: "#cbd5e1",
+                                            fontWeight: 600,
+                                            minWidth: 52,
+                                          }}
+                                        >
+                                          {stock.name}
+                                        </span>
+                                        {ytdStr && (
+                                          <span
+                                            style={{
+                                              fontSize: 9,
+                                              color: ytdColor,
+                                              fontWeight: 700,
+                                              background: `${ytdColor}18`,
+                                              padding: "1px 4px",
+                                              borderRadius: 3,
+                                              whiteSpace: "nowrap",
+                                            }}
+                                          >
+                                            年 {ytdStr}
+                                          </span>
+                                        )}
+                                        {m5Str && (
+                                          <span
+                                            style={{
+                                              fontSize: 9,
+                                              color: m5Color,
+                                              fontWeight: 700,
+                                              background: `${m5Color}18`,
+                                              padding: "1px 4px",
+                                              borderRadius: 3,
+                                              whiteSpace: "nowrap",
+                                            }}
+                                          >
+                                            5月 {m5Str}
+                                          </span>
+                                        )}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
                               <div
                                 style={{
                                   display: "flex",
@@ -4179,6 +4288,7 @@ function OverviewView({ onNavigate }: { onNavigate: (id: string) => void }) {
 function RightPanel({
   item,
   overrideStocks,
+  liveQuotes,
   onOverride,
   onClose,
   onNavigate,
@@ -4188,6 +4298,7 @@ function RightPanel({
 }: {
   item: RightPanelItem | null;
   overrideStocks: Record<string, StockEntry[]>;
+  liveQuotes: Record<string, LiveQuote>;
   onOverride: (id: string, stocks: StockEntry[]) => void;
   onClose: () => void;
   onNavigate: (code: string) => void;
@@ -4212,7 +4323,13 @@ function RightPanel({
   const [showAdd, setShowAdd] = useState(false);
 
   const baseStocks = item?.stocks ?? [];
-  const currentStocks = (item && overrideStocks[item.id]) ?? baseStocks;
+  const currentStocks = ((item && overrideStocks[item.id]) ?? baseStocks).map(
+    (s) => {
+      const live = liveQuotes[s.code];
+      if (!live) return s;
+      return { ...s, price: live.price, change: live.change };
+    },
+  );
 
   const handleDelete = (code: string) => {
     if (!item) return;
@@ -4240,12 +4357,23 @@ function RightPanel({
   if (!item) {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-4 px-6">
-        <div className="w-16 h-16 rounded-2xl bg-[#1a1f2e] flex items-center justify-center text-3xl">
+        <div
+          className="w-16 h-16 rounded-2xl flex items-center justify-center text-3xl"
+          style={{ background: "var(--bg-tertiary)" }}
+        >
           🔍
         </div>
         <div className="text-center">
-          <div className="text-gray-300 text-sm font-medium">选择企业节点</div>
-          <div className="text-gray-600 text-xs mt-1 leading-relaxed">
+          <div
+            className="text-sm font-medium"
+            style={{ color: "var(--text-primary)" }}
+          >
+            选择企业节点
+          </div>
+          <div
+            className="text-xs mt-1 leading-relaxed"
+            style={{ color: "var(--text-tertiary)" }}
+          >
             点击图谱中任意企业节点，查看上下游供应关系与相关 A 股
           </div>
         </div>
@@ -4254,11 +4382,20 @@ function RightPanel({
             <button
               key={q.id}
               onClick={() => onSelectQuick(q.id)}
-              className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-[#1a1f2e] hover:bg-[#1e2538] text-left transition-colors"
+              className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-left transition-colors"
+              style={{ background: "var(--bg-tertiary)" }}
             >
               {q.icon && <span className="text-base">{q.icon}</span>}
-              <span className="text-gray-400 text-xs">{q.label}</span>
-              <span className="ml-auto text-gray-600 text-xs">
+              <span
+                className="text-xs"
+                style={{ color: "var(--text-secondary)" }}
+              >
+                {q.label}
+              </span>
+              <span
+                className="ml-auto text-xs"
+                style={{ color: "var(--text-tertiary)" }}
+              >
                 {q.count} 家
               </span>
             </button>
@@ -4502,10 +4639,11 @@ type ViewTab = "chain" | "anatomy";
 export default function IndustryCanvasPage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const industryId = params.name as string;
   const industry = INDUSTRY_REGISTRY[industryId];
 
-  const [nodes, , onNodesChange] = useNodesState<ComponentNode>(
+  const [nodes, setNodes, onNodesChange] = useNodesState<ComponentNode>(
     industry?.nodes ?? [],
   );
   const [edges, , onEdgesChange] = useEdgesState(industry?.edges ?? []);
@@ -4516,6 +4654,144 @@ export default function IndustryCanvasPage() {
   const [stockOverrides, setStockOverrides] = useState<
     Record<string, StockEntry[]>
   >({});
+
+  const [liveQuotes, setLiveQuotes] = useState<Record<string, LiveQuote>>({});
+  const [perfData, setPerfData] = useState<
+    Record<string, { ytd: number | null; m5: number | null }>
+  >({});
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<
+    Array<{ code: string; name: string; nodeId: string }>
+  >([]);
+  const [showSearchDropdown, setShowSearchDropdown] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    fetch("http://localhost:8000/api/industry/stocks")
+      .then((r) => r.json())
+      .then((data: { quotes: Record<string, LiveQuote> }) =>
+        setLiveQuotes(data.quotes),
+      )
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    fetch("http://localhost:8000/api/industry/perf")
+      .then((r) => r.json())
+      .then(
+        (data: {
+          perf: Record<string, { ytd: number | null; m5: number | null }>;
+        }) => setPerfData(data.perf),
+      )
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!industry?.nodes || Object.keys(liveQuotes).length === 0) return;
+
+    const updatedNodes = industry.nodes.map((node) => {
+      const updatedStocks = node.data.stocks.map((stock) => {
+        const liveQuote = liveQuotes[stock.code];
+        if (liveQuote) {
+          return {
+            ...stock,
+            price: liveQuote.price,
+            change: liveQuote.change,
+          };
+        }
+        return stock;
+      });
+
+      return {
+        ...node,
+        data: {
+          ...node.data,
+          stocks: updatedStocks,
+        },
+      };
+    });
+
+    setNodes(updatedNodes);
+  }, [liveQuotes, industry?.nodes, setNodes]);
+
+  useEffect(() => {
+    if (searchQuery.trim().length === 0) {
+      setSearchResults([]);
+      setShowSearchDropdown(false);
+      return;
+    }
+
+    const query = searchQuery.toLowerCase();
+    const results: Array<{ code: string; name: string; nodeId: string }> = [];
+
+    nodes.forEach((node) => {
+      const stocks = node.data.stocks || [];
+      stocks.forEach((stock) => {
+        if (
+          stock.code.toLowerCase().includes(query) ||
+          stock.name.toLowerCase().includes(query)
+        ) {
+          results.push({
+            code: stock.code,
+            name: stock.name,
+            nodeId: node.id,
+          });
+        }
+      });
+    });
+
+    setSearchResults(results);
+    setShowSearchDropdown(results.length > 0);
+  }, [searchQuery, nodes]);
+
+  const handleSearchSelect = useCallback(
+    (result: { code: string; name: string; nodeId: string }) => {
+      setActiveTab("chain");
+      setSelectedId(result.nodeId);
+      setSearchQuery("");
+      setShowSearchDropdown(false);
+    },
+    [],
+  );
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        searchInputRef.current &&
+        !searchInputRef.current.contains(event.target as HTMLElement)
+      ) {
+        setShowSearchDropdown(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  useEffect(() => {
+    const stockCode = searchParams.get("stock");
+    if (!stockCode || nodes.length === 0) return;
+
+    const targetNode = nodes.find((node) => {
+      const stocks = node.data.stocks || [];
+      return stocks.some((stock) => stock.code === stockCode);
+    });
+
+    if (targetNode) {
+      setActiveTab("chain");
+      setSelectedId(targetNode.id);
+
+      setTimeout(() => {
+        const element = document.querySelector(`[data-id="${targetNode.id}"]`);
+        if (element) {
+          element.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+      }, 300);
+
+      const newUrl = window.location.pathname;
+      window.history.replaceState({}, "", newUrl);
+    }
+  }, [searchParams, nodes]);
 
   const handleOverride = useCallback((id: string, stocks: StockEntry[]) => {
     setStockOverrides((prev) => ({ ...prev, [id]: stocks }));
@@ -4633,28 +4909,127 @@ export default function IndustryCanvasPage() {
 
   return (
     <div className="flex flex-col h-full">
-      {/* Header */}
-      <div className="flex items-center gap-3 px-6 py-3 border-b border-[#1e2332] bg-[#151821] flex-shrink-0">
+      <div
+        className="flex items-center gap-3 px-6 py-3 border-b flex-shrink-0"
+        style={{
+          background: "var(--bg-secondary)",
+          borderColor: "var(--border-color)",
+        }}
+      >
         <button
           onClick={() => router.push("/industry")}
-          className="flex items-center gap-1.5 text-gray-500 hover:text-white text-sm transition-colors"
+          className="flex items-center gap-1.5 text-sm transition-colors"
+          style={{ color: "var(--text-secondary)" }}
         >
           <ArrowLeft size={16} />
           产业列表
         </button>
-        <span className="text-gray-700">/</span>
+        <span style={{ color: "var(--text-tertiary)" }}>/</span>
         <div>
-          <span className="text-white font-semibold text-sm">
+          <span
+            className="font-semibold text-sm"
+            style={{ color: "var(--text-primary)" }}
+          >
             {industry.title}
           </span>
-          <span className="text-gray-600 text-xs ml-2">
+          <span
+            className="text-xs ml-2"
+            style={{ color: "var(--text-tertiary)" }}
+          >
             {industry.subtitle}
           </span>
         </div>
 
         <div className="ml-auto flex items-center gap-2">
+          <div className="relative">
+            <div className="relative">
+              <Search
+                className="absolute left-2.5 top-1/2 -translate-y-1/2"
+                style={{ color: "var(--text-secondary)" }}
+                size={14}
+              />
+              <input
+                ref={searchInputRef}
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && searchResults.length > 0) {
+                    handleSearchSelect(searchResults[0]);
+                  } else if (e.key === "Escape") {
+                    setSearchQuery("");
+                    setShowSearchDropdown(false);
+                  }
+                }}
+                onFocus={() => {
+                  if (searchResults.length > 0) setShowSearchDropdown(true);
+                }}
+                placeholder="搜索股票名称或代码..."
+                className="w-64 pl-8 pr-8 py-1.5 border rounded-md text-sm focus:outline-none focus:border-[#3b5bdb]"
+                style={{
+                  background: "var(--bg-primary)",
+                  borderColor: "var(--border-color)",
+                  color: "var(--text-primary)",
+                }}
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => {
+                    setSearchQuery("");
+                    setShowSearchDropdown(false);
+                  }}
+                  className="absolute right-2 top-1/2 -translate-y-1/2"
+                  style={{ color: "var(--text-secondary)" }}
+                >
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+
+            {showSearchDropdown && searchResults.length > 0 && (
+              <div
+                className="absolute top-full mt-1 w-full border rounded-md shadow-xl z-50 max-h-80 overflow-y-auto"
+                style={{
+                  background: "var(--bg-secondary)",
+                  borderColor: "var(--border-color)",
+                }}
+              >
+                {searchResults.map((result, idx) => (
+                  <button
+                    key={`${result.nodeId}-${result.code}`}
+                    onClick={() => handleSearchSelect(result)}
+                    className={cn(
+                      "w-full flex items-center justify-between px-3 py-2 text-left transition-colors",
+                      idx === 0 && "rounded-t-md",
+                      idx === searchResults.length - 1 && "rounded-b-md",
+                    )}
+                  >
+                    <span
+                      className="text-sm"
+                      style={{ color: "var(--text-primary)" }}
+                    >
+                      {result.name}
+                    </span>
+                    <span
+                      className="text-xs"
+                      style={{ color: "var(--text-secondary)" }}
+                    >
+                      {result.code}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
           {industryId !== "overview" && (
-            <div className="flex bg-[#0d1117] border border-[#1e2332] rounded-lg p-0.5">
+            <div
+              className="flex border rounded-lg p-0.5"
+              style={{
+                background: "var(--bg-primary)",
+                borderColor: "var(--border-color)",
+              }}
+            >
               <button
                 onClick={() => {
                   setActiveTab("chain");
@@ -4662,10 +5037,16 @@ export default function IndustryCanvasPage() {
                 }}
                 className={cn(
                   "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors",
-                  activeTab === "chain"
-                    ? "bg-[#1e2538] text-white"
-                    : "text-gray-500 hover:text-gray-300",
+                  activeTab === "chain" ? "text-white" : "",
                 )}
+                style={
+                  activeTab === "chain"
+                    ? {
+                        background: "var(--bg-tertiary)",
+                        color: "var(--text-primary)",
+                      }
+                    : { color: "var(--text-secondary)" }
+                }
               >
                 <span>🗺️</span> 供应链图谱
               </button>
@@ -4676,10 +5057,16 @@ export default function IndustryCanvasPage() {
                 }}
                 className={cn(
                   "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors",
-                  activeTab === "anatomy"
-                    ? "bg-[#1e2538] text-white"
-                    : "text-gray-500 hover:text-gray-300",
+                  activeTab === "anatomy" ? "text-white" : "",
                 )}
+                style={
+                  activeTab === "anatomy"
+                    ? {
+                        background: "var(--bg-tertiary)",
+                        color: "var(--text-primary)",
+                      }
+                    : { color: "var(--text-secondary)" }
+                }
               >
                 <span>🔬</span> 3D 解剖图
               </button>
@@ -4695,7 +5082,10 @@ export default function IndustryCanvasPage() {
                       className="w-2 h-2 rounded-full"
                       style={{ background: LAYER_STYLES[layer].border }}
                     />
-                    <span className="text-xs text-gray-500">
+                    <span
+                      className="text-xs"
+                      style={{ color: "var(--text-secondary)" }}
+                    >
                       {LAYER_LABEL[layer]}
                     </span>
                   </div>
@@ -4794,6 +5184,7 @@ export default function IndustryCanvasPage() {
             selectedId={selectedId}
             onSelect={setSelectedId}
             layerLabels={flowLayerLabels}
+            perfData={perfData}
           />
         )}
 
@@ -4830,6 +5221,7 @@ export default function IndustryCanvasPage() {
                 <RightPanel
                   item={rightPanelItem}
                   overrideStocks={stockOverrides}
+                  liveQuotes={liveQuotes}
                   onOverride={handleOverride}
                   onClose={() => setSelectedId(null)}
                   onNavigate={(code) => router.push(`/stock/${code}`)}
@@ -4874,6 +5266,7 @@ export default function IndustryCanvasPage() {
                 <RightPanel
                   item={rightPanelItem}
                   overrideStocks={stockOverrides}
+                  liveQuotes={liveQuotes}
                   onOverride={handleOverride}
                   onClose={() => setSelectedId(null)}
                   onNavigate={(code) => router.push(`/stock/${code}`)}

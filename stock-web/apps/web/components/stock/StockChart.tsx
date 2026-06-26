@@ -127,6 +127,35 @@ function calcKDJ(
   }));
 }
 
+function calcBOLL(
+  data: KLineBar[],
+  period: number = 20,
+  stdDev: number = 2,
+): { time: string; upper: number; middle: number; lower: number }[] {
+  return data
+    .map((_, i) => {
+      if (i < period - 1) return null;
+      const slice = data.slice(i - period + 1, i + 1);
+      const closes = slice.map((b) => b.close);
+      const middle = closes.reduce((s, v) => s + v, 0) / period;
+      const variance =
+        closes.reduce((s, v) => s + Math.pow(v - middle, 2), 0) / period;
+      const std = Math.sqrt(variance);
+      return {
+        time: data[i].time,
+        upper: parseFloat((middle + stdDev * std).toFixed(3)),
+        middle: parseFloat(middle.toFixed(3)),
+        lower: parseFloat((middle - stdDev * std).toFixed(3)),
+      };
+    })
+    .filter(Boolean) as {
+    time: string;
+    upper: number;
+    middle: number;
+    lower: number;
+  }[];
+}
+
 export function StockChart({ data, activeIndicators }: StockChartProps) {
   const mainRef = useRef<HTMLDivElement>(null);
   const subRef = useRef<HTMLDivElement>(null);
@@ -178,6 +207,38 @@ export function StockChart({ data, activeIndicators }: StockChartProps) {
       });
       ma.setData(calcMA(data, p));
     });
+
+    if (activeIndicators.includes("BOLL")) {
+      const bollData = calcBOLL(data);
+      const upperLine = main.addSeries(LineSeries, {
+        color: "#f5a623",
+        lineWidth: 1,
+        priceLineVisible: false,
+        lastValueVisible: false,
+      });
+      upperLine.setData(
+        bollData.map((d) => ({ time: d.time, value: d.upper })),
+      );
+      const middleLine = main.addSeries(LineSeries, {
+        color: "#9ca3af",
+        lineWidth: 1,
+        priceLineVisible: false,
+        lastValueVisible: false,
+      });
+      middleLine.setData(
+        bollData.map((d) => ({ time: d.time, value: d.middle })),
+      );
+      const lowerLine = main.addSeries(LineSeries, {
+        color: "#60a5fa",
+        lineWidth: 1,
+        priceLineVisible: false,
+        lastValueVisible: false,
+      });
+      lowerLine.setData(
+        bollData.map((d) => ({ time: d.time, value: d.lower })),
+      );
+    }
+
     main.timeScale().fitContent();
 
     // MACD sub-chart

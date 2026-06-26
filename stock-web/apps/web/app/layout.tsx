@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { Geist } from "next/font/google";
 import "./globals.css";
 import { Sidebar } from "@/components/layout/Sidebar";
+import { ThemeProvider } from "./theme-provider";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 const geist = Geist({ subsets: ["latin"] });
 
@@ -17,11 +19,25 @@ export default function RootLayout({
 }) {
   return (
     <html lang="zh-CN">
-      <body className={`${geist.className} bg-[#0f1117] text-white`}>
-        <div className="flex h-screen overflow-hidden">
-          <Sidebar />
-          <main className="flex-1 overflow-auto bg-[#0f1117]">{children}</main>
-        </div>
+      <body
+        className={geist.className}
+        style={{
+          background: "var(--bg-primary)",
+          color: "var(--text-primary)",
+        }}
+      >
+        <ThemeProvider>
+          <div className="flex h-screen overflow-hidden">
+            <Sidebar />
+            <main
+              className="flex-1 overflow-auto relative"
+              style={{ background: "var(--bg-primary)" }}
+            >
+              <ThemeToggle />
+              {children}
+            </main>
+          </div>
+        </ThemeProvider>
       </body>
     </html>
   );

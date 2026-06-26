@@ -1,10 +1,11 @@
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
-from routers import quote, kline, fundamental, news
+from routers import quote, kline, fundamental, news, industry, guba
 import akshare as ak
 from fastapi import HTTPException
+from db import init_db
 
-app = FastAPI(title="股策AI 数据服务", version="0.1.0")
+app = FastAPI(title="股策AI 数据服务", version="0.2.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -18,6 +19,13 @@ app.include_router(quote.router, prefix="/api/quote", tags=["行情"])
 app.include_router(kline.router, prefix="/api/kline", tags=["K线"])
 app.include_router(fundamental.router, prefix="/api/fundamental", tags=["基本面"])
 app.include_router(news.router, prefix="/api/news", tags=["新闻"])
+app.include_router(industry.router, prefix="/api/industry", tags=["产业链"])
+app.include_router(guba.router, prefix="/api/guba", tags=["股吧资讯"])
+
+
+@app.on_event("startup")
+def startup():
+    init_db()
 
 
 @app.get("/health")

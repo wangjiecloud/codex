@@ -1,4 +1,8 @@
 fastapi>=0.111.0
 uvicorn[standard]>=0.29.0
 akshare>=1.14.0
+baostock>=0.8.8
 pandas>=2.0.0
+sqlalchemy>=2.0.0
+beautifulsoup4>=4.12.0
+requests>=2.31.0

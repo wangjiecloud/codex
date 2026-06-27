@@ -2,7 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Search, BarChart2, LineChart, Bot, TrendingUp } from "lucide-react";
+import {
+  Search,
+  BarChart2,
+  LineChart,
+  Bot,
+  TrendingUp,
+  Activity,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const navItems = [
@@ -30,6 +37,12 @@ const navItems = [
     label: "AI Agent",
     icon: Bot,
     match: (p: string) => p.startsWith("/agents"),
+  },
+  {
+    href: "/system",
+    label: "系统监控",
+    icon: Activity,
+    match: (p: string) => p.startsWith("/system"),
   },
 ];
 

@@ -91,6 +91,8 @@ function getRecentlyViewed(): Array<{ code: string; name: string }> {
       if (seen.has(item.code)) return false;
       if (item.code === "000001") return false;
       if (item.code === "688208") return false;
+      if (item.code === "detail") return false;
+      if (!item.code || !item.name) return false;
       seen.add(item.code);
       return true;
     });
@@ -202,10 +204,23 @@ export default function StockDetailPage() {
   const [selectedPost, setSelectedPost] = useState<GubaItem | null>(null);
   const [postContent, setPostContent] = useState<string | null>(null);
   const [postLoading, setPostLoading] = useState(false);
+  const [bottomHeight, setBottomHeight] = useState(180);
+  const [isResizing, setIsResizing] = useState(false);
+  const [quoteLoading, setQuoteLoading] = useState(true);
+  const [gubaLoading, setGubaLoading] = useState(true);
 
   useEffect(() => {
     setWatchlist(getRecentlyViewed());
-  }, []);
+
+    if (code === "detail" || !code || code === "undefined") {
+      const recent = getRecentlyViewed();
+      if (recent.length > 0) {
+        router.replace(`/stock/${recent[0].code}`);
+      } else if (WATCHLIST.length > 0) {
+        router.replace(`/stock/${WATCHLIST[0].code}`);
+      }
+    }
+  }, [code, router]);
 
   useEffect(() => {
     if (quote.name) {
@@ -214,12 +229,14 @@ export default function StockDetailPage() {
   }, [code, quote.name]);
 
   useEffect(() => {
+    setQuoteLoading(true);
     fetch(`http://localhost:8000/api/quote/${code}`)
       .then((r) => r.json())
       .then((data) => {
         if (data.price !== undefined) setQuote(data as QuoteData);
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setQuoteLoading(false));
   }, [code]);
 
   useEffect(() => {
@@ -228,7 +245,11 @@ export default function StockDetailPage() {
     fetch(`http://localhost:8000/api/kline/${code}?period=${period}&count=120`)
       .then((r) => r.json())
       .then((data) => {
-        if (data.bars && data.bars.length > 0) setKlineData(data.bars);
+        if (Array.isArray(data) && data.length > 0) {
+          setKlineData(data);
+        } else if (data.bars && data.bars.length > 0) {
+          setKlineData(data.bars);
+        }
       })
       .catch(() => {});
   }, [code, activePeriod]);
@@ -246,6 +267,7 @@ export default function StockDetailPage() {
     let timer: ReturnType<typeof setTimeout> | null = null;
 
     const fetchGuba = (pg: number) => {
+      setGubaLoading(true);
       const category = TAB_CATEGORY_MAP[activeTab] ?? "all";
       fetch(
         `http://localhost:8000/api/guba/${code}?category=${category}&page=${pg}&page_size=20`,
@@ -262,7 +284,8 @@ export default function StockDetailPage() {
             timer = setTimeout(() => fetchGuba(pg), 3000);
           }
         })
-        .catch(() => {});
+        .catch(() => {})
+        .finally(() => setGubaLoading(false));
     };
 
     fetchGuba(gubaCurrentPage);
@@ -291,6 +314,39 @@ export default function StockDetailPage() {
   });
 
   const displayName = quote.name || `股票${code}`;
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsResizing(true);
+  };
+
+  useEffect(() => {
+    if (!isResizing) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const container = document.getElementById("main-chart-container");
+      if (!container) return;
+
+      const containerRect = container.getBoundingClientRect();
+      const newHeight = containerRect.bottom - e.clientY;
+      const minHeight = 150;
+      const maxHeight = containerRect.height - 200;
+
+      setBottomHeight(Math.min(Math.max(newHeight, minHeight), maxHeight));
+    };
+
+    const handleMouseUp = () => {
+      setIsResizing(false);
+    };
+
+    document.addEventListener("mousemove", handleMouseMove);
+    document.addEventListener("mouseup", handleMouseUp);
+
+    return () => {
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [isResizing]);
 
   return (
     <div className="flex flex-col h-full text-xs overflow-hidden">
@@ -398,32 +454,53 @@ export default function StockDetailPage() {
         </div>
 
         {/* Main chart area */}
-        <div className="flex-1 flex flex-col overflow-hidden">
+        <div
+          id="main-chart-container"
+          className="flex-1 flex flex-col overflow-hidden"
+        >
           {/* Stock header */}
           <div className="flex items-start justify-between px-4 py-2 border-b border-[var(--border-color)] bg-[var(--bg-primary)] shrink-0">
             <div>
               <div className="flex items-baseline gap-3">
-                <span className="text-lg font-bold text-[var(--text-primary)]">
-                  {displayName}
-                </span>
-                <span className="text-[var(--text-tertiary)]">({code})</span>
+                {quoteLoading ? (
+                  <div className="h-7 w-48 bg-[var(--bg-tertiary)] animate-pulse rounded" />
+                ) : (
+                  <>
+                    <span className="text-lg font-bold text-[var(--text-primary)]">
+                      {displayName}
+                    </span>
+                    <span className="text-[var(--text-tertiary)]">
+                      ({code})
+                    </span>
+                  </>
+                )}
               </div>
               <div className="flex items-baseline gap-2 mt-0.5">
-                <span
-                  className={cn(
-                    "text-2xl font-bold font-mono",
-                    getPriceColor(quote.change),
-                  )}
-                >
-                  {quote.price > 0 ? quote.price.toFixed(3) : "--"}
-                </span>
-                <span className={cn("text-sm", getPriceColor(quote.change))}>
-                  {quote.changeAmt >= 0 ? "+" : ""}
-                  {quote.price > 0 ? quote.changeAmt.toFixed(3) : "--"}
-                </span>
-                <span className={cn("text-sm", getPriceColor(quote.change))}>
-                  {quote.price > 0 ? formatPercent(quote.change) : "--"}
-                </span>
+                {quoteLoading ? (
+                  <div className="h-8 w-40 bg-[var(--bg-tertiary)] animate-pulse rounded" />
+                ) : (
+                  <>
+                    <span
+                      className={cn(
+                        "text-2xl font-bold font-mono",
+                        getPriceColor(quote.change),
+                      )}
+                    >
+                      {quote.price > 0 ? quote.price.toFixed(3) : "--"}
+                    </span>
+                    <span
+                      className={cn("text-sm", getPriceColor(quote.change))}
+                    >
+                      {quote.changeAmt >= 0 ? "+" : ""}
+                      {quote.price > 0 ? quote.changeAmt.toFixed(3) : "--"}
+                    </span>
+                    <span
+                      className={cn("text-sm", getPriceColor(quote.change))}
+                    >
+                      {quote.price > 0 ? formatPercent(quote.change) : "--"}
+                    </span>
+                  </>
+                )}
               </div>
             </div>
             <div className="grid grid-cols-2 gap-x-6 gap-y-0.5 text-right mt-1">
@@ -479,6 +556,19 @@ export default function StockDetailPage() {
             ))}
           </div>
 
+          {/* Resizable divider */}
+          <div
+            onMouseDown={handleMouseDown}
+            className={cn(
+              "h-1 bg-[var(--border-color)] hover:bg-[#f5a623]/40 cursor-row-resize transition-colors shrink-0 relative group",
+              isResizing && "bg-[#f5a623]/60",
+            )}
+          >
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="w-12 h-0.5 bg-[var(--text-tertiary)] group-hover:bg-[#f5a623] transition-colors rounded-full" />
+            </div>
+          </div>
+
           {/* Bottom tabs */}
           <div className="flex items-center border-t border-[var(--border-color)] bg-[var(--bg-secondary)] shrink-0">
             {BOTTOM_TABS.map((tab) => (
@@ -512,9 +602,21 @@ export default function StockDetailPage() {
 
           {/* Tab content */}
           {activeTab !== "AI分析" && (
-            <div className="flex flex-col" style={{ height: "180px" }}>
+            <div
+              className="flex flex-col"
+              style={{ height: `${bottomHeight}px` }}
+            >
               <div className="flex-1 overflow-y-auto bg-[var(--bg-primary)] text-[11px]">
-                {gubaPage.items.length > 0 ? (
+                {gubaLoading ? (
+                  <div className="space-y-2 p-3">
+                    {[1, 2, 3, 4, 5].map((i) => (
+                      <div
+                        key={i}
+                        className="h-8 bg-[var(--bg-tertiary)] animate-pulse rounded"
+                      />
+                    ))}
+                  </div>
+                ) : gubaPage.items.length > 0 ? (
                   <table className="w-full">
                     <thead className="sticky top-0 bg-[var(--bg-secondary)] border-b border-[var(--border-color)]">
                       <tr className="text-[var(--text-tertiary)] text-[10px]">

@@ -95,6 +95,8 @@ def _safe_float(val, default=0.0) -> float:
 
 
 def _sync_all_quotes():
+    from routers.sync import _status, _lock
+
     global _sync_running
     _sync_running = True
     db = SessionLocal()
@@ -104,7 +106,15 @@ def _sync_all_quotes():
         yesterday = (date.today() - timedelta(days=5)).strftime("%Y-%m-%d")
         fields = "date,code,open,high,low,close,preclose,volume,amount,turn,pctChg,peTTM,pbMRQ"
         count = 0
-        for raw_code in _get_a_shares(db):
+
+        all_codes = list(_get_a_shares(db))
+        total_codes = len(all_codes)
+
+        for idx, raw_code in enumerate(all_codes):
+            with _lock:
+                _status["current"] = raw_code
+                _status["done"] = idx
+
             bs_code = _to_bs_code(raw_code)
             try:
                 rs = bs.query_history_k_data_plus(
@@ -115,9 +125,17 @@ def _sync_all_quotes():
                     frequency="d",
                     adjustflag="2",
                 )
+
+                if rs.error_code != "0":
+                    print(f"[sync_quotes] {raw_code} baostock error: {rs.error_msg}")
+                    continue
+
                 row_data = []
-                while rs.error_code == "0" and rs.next():
+                max_rows = 10
+                row_count = 0
+                while rs.next() and row_count < max_rows:
                     row_data.append(rs.get_row_data())
+                    row_count += 1
             except Exception as e:
                 print(f"[sync_quotes] {raw_code} fetch error: {e}")
                 continue
@@ -171,8 +189,15 @@ def _sync_all_quotes():
             count += 1
             if count % 50 == 0:
                 db.commit()
+                print(
+                    f"[sync_quotes] progress: {idx + 1}/{total_codes} ({count} saved)"
+                )
 
         db.commit()
+
+        with _lock:
+            _status["done"] = total_codes
+
         print(f"[sync_quotes] done, saved {count} rows")
     except Exception as e:
         db.rollback()
@@ -195,6 +220,8 @@ def _sync_klines(code: str, period: str = "daily"):
         fields = "date,code,open,high,low,close,volume,amount,turn,pctChg"
         start = (date.today() - timedelta(days=400)).strftime("%Y-%m-%d")
         end = date.today().strftime("%Y-%m-%d")
+
+        print(f"[sync_klines] {code} querying baostock...")
         rs = bs.query_history_k_data_plus(
             bs_code,
             fields,
@@ -203,9 +230,18 @@ def _sync_klines(code: str, period: str = "daily"):
             frequency=bs_period,
             adjustflag="2",
         )
+
+        if rs.error_code != "0":
+            print(f"[sync_klines] {code} baostock error: {rs.error_msg}")
+            return
+
         rows_saved = 0
-        while rs.error_code == "0" and rs.next():
+        max_rows = 1000
+        while rs.next() and rows_saved < max_rows:
             r = rs.get_row_data()
+            if not r or len(r) < 10:
+                break
+
             stmt = sqlite_insert(StockKline).values(
                 code=code,
                 period=period,
@@ -235,10 +271,13 @@ def _sync_klines(code: str, period: str = "daily"):
             db.execute(stmt)
             rows_saved += 1
         db.commit()
-        print(f"[sync_klines] {code} done, {rows_saved} bars")
+        print(f"[sync_klines] {code} done, {rows_saved} bars saved")
     except Exception as e:
         db.rollback()
         print(f"[sync_klines] {code} error: {e}")
+        import traceback
+
+        traceback.print_exc()
         reset_bs()
     finally:
         db.close()

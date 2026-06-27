@@ -25,6 +25,20 @@ def _to_bs_code(code: str) -> str:
     return f"sz.{code}"
 
 
+def _is_a_share(code: str) -> bool:
+    """Check if stock code is A-share (supported by baostock)"""
+    return (
+        code.startswith("0")  # 深圳主板/中小板
+        or code.startswith("002")  # 深圳中小板
+        or code.startswith("003")  # 深圳主板
+        or code.startswith("300")  # 创业板
+        or code.startswith("600")  # 上海主板
+        or code.startswith("601")  # 上海主板
+        or code.startswith("603")  # 上海主板
+        or code.startswith("688")  # 科创板
+    )
+
+
 def _safe_float(val, default=0.0) -> float:
     try:
         v = float(str(val).strip())
@@ -34,6 +48,12 @@ def _safe_float(val, default=0.0) -> float:
 
 
 def _fetch_and_cache_quote(code: str) -> dict:
+    if not _is_a_share(code):
+        raise HTTPException(
+            status_code=501,
+            detail=f"Real-time quotes not supported for non-A-share stock: {code}",
+        )
+
     db = SessionLocal()
     try:
         bs = get_bs()
@@ -134,23 +154,65 @@ def _fetch_and_cache_quote(code: str) -> dict:
 async def get_quote(code: str, db: Session = Depends(get_db)):
     row = db.query(StockQuote).filter(StockQuote.code == code).first()
     if row:
-        return {
-            "code": row.code,
-            "name": row.name,
-            "price": row.price,
-            "change": row.change,
-            "changeAmt": row.change_amt,
-            "open": row.open,
-            "prevClose": row.prev_close,
-            "high": row.high,
-            "low": row.low,
-            "volume": row.volume,
-            "turnover": row.turnover,
-            "marketCap": row.market_cap,
-            "pe": row.pe,
-            "pb": row.pb,
-            "turnoverRate": row.turnover_rate,
-            "amplitude": row.amplitude,
-            "updatedAt": row.updated_at.isoformat() if row.updated_at else None,
-        }
-    return _fetch_and_cache_quote(code)
+        cache_age_hours = (
+            (datetime.utcnow() - row.updated_at).total_seconds() / 3600
+            if row.updated_at
+            else 9999
+        )
+
+        # 如果缓存较新(24小时内)，直接返回
+        if cache_age_hours < 24:
+            return {
+                "code": row.code,
+                "name": row.name,
+                "price": row.price,
+                "change": row.change,
+                "changeAmt": row.change_amt,
+                "open": row.open,
+                "prevClose": row.prev_close,
+                "high": row.high,
+                "low": row.low,
+                "volume": row.volume,
+                "turnover": row.turnover,
+                "marketCap": row.market_cap,
+                "pe": row.pe,
+                "pb": row.pb,
+                "turnoverRate": row.turnover_rate,
+                "amplitude": row.amplitude,
+                "updatedAt": row.updated_at.isoformat() if row.updated_at else None,
+            }
+
+    # 尝试获取最新数据
+    try:
+        return _fetch_and_cache_quote(code)
+    except (RuntimeError, HTTPException) as e:
+        # 如果baostock失败但有旧缓存，返回旧缓存
+        if row:
+            print(
+                f"[quote] baostock failed for {code}, returning stale cache ({cache_age_hours:.1f}h old)"
+            )
+            return {
+                "code": row.code,
+                "name": row.name,
+                "price": row.price,
+                "change": row.change,
+                "changeAmt": row.change_amt,
+                "open": row.open,
+                "prevClose": row.prev_close,
+                "high": row.high,
+                "low": row.low,
+                "volume": row.volume,
+                "turnover": row.turnover,
+                "marketCap": row.market_cap,
+                "pe": row.pe,
+                "pb": row.pb,
+                "turnoverRate": row.turnover_rate,
+                "amplitude": row.amplitude,
+                "updatedAt": row.updated_at.isoformat() if row.updated_at else None,
+                "cacheWarning": "数据可能不是最新，正在更新中...",
+            }
+        # 无缓存且baostock失败，返回503
+        raise HTTPException(
+            status_code=503,
+            detail="数据服务暂时不可用，请稍后重试。",
+        )

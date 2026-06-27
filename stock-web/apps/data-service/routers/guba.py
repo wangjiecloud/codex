@@ -6,7 +6,7 @@ import threading
 import time
 
 from db import get_db, SessionLocal, GubaPost
-from eastmoney_scraper import scrape_all_categories, fetch_post_content
+from eastmoney_scraper import scrape_all_categories, fetch_post_content, fetch_guba_all
 
 router = APIRouter()
 
@@ -15,7 +15,7 @@ _CACHE_TTL_MINUTES = 5
 _syncing: set = set()
 _syncing_lock = threading.Lock()
 
-VALID_CATEGORIES = {"all", "announcement", "news", "research"}
+VALID_CATEGORIES = {"all", "announcement", "news", "research", "discussion", "article"}
 
 
 def _is_data_fresh(db: Session, code: str) -> bool:
@@ -142,6 +142,7 @@ def _sync_guba_posts(code: str):
                            ON CONFLICT(code, post_id) DO UPDATE SET
                              read_count=excluded.read_count,
                              comment_count=excluded.comment_count,
+                             post_time=excluded.post_time,
                              post_date=excluded.post_date,
                              content=excluded.content,
                              content_fetched=excluded.content_fetched,
@@ -241,7 +242,218 @@ async def get_guba_data(
     }
 
 
+@router.post("/sync/batch")
+async def trigger_batch_guba_sync(background_tasks: BackgroundTasks):
+    from routers.sync import _status, _lock
+
+    with _lock:
+        if _status["running"]:
+            return {"status": "already_running", **_status}
+
+    background_tasks.add_task(_run_batch_guba_sync)
+    return {"status": "started"}
+
+
+@router.post("/sync/all/batch")
+async def trigger_batch_guba_all_sync(background_tasks: BackgroundTasks):
+    from routers.sync import _status, _lock
+
+    with _lock:
+        if _status["running"]:
+            return {"status": "already_running", **_status}
+
+    background_tasks.add_task(_run_batch_guba_all_sync)
+    return {"status": "started"}
+
+
+@router.post("/sync/all/{code}")
+async def trigger_guba_all_sync(code: str, background_tasks: BackgroundTasks):
+    background_tasks.add_task(_sync_guba_all_posts, code)
+    return {"status": "started", "code": code}
+
+
 @router.post("/sync/{code}")
 async def trigger_guba_sync(code: str, background_tasks: BackgroundTasks):
     background_tasks.add_task(_sync_guba_posts, code)
     return {"status": "started", "code": code}
+
+
+def _run_batch_guba_sync():
+    from db import SessionLocal, StockMeta
+    from routers.sync import _status, _lock
+
+    db = SessionLocal()
+    try:
+        codes = [row.code for row in db.query(StockMeta.code).all()]
+    finally:
+        db.close()
+
+    with _lock:
+        _status.update(
+            running=True,
+            phase="guba",
+            total=len(codes),
+            done=0,
+            current="",
+            started_at=datetime.utcnow().isoformat(),
+            finished_at="",
+        )
+
+    print(f"[guba_sync] starting batch sync for {len(codes)} stocks")
+
+    for i, code in enumerate(codes):
+        with _lock:
+            _status["current"] = code
+            _status["done"] = i
+
+        try:
+            _sync_guba_posts(code)
+        except Exception as e:
+            print(f"[guba_sync] error syncing {code}: {e}")
+
+        time.sleep(0.5)
+
+    with _lock:
+        _status.update(
+            running=False,
+            phase="done",
+            current="",
+            done=len(codes),
+            finished_at=datetime.utcnow().isoformat(),
+        )
+
+    print("[guba_sync] batch sync finished")
+
+
+def _sync_guba_all_posts(code: str, max_pages: int = 5):
+    db = SessionLocal()
+    try:
+        print(f"[guba_all_sync] syncing all posts for {code}")
+        all_posts = []
+
+        for page in range(1, max_pages + 1):
+            posts = fetch_guba_all(code, page)
+            if not posts:
+                break
+            all_posts.extend(posts)
+            time.sleep(0.3)
+
+        if not all_posts:
+            print(f"[guba_all_sync] no posts found for {code}")
+            return
+
+        _upsert_all_posts(db, code, all_posts)
+        print(f"[guba_all_sync] synced {len(all_posts)} posts for {code}")
+
+    except Exception as e:
+        print(f"[guba_all_sync] error syncing {code}: {e}")
+    finally:
+        db.close()
+
+
+def _upsert_all_posts(db: Session, code: str, posts: list):
+    now = datetime.utcnow()
+    all_rows = []
+
+    for post in posts:
+        all_rows.append(
+            {
+                "code": code,
+                "post_id": post["post_id"],
+                "title": post["title"],
+                "author": post["author"],
+                "author_url": post.get("author_url", ""),
+                "read_count": post.get("read_count", 0),
+                "comment_count": post.get("reply_count", 0),
+                "post_time": post.get("update_time", ""),
+                "post_date": post.get("update_time", ""),
+                "url": post["url"],
+                "category": "discussion" if post.get("post_type") == "0" else "article",
+                "post_type": post.get("post_type", "0"),
+                "content": "",
+                "content_fetched": 0,
+                "updated_at": now,
+            }
+        )
+
+    if not all_rows:
+        return 0
+
+    batch_size = 100
+    count = 0
+    for i in range(0, len(all_rows), batch_size):
+        batch = all_rows[i : i + batch_size]
+        for attempt in range(10):
+            try:
+                stmt = sqlite_insert(GubaPost).values(batch)
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=["code", "post_id"],
+                    set_={
+                        "read_count": stmt.excluded.read_count,
+                        "comment_count": stmt.excluded.comment_count,
+                        "post_date": stmt.excluded.post_date,
+                        "post_time": stmt.excluded.post_time,
+                        "author_url": stmt.excluded.author_url,
+                        "post_type": stmt.excluded.post_type,
+                        "updated_at": stmt.excluded.updated_at,
+                    },
+                )
+                db.execute(stmt)
+                db.commit()
+                count += len(batch)
+                break
+            except Exception as e:
+                if attempt == 9:
+                    print(f"[_upsert_all_posts] error batch {i}: {e}")
+                    raise
+                db.rollback()
+                time.sleep(0.1)
+
+    return count
+
+
+def _run_batch_guba_all_sync():
+    from db import SessionLocal, StockMeta
+    from routers.sync import _status, _lock
+
+    db = SessionLocal()
+    try:
+        codes = [row.code for row in db.query(StockMeta.code).all()]
+    finally:
+        db.close()
+
+    with _lock:
+        _status.update(
+            running=True,
+            phase="guba_all",
+            total=len(codes),
+            done=0,
+            current="",
+            started_at=datetime.utcnow().isoformat(),
+            finished_at="",
+        )
+
+    print(f"[guba_all_sync] starting batch sync for {len(codes)} stocks")
+
+    for i, code in enumerate(codes):
+        with _lock:
+            _status["current"] = code
+            _status["done"] = i
+
+        try:
+            _sync_guba_all_posts(code)
+        except Exception as e:
+            print(f"[guba_all_sync] error syncing {code}: {e}")
+
+        time.sleep(0.5)
+
+    with _lock:
+        _status.update(
+            running=False,
+            phase="done",
+            current="",
+            done=len(codes),
+            finished_at=datetime.utcnow().isoformat(),
+        )
+
+    print("[guba_all_sync] batch sync finished")

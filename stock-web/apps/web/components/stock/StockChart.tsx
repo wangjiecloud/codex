@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useMemo } from "react";
 import {
   createChart,
   IChartApi,
@@ -169,8 +169,23 @@ export function StockChart({ data, activeIndicators }: StockChartProps) {
   const sub2Ref = useRef<HTMLDivElement>(null);
   const volRef = useRef<HTMLDivElement>(null);
 
+  const indicators = useMemo(() => {
+    if (data.length === 0) return null;
+
+    return {
+      ma5: calcMA(data, 5),
+      ma10: calcMA(data, 10),
+      ma20: calcMA(data, 20),
+      ma30: calcMA(data, 30),
+      ma60: calcMA(data, 60),
+      macd: calcMACD(data),
+      kdj: calcKDJ(data),
+      boll: calcBOLL(data),
+    };
+  }, [data]);
+
   useEffect(() => {
-    if (!mainRef.current || data.length === 0) return;
+    if (!mainRef.current || data.length === 0 || !indicators) return;
 
     const bgColor = getCssVar("--bg-primary");
     const textColor = getCssVar("--text-secondary");
@@ -208,19 +223,25 @@ export function StockChart({ data, activeIndicators }: StockChartProps) {
     );
 
     const MA_COLORS = ["#f5a623", "#4ade80", "#60a5fa", "#c084fc", "#f472b6"];
-    const MA_PERIODS = [5, 10, 20, 30, 60];
-    MA_PERIODS.forEach((p, i) => {
+    const MA_DATA = [
+      indicators.ma5,
+      indicators.ma10,
+      indicators.ma20,
+      indicators.ma30,
+      indicators.ma60,
+    ];
+    MA_DATA.forEach((maData, i) => {
       const ma = main.addSeries(LineSeries, {
         color: MA_COLORS[i],
         lineWidth: 1,
         priceLineVisible: false,
         lastValueVisible: false,
       });
-      ma.setData(calcMA(data, p));
+      ma.setData(maData);
     });
 
     if (activeIndicators.includes("BOLL")) {
-      const bollData = calcBOLL(data);
+      const bollData = indicators.boll;
       const upperLine = main.addSeries(LineSeries, {
         color: "#f5a623",
         lineWidth: 1,
@@ -256,7 +277,7 @@ export function StockChart({ data, activeIndicators }: StockChartProps) {
     let macdChart: IChartApi | null = null;
     if (activeIndicators.includes("MACD") && subRef.current) {
       macdChart = createChart(subRef.current, { ...opts, height: 120 });
-      const macdData = calcMACD(data);
+      const macdData = indicators.macd;
       const hist = macdChart.addSeries(HistogramSeries, {
         color: "#e84444",
         priceLineVisible: false,
@@ -292,7 +313,7 @@ export function StockChart({ data, activeIndicators }: StockChartProps) {
     let kdjChart: IChartApi | null = null;
     if (activeIndicators.includes("KDJ") && sub2Ref.current) {
       kdjChart = createChart(sub2Ref.current, { ...opts, height: 120 });
-      const kdjData = calcKDJ(data);
+      const kdjData = indicators.kdj;
       const kLine = kdjChart.addSeries(LineSeries, {
         color: "#f5a623",
         lineWidth: 1,

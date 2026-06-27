@@ -1,6 +1,6 @@
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
-from routers import quote, kline, fundamental, news, industry, guba, sync
+from routers import quote, kline, fundamental, news, industry, guba, sync, system
 import akshare as ak
 from fastapi import HTTPException
 from db import init_db
@@ -12,7 +12,7 @@ app = FastAPI(title="股策AI 数据服务", version="0.2.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=["http://localhost:3000", "null"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -25,6 +25,7 @@ app.include_router(news.router, prefix="/api/news", tags=["新闻"])
 app.include_router(industry.router, prefix="/api/industry", tags=["产业链"])
 app.include_router(guba.router, prefix="/api/guba", tags=["股吧资讯"])
 app.include_router(sync.router, prefix="/api/sync", tags=["数据同步"])
+app.include_router(system.router, prefix="/api/system", tags=["系统监控"])
 
 _scheduler = BackgroundScheduler(timezone="Asia/Shanghai")
 
@@ -33,6 +34,7 @@ _scheduler = BackgroundScheduler(timezone="Asia/Shanghai")
 def startup():
     init_db()
 
+    # 每日全量同步（盘后17:30）
     _scheduler.add_job(
         industry.sync_all_data,
         trigger="cron",
@@ -41,6 +43,17 @@ def startup():
         id="daily_sync",
         replace_existing=True,
     )
+
+    # 交易时段高频同步（9:00-15:00每10分钟）
+    _scheduler.add_job(
+        industry._sync_all_quotes,
+        trigger="cron",
+        hour="9-14",
+        minute="*/10",
+        id="trading_hours_sync",
+        replace_existing=True,
+    )
+
     _scheduler.start()
 
     now = datetime.now().time()

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, ExternalLink, Plus, Star, X } from "lucide-react";
 import { StockChart, generateMockData } from "@/components/stock/StockChart";
 import { AgentPanel } from "@/components/agents/AgentPanel";
@@ -210,10 +210,33 @@ function formatAmount(amt: number): string {
   return amt.toFixed(0);
 }
 
+const INDUSTRY_LABELS: Record<string, string> = {
+  overview: "AI算力全景",
+  aigpu: "AI算力芯片",
+  pcb: "PCB",
+  mlcc: "MLCC",
+  memory: "存储芯片",
+  optics: "光模块与CPO",
+  fiber: "光纤光缆",
+  liquidcool: "液冷散热",
+  aipower: "AI供配电",
+  coppercable: "高速铜连接",
+  idc: "智算中心/IDC",
+  glasssub: "玻璃基板",
+  aiserver: "AI服务器",
+  semieq: "半导体设备",
+};
+
 export default function StockDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const code = params.code as string;
+  const fromPath = searchParams.get("from") ?? null;
+  const fromIndustryId = fromPath?.match(/^\/industry\/(.+)$/)?.[1] ?? null;
+  const fromLabel = fromIndustryId
+    ? (INDUSTRY_LABELS[fromIndustryId] ?? fromIndustryId)
+    : null;
 
   const [quote, setQuote] = useState<QuoteData>(DEFAULT_QUOTE);
   const [klineData, setKlineData] = useState<KLineBar[]>(() =>
@@ -434,10 +457,11 @@ export default function StockDetailPage() {
       {/* Top toolbar */}
       <div className="flex items-center gap-1 px-3 py-1.5 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] shrink-0 overflow-x-auto">
         <button
-          onClick={() => router.push("/stock/search")}
+          onClick={() => router.push(fromPath ?? "/stock/search")}
           className="flex items-center gap-1 text-[var(--text-tertiary)] hover:text-[var(--text-primary)] mr-2 shrink-0"
         >
           <ArrowLeft size={13} />
+          {fromLabel && <span className="text-[11px]">{fromLabel}</span>}
         </button>
         <button
           onClick={() => setIsStarred((s) => !s)}

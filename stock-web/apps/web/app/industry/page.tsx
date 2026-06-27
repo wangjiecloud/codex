@@ -4,8 +4,6 @@ import React, { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import {
   Plus,
-  Edit2,
-  Trash2,
   ChevronRight,
   Factory,
   Cpu,
@@ -452,33 +450,6 @@ export default function IndustryPage() {
                     />
                   </div>
                 </button>
-
-                <div
-                  className="border-t px-5 py-2 flex items-center justify-end gap-2"
-                  style={{ borderColor: "var(--border-color)" }}
-                >
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleEdit(industry);
-                    }}
-                    className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded transition-all"
-                    style={{ color: "var(--text-secondary)" }}
-                  >
-                    <Edit2 size={12} />
-                    编辑
-                  </button>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDelete(industry.id);
-                    }}
-                    className="flex items-center gap-1.5 text-xs text-red-400 hover:text-red-400 px-3 py-1.5 rounded hover:bg-red-400/10 transition-all"
-                  >
-                    <Trash2 size={12} />
-                    删除
-                  </button>
-                </div>
               </div>
             );
           })}

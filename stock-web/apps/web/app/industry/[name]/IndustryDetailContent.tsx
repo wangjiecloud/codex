@@ -365,6 +365,382 @@ const e = (
 //   铜冠铜箔/德福科技 高端高速铜箔供PCB厂
 //   联瑞新材/壹石通 球形硅微粉（低介电填料）→高频高速CCL
 
+const INDUSTRY_GUIDE: Record<
+  string,
+  {
+    title: string;
+    intro: string;
+    layers: { label: string; what: string; why: string }[];
+  }
+> = {
+  optics: {
+    title: "光模块产业链加工流程",
+    intro:
+      '光模块是AI服务器之间传输数据的"光速高速公路"，把电信号转成光信号，实现超高速低延迟的机柜间互联。',
+    layers: [
+      {
+        label: "L0 光芯片/硅光材料",
+        what: "生产激光芯片（EML/DFB/VCSEL）和磷化铟（InP）衬底原料",
+        why: '激光芯片是光模块的"发动机"，决定光信号的速率和传输距离',
+      },
+      {
+        label: "L1 光器件/组件",
+        what: "将激光芯片封装成光隔离器、调制器、连接器等光学组件",
+        why: "把裸芯片变成可组装的标准零件，控制光路方向和信号质量",
+      },
+      {
+        label: "L2 高速光模块",
+        what: "将光芯片+驱动IC+光器件集成封装成800G/1.6T光模块成品",
+        why: "这是直接插入英伟达交换机/服务器的终端产品，决定AI集群带宽",
+      },
+      {
+        label: "L3 终端客户",
+        what: "英伟达/思科等将光模块集成到NVLink交换机或CPO共封装方案中",
+        why: "光模块在这里完成最终部署，连接GB200超级集群的每个GPU节点",
+      },
+    ],
+  },
+  pcb: {
+    title: "PCB印制电路板产业链加工流程",
+    intro:
+      'PCB是电子设备的"神经系统底板"，所有芯片、电容、接口都焊接在它上面。AI服务器用的PCB层数多达40层以上，制作难度极高。',
+    layers: [
+      {
+        label: "L0 原材料/耗材/设备",
+        what: "生产玻纤布、铜箔、树脂、钻针、激光设备等PCB制造原料",
+        why: "铜箔厚度和粗糙度直接影响高频信号损耗，AI服务器对此要求极严苛",
+      },
+      {
+        label: "L1 覆铜板（CCL）",
+        what: '将玻纤布+铜箔+树脂压合成覆铜板，相当于PCB的"毛坯板"',
+        why: "CCL的介电常数决定信号传播速度，高速AI服务器需要低介电常数材料",
+      },
+      {
+        label: "L2 PCB制造/IC载板",
+        what: "在CCL上通过曝光→蚀刻→钻孔→电镀工艺制作多层电路",
+        why: "线路越精细，布线密度越高，同等面积能承载的芯片和功能越多",
+      },
+      {
+        label: "L3 组装/测试",
+        what: "将PCB与GPU芯片、内存、连接器焊接组装成完整服务器主板",
+        why: "焊接质量和组装良率决定最终AI服务器的稳定性和性能",
+      },
+      {
+        label: "L4 终端客户",
+        what: "英伟达/华为等将主板集成到AI服务器机柜交付数据中心",
+        why: "PCB是整个AI算力基础设施的物理载体，每台GB200包含数十块复杂PCB",
+      },
+    ],
+  },
+  mlcc: {
+    title: "MLCC积层陶瓷电容产业链加工流程",
+    intro:
+      "MLCC是电子设备中用量最大的无源元件，每台AI服务器需要数千颗，用于滤波、去耦，保证芯片电源供电稳定。",
+    layers: [
+      {
+        label: "L0 材料企业",
+        what: "生产钛酸钡粉、镍粉浆料、铜箔等MLCC核心原材料",
+        why: "钛酸钡粉的纯度和粒径决定电容量和温度稳定性",
+      },
+      {
+        label: "L1 关键部件企业",
+        what: "将原材料加工成内电极浆料、介质薄膜等半成品",
+        why: "薄膜厚度越薄，单层电容量越大，可以在更小体积实现更大容量",
+      },
+      {
+        label: "L2 核心器件企业",
+        what: "通过流延→叠层→切割→烧结→电极处理制成MLCC成品",
+        why: "AI服务器使用的X5R/X7R规格MLCC需要在高温下保持稳定的电容量",
+      },
+      {
+        label: "L3 组装/分销企业",
+        what: "MLCC贴装到PCB上，与其他元器件一起构成完整电路",
+        why: "AI GPU芯片周围密布数百颗MLCC，为核心芯片提供瞬态电流支撑",
+      },
+      {
+        label: "L4 终端客户",
+        what: "英伟达/华为服务器通过MLCC保障GPU稳定运行",
+        why: "GPU峰值功耗变化剧烈，没有足够的去耦电容会导致芯片崩溃或性能下降",
+      },
+    ],
+  },
+  memory: {
+    title: "存储芯片（HBM/DRAM/NAND）产业链加工流程",
+    intro:
+      '存储芯片是AI训练的"草稿纸"，模型参数和中间计算结果都存在这里。HBM是AI服务器独有的高带宽内存，通过TSV硅通孔垂直堆叠多层DRAM。',
+    layers: [
+      {
+        label: "L0 原材料企业",
+        what: "生产超纯硅片、特种气体、高纯化学品等晶圆制造原料",
+        why: "300mm大硅片是DRAM/NAND的基础，任何杂质都会导致存储单元失效",
+      },
+      {
+        label: "L1 关键材料企业",
+        what: "生产CMP抛光液、靶材、前驱体等关键工艺材料",
+        why: "每一步光刻、刻蚀、沉积工艺都需要特定材料，决定存储密度和良率",
+      },
+      {
+        label: "L2 核心制造企业",
+        what: "在晶圆上通过数百道工序制造DRAM/NAND/HBM存储晶圆",
+        why: "HBM需要额外的TSV钻孔和Cu柱工艺，制造难度是普通DRAM的数倍",
+      },
+      {
+        label: "L3 封测/模组/设备",
+        what: "切割晶圆→测试→封装成内存条/HBM堆叠模组",
+        why: "HBM封装是通过CoWoS技术将多层DRAM直接贴合在GPU旁边，实现超高带宽",
+      },
+      {
+        label: "L4 终端客户",
+        what: "AI服务器将HBM焊接在H100/B200 GPU旁，DDR5装入内存插槽",
+        why: "H100配备80GB HBM3，训练千亿参数模型时每秒读写数据超过3TB",
+      },
+    ],
+  },
+  aigpu: {
+    title: "AI算力芯片（GPU/NPU）产业链加工流程",
+    intro:
+      "GPU是AI训练的核心引擎，由EDA设计→先进晶圆制造→CoWoS封装→系统集成等环节构成，每个环节都极度依赖少数关键供应商。",
+    layers: [
+      {
+        label: "L0 EDA/制程/封装",
+        what: "EDA软件设计芯片电路图，台积电3nm晶圆代工，长电/通富封测",
+        why: "没有EDA就无法设计芯片，没有台积电3nm就无法制造最先进GPU",
+      },
+      {
+        label: "L1 核心算力芯片",
+        what: "英伟达/AMD/国产GPU/NPU芯片的设计和流片",
+        why: "H100拥有800亿个晶体管，是目前最复杂的商业芯片之一",
+      },
+      {
+        label: "L2 AI算力系统",
+        what: "服务器厂商将GPU芯片集成到HGX/DGX服务器板中",
+        why: "8块H100 GPU通过NVLink互联后，算力相当于640个传统服务器",
+      },
+      {
+        label: "L3 算力应用",
+        what: "云厂商和AI公司将AI服务器部署为大规模训练集群",
+        why: "GPT-4训练消耗了约25000块A100 GPU运行90天",
+      },
+    ],
+  },
+  fiber: {
+    title: "光纤光缆产业链加工流程",
+    intro:
+      "光纤是数据中心之间传输数据的介质，AI时代数据中心规模扩张直接拉动光纤需求爆发式增长。",
+    layers: [
+      {
+        label: "L0 原材料",
+        what: "高纯石英管、四氯化硅、保护气体等光纤制造原料",
+        why: "光纤的传输损耗极低（每公里仅损失0.2dB），对原材料纯度要求极高",
+      },
+      {
+        label: "L1 光纤预制棒",
+        what: "通过PCVD/OVD工艺将高纯SiO₂沉积制成光纤预制棒",
+        why: "预制棒是光纤的毛坯，决定光纤的折射率分布和传输性能",
+      },
+      {
+        label: "L2 光纤/光缆制造",
+        what: "将预制棒拉丝成光纤，再成缆加护套制成光缆成品",
+        why: "单根光纤直径仅125微米，比头发丝略粗，但能承载Tb级数据传输",
+      },
+      {
+        label: "L3 终端客户",
+        what: "电信运营商、数据中心铺设光缆构建骨干网和园区网",
+        why: "AI大模型训练需要超大规模集群，集群内外的光纤互联需求持续激增",
+      },
+    ],
+  },
+  liquidcool: {
+    title: "液冷散热系统产业链加工流程",
+    intro:
+      "AI服务器功耗极高（单台GB200机柜超过120kW），传统风冷已无法满足散热需求，液冷是GB200等高密度算力设备的标配散热方案。",
+    layers: [
+      {
+        label: "L0 液冷材料/管路",
+        what: "生产冷却液（水基/氟化液）、快接接头、液冷管路等原材料",
+        why: "氟化液是浸没液冷的核心介质，需要绝缘、不燃且与电子元件相容",
+      },
+      {
+        label: "L1 冷板/CDU组件",
+        what: "制造贴合GPU的冷板散热器和冷却分配单元（CDU）",
+        why: "冷板贴合GPU表面带走热量，CDU负责调节冷却液温度和流量",
+      },
+      {
+        label: "L2 液冷系统集成",
+        what: "将冷板+CDU+管路+监控系统集成为完整的机柜液冷解决方案",
+        why: "GB200 NVL72机柜需要专门设计的液冷分配系统，散热功率超过100kW",
+      },
+      {
+        label: "L3 终端交付",
+        what: "工业富联等ODM将液冷系统与GPU服务器集成后交付IDC运营商",
+        why: "液冷相比风冷可降低数据中心PUE至1.1以下，大幅降低运营成本",
+      },
+    ],
+  },
+  aipower: {
+    title: "AI供配电（PSU/BBU/HVDC）产业链加工流程",
+    intro:
+      "为AI服务器机柜提供稳定可靠的电力是一大挑战。GB200机柜单柜功耗高达120kW，需要完整的供配电链路从电网到每颗GPU的每瓦功率。",
+    layers: [
+      {
+        label: "L0 核心原材料",
+        what: "IGBT/SiC功率模块、电解电容、驱动IC等电源核心器件",
+        why: "IGBT是电源转换的核心开关器件，SiC相比Si可在更高频率和温度下工作",
+      },
+      {
+        label: "L1 关键电源模块",
+        what: "将功率器件组合成服务器PSU（电源供应单元）和BBU（后备电池）",
+        why: "GB200每台服务器需要多个PSU并联，保证高功率密度下的稳定供电",
+      },
+      {
+        label: "L2 供配电系统集成",
+        what: "集成PSU/UPS/HVDC构成数据中心完整供配电解决方案",
+        why: "HVDC（高压直流）相比传统AC供电减少2次转换，效率提升约5-8%",
+      },
+      {
+        label: "L3 终端客户",
+        what: "IDC运营商（润泽/奥飞）将供配电系统部署在机房中为GPU集群供电",
+        why: "一个万卡GPU集群的用电量相当于一座小型城市，供配电可靠性至关重要",
+      },
+    ],
+  },
+  coppercable: {
+    title: "高速铜连接（DAC/AEC）产业链加工流程",
+    intro:
+      "DAC铜缆是GPU机柜内短距高速互联的最经济方案，在3米以内比光模块成本低70%，是NVLink机柜内部GPU互联的主要选择。",
+    layers: [
+      {
+        label: "L0 原材料",
+        what: "高纯铜杆、屏蔽材料、高速连接器等铜缆原材料",
+        why: "AI服务器铜缆传输速率400G~800G，对铜材纯度和屏蔽设计要求极高",
+      },
+      {
+        label: "L1 线缆/连接器制造",
+        what: "拉制高速同轴铜缆，制造高速QSFP/OSFP连接器",
+        why: "连接器的插拔次数、信号完整性是规格要求中最严苛的部分",
+      },
+      {
+        label: "L2 高速互联模组",
+        what: "将铜缆+连接器+信号处理芯片集成为DAC/AEC高速线缆组件",
+        why: "AEC（主动铜缆）内置均衡芯片，可将有效传输距离延长到7米以上",
+      },
+      {
+        label: "L3 终端客户",
+        what: "英伟达NVL72机柜用DAC铜缆连接72块GPU与NVSwitch交换芯片",
+        why: "一个NVL72机柜内部需要数百根DAC铜缆，总带宽超过57.6Tb/s",
+      },
+    ],
+  },
+  idc: {
+    title: "智算中心/IDC产业链运营流程",
+    intro:
+      "智算中心是AI算力的物理载体，将土地、电力、网络、设备整合为可租用的算力服务，是AI大模型训练和推理的基础设施。",
+    layers: [
+      {
+        label: "L0 基础设施建设",
+        what: "选址、土地获取、变电站建设、网络接入等前期工程",
+        why: "IDC选址需同时满足低电价、充足电力容量、低自然灾害风险等条件",
+      },
+      {
+        label: "L1 机房配套设备",
+        what: "UPS不间断电源、精密空调/液冷、网络安全设备等机房设备采购安装",
+        why: "AI IDC的PUE目标为1.2以下，配套设备效率直接决定运营成本",
+      },
+      {
+        label: "L2 智算中心运营",
+        what: "采购GPU服务器，搭建网络互联，运营IDC并对外提供算力租用",
+        why: "万卡集群的网络拓扑和调度系统复杂度不亚于GPU本身的技术难度",
+      },
+      {
+        label: "L3 算力服务客户",
+        what: "AI公司、云厂商通过租用算力训练大模型或运行推理服务",
+        why: "一次GPT级大模型训练需要连续占用千卡级GPU数周，算力成本数千万",
+      },
+    ],
+  },
+  glasssub: {
+    title: "玻璃基板（半导体封装/面板）产业链加工流程",
+    intro:
+      "玻璃基板是下一代半导体先进封装的关键材料，相比传统有机基板尺寸更大、翘曲更低、布线更精细，有望成为AI芯片封装的革命性材料。",
+    layers: [
+      {
+        label: "上游原料/设备",
+        what: "高纯石英砂、特种玻璃原料、玻璃熔化设备等基础材料",
+        why: "半导体封装玻璃基板对表面平整度要求达到纳米级，原料纯度至关重要",
+      },
+      {
+        label: "玻璃基板制造",
+        what: "熔化→成型→研磨→抛光→切割制成高精度玻璃基板",
+        why: "玻璃基板的热膨胀系数与硅芯片接近，可大幅降低封装应力和翘曲",
+      },
+      {
+        label: "下游封装/面板",
+        what: "在玻璃基板上制作线路层，封装GPU等芯片；或用于OLED/LCD面板",
+        why: "玻璃基板封装可实现比ABF有机基板更细的线路，支持更多GPU芯片集成",
+      },
+      {
+        label: "终端应用",
+        what: "AI芯片、智能手机屏幕、平板电脑等消费电子终端应用",
+        why: "英特尔已宣布2026年量产玻璃基板封装芯片，英伟达等正在评估导入计划",
+      },
+    ],
+  },
+  aiserver: {
+    title: "AI服务器整机产业链组装流程",
+    intro:
+      "AI服务器整机是将GPU、内存、PCB、液冷等所有零部件集成为可运行AI任务的完整计算设备，工业富联等ODM是这个环节的核心执行者。",
+    layers: [
+      {
+        label: "L0 核心零部件",
+        what: "GPU芯片、HBM内存、AI服务器PCB、光模块、铜缆等关键零件",
+        why: "AI服务器的90%价值集中在GPU等核心零部件，整机组装是最后一公里",
+      },
+      {
+        label: "L1 ODM/代工制造",
+        what: "按英伟达MGX规格将所有零件组装、测试为完整AI服务器",
+        why: "GB200服务器组装精度要求极高，液冷接头和GPU热界面处理是关键工序",
+      },
+      {
+        label: "L2 品牌整机",
+        what: "以品牌形式交付整机，或进一步集成为DGX/HGX超级计算机系统",
+        why: "DGX SuperPOD将256块B200 GPU通过NVLink互联，是最高规格AI计算单元",
+      },
+      {
+        label: "L3 终端客户",
+        what: "云厂商、AI公司、政府算力中心部署AI服务器运行大模型",
+        why: "字节跳动2024年采购了价值数百亿的AI服务器，是全球最大单一买家之一",
+      },
+    ],
+  },
+  semieq: {
+    title: "半导体设备产业链供应流程",
+    intro:
+      '半导体设备是芯片制造的"母机"，没有光刻机、刻蚀机就无法制造GPU芯片。AI算力需求爆发直接拉动了先进制程设备的强劲需求。',
+    layers: [
+      {
+        label: "L0 关键零部件/材料",
+        what: "石英件、靶材、特种气体、CMP耗材等设备核心零部件",
+        why: "一台刻蚀机包含数万个精密零件，石英腔体需要定期更换，是耗材大项",
+      },
+      {
+        label: "L1 设备整机",
+        what: "光刻机、刻蚀机、CVD/PVD、CMP等半导体制造设备",
+        why: "ASML EUV光刻机单台售价1.5亿美元，全球只有ASML能生产，是最卡脖子的设备",
+      },
+      {
+        label: "L2 晶圆制造/封装应用",
+        what: "晶圆厂使用设备对硅片进行数百道工序，制造芯片晶圆",
+        why: "先进制程AI芯片需要ASML EUV曝光超过100层，每道工序都需要特定设备",
+      },
+      {
+        label: "L3 终端芯片客户",
+        what: "英伟达/AMD等芯片公司通过台积电代工，获得最终AI芯片产品",
+        why: "台积电3nm工厂的设备投资超过200亿美元，是全球制造业最密集的投资之一",
+      },
+    ],
+  },
+};
+
 function ProcessFlowView({
   nodes,
   selectedId,
@@ -372,6 +748,7 @@ function ProcessFlowView({
   layerLabels,
   perfData,
   liveQuotes,
+  industryId,
 }: {
   nodes: ComponentNode[];
   selectedId: string | null;
@@ -379,10 +756,12 @@ function ProcessFlowView({
   layerLabels: string[];
   perfData: Record<string, { ytd: number | null; m5: number | null }>;
   liveQuotes: Record<string, LiveQuote>;
+  industryId?: string;
 }) {
   const { theme } = useTheme();
   const isLight = theme === "light";
   const [zoom, setZoom] = React.useState(1);
+  const [showGuide, setShowGuide] = React.useState(false);
   const containerRef = React.useRef<HTMLDivElement>(null);
   const startTimeRef = React.useRef(Date.now());
   const frameRef = React.useRef<number | undefined>(undefined);
@@ -508,7 +887,51 @@ function ProcessFlowView({
         <span className="text-xs text-[var(--text-tertiary)]">
           3D加工流程图 · 点击节点查看 A 股龙头企业 · Ctrl+滚轮缩放
         </span>
-        <div className="ml-auto flex items-center gap-3">
+        <div className="ml-auto flex items-center gap-4">
+          {industryId && INDUSTRY_GUIDE[industryId] && (
+            <button
+              onClick={() => setShowGuide(true)}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 5,
+                padding: "4px 10px",
+                borderRadius: 6,
+                border: `1px solid ${isLight ? "#e2e8f0" : "#334155"}`,
+                background: isLight ? "#f8fafc" : "#1e293b",
+                color: isLight ? "#475569" : "#94a3b8",
+                fontSize: 12,
+                cursor: "pointer",
+                fontFamily: "monospace",
+                transition: "all 0.15s",
+              }}
+              onMouseEnter={(e) => {
+                (e.currentTarget as HTMLButtonElement).style.borderColor =
+                  "#3b82f6";
+                (e.currentTarget as HTMLButtonElement).style.color = "#3b82f6";
+              }}
+              onMouseLeave={(e) => {
+                (e.currentTarget as HTMLButtonElement).style.borderColor =
+                  isLight ? "#e2e8f0" : "#334155";
+                (e.currentTarget as HTMLButtonElement).style.color = isLight
+                  ? "#475569"
+                  : "#94a3b8";
+              }}
+            >
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <circle cx="12" cy="12" r="10" />
+                <path d="M12 16v-4M12 8h.01" />
+              </svg>
+              流程说明
+            </button>
+          )}
           {layers.map((layer, i) => (
             <div key={i} className="flex items-center gap-1">
               <div
@@ -522,6 +945,282 @@ function ProcessFlowView({
           ))}
         </div>
       </div>
+
+      {showGuide &&
+        industryId &&
+        INDUSTRY_GUIDE[industryId] &&
+        (() => {
+          const guide = INDUSTRY_GUIDE[industryId];
+          const layerColors = [
+            "#3b82f6",
+            "#06b6d4",
+            "#f5a623",
+            "#10b981",
+            "#8b5cf6",
+          ];
+          return (
+            <div
+              style={{
+                position: "fixed",
+                inset: 0,
+                zIndex: 1000,
+                background: "rgba(0,0,0,0.55)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                backdropFilter: "blur(4px)",
+              }}
+              onClick={() => setShowGuide(false)}
+            >
+              <div
+                style={{
+                  background: isLight ? "#ffffff" : "#0f172a",
+                  border: `1px solid ${isLight ? "#e2e8f0" : "#1e293b"}`,
+                  borderRadius: 16,
+                  width: "min(860px, 92vw)",
+                  maxHeight: "85vh",
+                  overflowY: "auto",
+                  padding: "32px 36px",
+                  position: "relative",
+                  boxShadow: "0 25px 60px rgba(0,0,0,0.4)",
+                }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <button
+                  onClick={() => setShowGuide(false)}
+                  style={{
+                    position: "absolute",
+                    top: 16,
+                    right: 16,
+                    width: 28,
+                    height: 28,
+                    borderRadius: 8,
+                    border: "none",
+                    background: isLight ? "#f1f5f9" : "#1e293b",
+                    color: isLight ? "#64748b" : "#94a3b8",
+                    cursor: "pointer",
+                    fontSize: 16,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  ×
+                </button>
+
+                <div style={{ marginBottom: 20 }}>
+                  <div
+                    style={{
+                      fontSize: 18,
+                      fontWeight: 700,
+                      color: isLight ? "#0f172a" : "#f1f5f9",
+                      marginBottom: 8,
+                    }}
+                  >
+                    {guide.title}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 13,
+                      color: isLight ? "#64748b" : "#94a3b8",
+                      lineHeight: 1.7,
+                    }}
+                  >
+                    {guide.intro}
+                  </div>
+                </div>
+
+                <div
+                  style={{ display: "flex", gap: 24, alignItems: "flex-start" }}
+                >
+                  {/* 左侧：流程示意图 */}
+                  <div style={{ flexShrink: 0, width: 160 }}>
+                    <div
+                      style={{
+                        fontSize: 11,
+                        color: isLight ? "#94a3b8" : "#475569",
+                        marginBottom: 10,
+                        fontWeight: 600,
+                        letterSpacing: "0.05em",
+                      }}
+                    >
+                      加工流程
+                    </div>
+                    {guide.layers.map((layer, i) => (
+                      <div
+                        key={i}
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          alignItems: "center",
+                        }}
+                      >
+                        <div
+                          style={{
+                            width: "100%",
+                            padding: "8px 12px",
+                            borderRadius: 8,
+                            background: `${layerColors[i] ?? "#888"}18`,
+                            border: `1.5px solid ${layerColors[i] ?? "#888"}55`,
+                            textAlign: "center",
+                          }}
+                        >
+                          <div
+                            style={{
+                              fontSize: 10,
+                              fontWeight: 700,
+                              color: layerColors[i] ?? "#888",
+                              marginBottom: 2,
+                            }}
+                          >
+                            {layer.label.split(" ")[0]}
+                          </div>
+                          <div
+                            style={{
+                              fontSize: 10,
+                              color: isLight ? "#475569" : "#94a3b8",
+                              lineHeight: 1.3,
+                            }}
+                          >
+                            {layer.label.split(" ").slice(1).join(" ")}
+                          </div>
+                        </div>
+                        {i < guide.layers.length - 1 && (
+                          <div
+                            style={{
+                              display: "flex",
+                              flexDirection: "column",
+                              alignItems: "center",
+                              padding: "2px 0",
+                            }}
+                          >
+                            <div
+                              style={{
+                                width: 2,
+                                height: 8,
+                                background: `${layerColors[i] ?? "#888"}60`,
+                              }}
+                            />
+                            <svg width="10" height="6" viewBox="0 0 10 6">
+                              <path
+                                d="M5 6L0 0h10z"
+                                fill={`${layerColors[i + 1] ?? "#888"}80`}
+                              />
+                            </svg>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* 右侧：逐层说明 */}
+                  <div
+                    style={{
+                      flex: 1,
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 12,
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: 11,
+                        color: isLight ? "#94a3b8" : "#475569",
+                        marginBottom: 2,
+                        fontWeight: 600,
+                        letterSpacing: "0.05em",
+                      }}
+                    >
+                      每个环节详解
+                    </div>
+                    {guide.layers.map((layer, i) => (
+                      <div
+                        key={i}
+                        style={{
+                          padding: "14px 16px",
+                          borderRadius: 10,
+                          background: isLight ? "#f8fafc" : "#1e293b",
+                          borderLeft: `3px solid ${layerColors[i] ?? "#888"}`,
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 8,
+                            marginBottom: 6,
+                          }}
+                        >
+                          <div
+                            style={{
+                              width: 20,
+                              height: 20,
+                              borderRadius: 5,
+                              background: `${layerColors[i] ?? "#888"}22`,
+                              border: `1px solid ${layerColors[i] ?? "#888"}55`,
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              fontSize: 10,
+                              fontWeight: 800,
+                              color: layerColors[i] ?? "#888",
+                            }}
+                          >
+                            {layer.label.split(" ")[0]}
+                          </div>
+                          <span
+                            style={{
+                              fontSize: 13,
+                              fontWeight: 600,
+                              color: isLight ? "#1e293b" : "#e2e8f0",
+                            }}
+                          >
+                            {layer.label.split(" ").slice(1).join(" ")}
+                          </span>
+                        </div>
+                        <div
+                          style={{
+                            fontSize: 12,
+                            color: isLight ? "#374151" : "#cbd5e1",
+                            lineHeight: 1.65,
+                            marginBottom: 6,
+                          }}
+                        >
+                          <span
+                            style={{
+                              fontWeight: 600,
+                              color: isLight ? "#0f172a" : "#f1f5f9",
+                            }}
+                          >
+                            做什么：
+                          </span>
+                          {layer.what}
+                        </div>
+                        <div
+                          style={{
+                            fontSize: 12,
+                            color: isLight ? "#6b7280" : "#94a3b8",
+                            lineHeight: 1.65,
+                          }}
+                        >
+                          <span
+                            style={{
+                              fontWeight: 600,
+                              color: layerColors[i] ?? "#888",
+                            }}
+                          >
+                            为什么重要：
+                          </span>
+                          {layer.why}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
       <div ref={containerRef} className="flex-1 relative overflow-hidden">
         <div
@@ -5207,6 +5906,7 @@ export default function IndustryCanvasPage() {
             layerLabels={flowLayerLabels}
             perfData={perfData}
             liveQuotes={liveQuotes}
+            industryId={industryId}
           />
         )}
 
@@ -5248,7 +5948,9 @@ export default function IndustryCanvasPage() {
                   liveQuotes={liveQuotes}
                   onOverride={handleOverride}
                   onClose={() => setSelectedId(null)}
-                  onNavigate={(code) => router.push(`/stock/${code}`)}
+                  onNavigate={(code) =>
+                    router.push(`/stock/${code}?from=/industry/${industryId}`)
+                  }
                   quickItems={quickItems}
                   onSelectQuick={setSelectedId}
                   relatedItems={relatedItems}
@@ -5295,7 +5997,9 @@ export default function IndustryCanvasPage() {
                   liveQuotes={liveQuotes}
                   onOverride={handleOverride}
                   onClose={() => setSelectedId(null)}
-                  onNavigate={(code) => router.push(`/stock/${code}`)}
+                  onNavigate={(code) =>
+                    router.push(`/stock/${code}?from=/industry/${industryId}`)
+                  }
                   quickItems={[]}
                   onSelectQuick={setSelectedId}
                   relatedItems={relatedItems}

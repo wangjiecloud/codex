@@ -4,11 +4,14 @@ from sqlalchemy import (
     String,
     Float,
     Integer,
+    Numeric,
     Text,
     DateTime,
     UniqueConstraint,
     text,
 )
+
+_P = Numeric(18, 4, asdecimal=False)
 from sqlalchemy.orm import declarative_base, sessionmaker
 from datetime import datetime
 
@@ -26,6 +29,7 @@ from sqlalchemy import event
 def set_wal_mode(dbapi_conn, connection_record):
     dbapi_conn.execute("PRAGMA journal_mode=WAL")
     dbapi_conn.execute("PRAGMA synchronous=NORMAL")
+    dbapi_conn.execute("PRAGMA busy_timeout=15000")
 
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -45,20 +49,20 @@ class StockQuote(Base):
     __tablename__ = "stock_quote"
     code = Column(String(10), primary_key=True)
     name = Column(String(50))
-    price = Column(Float)
-    change = Column(Float)
-    change_amt = Column(Float)
-    open = Column(Float)
-    prev_close = Column(Float)
-    high = Column(Float)
-    low = Column(Float)
+    price = Column(_P)
+    change = Column(_P)
+    change_amt = Column(_P)
+    open = Column(_P)
+    prev_close = Column(_P)
+    high = Column(_P)
+    low = Column(_P)
     volume = Column(Float)
     turnover = Column(Float)
-    market_cap = Column(Float)
-    pe = Column(Float)
-    pb = Column(Float)
-    turnover_rate = Column(Float)
-    amplitude = Column(Float)
+    market_cap = Column(_P)
+    pe = Column(_P)
+    pb = Column(_P)
+    turnover_rate = Column(_P)
+    amplitude = Column(_P)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
@@ -68,14 +72,14 @@ class StockKline(Base):
     code = Column(String(10), index=True)
     period = Column(String(10))
     trade_date = Column(String(10))
-    open = Column(Float)
-    high = Column(Float)
-    low = Column(Float)
-    close = Column(Float)
+    open = Column(_P)
+    high = Column(_P)
+    low = Column(_P)
+    close = Column(_P)
     volume = Column(Integer)
     turnover = Column(Float)
-    change_pct = Column(Float)
-    turn_rate = Column(Float)
+    change_pct = Column(_P)
+    turn_rate = Column(_P)
     updated_at = Column(DateTime, default=datetime.utcnow)
     __table_args__ = (UniqueConstraint("code", "period", "trade_date"),)
 
@@ -200,15 +204,15 @@ class ConceptBoard(Base):
     __tablename__ = "concept_board"
     code = Column(String(20), primary_key=True)
     name = Column(String(100))
-    change_pct = Column(Float)
-    change_amt = Column(Float)
-    price = Column(Float)
+    change_pct = Column(_P)
+    change_amt = Column(_P)
+    price = Column(_P)
     volume = Column(Float)
     turnover = Column(Float)
     rise_count = Column(Integer, default=0)
     fall_count = Column(Integer, default=0)
     lead_stock = Column(String(50), default="")
-    lead_stock_pct = Column(Float, default=0.0)
+    lead_stock_pct = Column(_P, default=0.0)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
@@ -218,16 +222,39 @@ class GlobalMarketIndex(Base):
     __tablename__ = "global_market_index"
     code = Column(String(20), primary_key=True)
     name = Column(String(100))
-    region = Column(String(20))  # cn / us / eu / asia / other
-    price = Column(Float)
-    change_amt = Column(Float)
-    change_pct = Column(Float)
-    open = Column(Float)
-    high = Column(Float)
-    low = Column(Float)
-    prev_close = Column(Float)
-    market_time = Column(String(30))  # 最新行情时间
+    region = Column(String(20))
+    price = Column(_P)
+    change_amt = Column(_P)
+    change_pct = Column(_P)
+    open = Column(_P)
+    high = Column(_P)
+    low = Column(_P)
+    prev_close = Column(_P)
+    market_time = Column(String(30))
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class PortfolioHolding(Base):
+    __tablename__ = "portfolio_holding"
+    id = Column(String(50), primary_key=True)
+    code = Column(String(10), index=True)
+    name = Column(String(50))
+    cost_price = Column(_P)
+    shares = Column(Integer)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class PortfolioTrade(Base):
+    __tablename__ = "portfolio_trade"
+    id = Column(String(50), primary_key=True)
+    holding_id = Column(String(50), index=True)
+    trade_type = Column(String(10))
+    trade_date = Column(String(20))
+    price = Column(_P)
+    shares = Column(Integer)
+    note = Column(Text, default="")
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 
 def get_db():

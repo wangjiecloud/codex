@@ -55,15 +55,15 @@ def sync_concept_boards() -> int:
                 stmt = sqlite_insert(ConceptBoard).values(
                     code=code,
                     name=str(it.get("f14", "")),
-                    change_pct=_safe_float(it.get("f3")),
-                    change_amt=_safe_float(it.get("f4")),
-                    price=_safe_float(it.get("f2")),
+                    change_pct=round(_safe_float(it.get("f3")), 4),
+                    change_amt=round(_safe_float(it.get("f4")), 4),
+                    price=round(_safe_float(it.get("f2")), 4),
                     volume=_safe_float(it.get("f5")),
                     turnover=_safe_float(it.get("f6")),
                     rise_count=int(_safe_float(it.get("f207", 0))),
                     fall_count=int(_safe_float(it.get("f208", 0))),
                     lead_stock=str(it.get("f128", "")),
-                    lead_stock_pct=_safe_float(it.get("f136")),
+                    lead_stock_pct=round(_safe_float(it.get("f136")), 4),
                     updated_at=datetime.utcnow(),
                 )
                 stmt = stmt.on_conflict_do_update(

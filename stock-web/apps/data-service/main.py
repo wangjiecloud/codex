@@ -13,6 +13,7 @@ from routers import (
     news_flash,
     concept_board,
     theme,
+    portfolio,
 )
 import akshare as ak
 from fastapi import HTTPException
@@ -43,6 +44,7 @@ app.include_router(global_market.router, prefix="/api/global", tags=["全球市�
 app.include_router(news_flash.router, prefix="/api/flash", tags=["快讯"])
 app.include_router(concept_board.router, prefix="/api/board", tags=["概念板块"])
 app.include_router(theme.router, prefix="/api/theme", tags=["主题板块"])
+app.include_router(portfolio.router, prefix="/api/portfolio", tags=["持仓管理"])
 
 _scheduler = BackgroundScheduler(timezone="Asia/Shanghai")
 
@@ -100,7 +102,13 @@ def startup():
     now = datetime.now().time()
     if now >= dtime(17, 30):
         print("[startup] after 17:30 — triggering immediate full sync")
-        threading.Thread(target=industry.sync_all_data, daemon=True).start()
+        from routers.sync import _run_full_sync, _status, _lock
+
+        with _lock:
+            if not _status["running"]:
+                threading.Thread(target=_run_full_sync, daemon=True).start()
+            else:
+                print("[startup] sync already running, skipping startup sync")
     elif now >= dtime(15, 0):
         print(f"[startup] {now.strftime('%H:%M')} — market closed, syncing quotes only")
         threading.Thread(target=industry._sync_all_quotes, daemon=True).start()

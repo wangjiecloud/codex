@@ -3,9 +3,6 @@
 import { useState, useEffect, useRef } from "react";
 import {
   Lock,
-  Unlock,
-  Eye,
-  EyeOff,
   Plus,
   Trash2,
   TrendingUp,
@@ -16,6 +13,7 @@ import {
   ChevronDown,
   ChevronRight,
   Edit2,
+  Search,
 } from "lucide-react";
 import { cn, getPriceColor, formatPercent } from "@/lib/utils";
 
@@ -43,12 +41,89 @@ interface HoldingStock {
   trades: TradeRecord[];
 }
 
-const PORTFOLIO_KEY = "portfolio_holdings";
+const API = "http://localhost:8000/api/portfolio";
 const PASSWORD = "111";
 
 /* ─────────────────────────────────────────────
-   Helpers
+   API helpers
 ───────────────────────────────────────────── */
+async function apiFetchHoldings(): Promise<HoldingStock[]> {
+  const r = await fetch(API);
+  const rows: Array<{
+    id: string;
+    code: string;
+    name: string;
+    costPrice: number;
+    shares: number;
+    trades: Array<{
+      id: string;
+      type: string;
+      date: string;
+      price: number;
+      shares: number;
+      note: string;
+    }>;
+  }> = await r.json();
+  return rows.map((h) => ({
+    id: h.id,
+    code: h.code,
+    name: h.name,
+    costPrice: h.costPrice,
+    shares: h.shares,
+    trades: h.trades.map((t) => ({
+      id: t.id,
+      type: t.type as "buy" | "sell",
+      date: t.date,
+      price: t.price,
+      shares: t.shares,
+      note: t.note,
+    })),
+  }));
+}
+
+async function apiUpsertHolding(s: HoldingStock) {
+  await fetch(API, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      id: s.id,
+      code: s.code,
+      name: s.name,
+      cost_price: s.costPrice,
+      shares: s.shares,
+    }),
+  });
+}
+
+async function apiDeleteHolding(id: string) {
+  await fetch(`${API}/${id}`, { method: "DELETE" });
+}
+
+async function apiAddTrade(holdingId: string, t: TradeRecord) {
+  await fetch(`${API}/${holdingId}/trades`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      id: t.id,
+      holding_id: holdingId,
+      trade_type: t.type,
+      trade_date: t.date,
+      price: t.price,
+      shares: t.shares,
+      note: t.note,
+    }),
+  });
+}
+
+async function apiDeleteTrade(holdingId: string, tradeId: string) {
+  await fetch(`${API}/${holdingId}/trades/${tradeId}`, { method: "DELETE" });
+}
+
+function formatMoney(n: number): string {
+  if (Math.abs(n) >= 10000) return (n / 10000).toFixed(2) + "万";
+  return n.toFixed(2);
+}
+
 function calcPnl(stock: HoldingStock): {
   pnl: number;
   pnlPct: number;
@@ -61,28 +136,6 @@ function calcPnl(stock: HoldingStock): {
   const pnl = marketValue - costValue;
   const pnlPct = costValue > 0 ? (pnl / costValue) * 100 : 0;
   return { pnl, pnlPct, marketValue, costValue };
-}
-
-function loadHoldings(): HoldingStock[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const stored = localStorage.getItem(PORTFOLIO_KEY);
-    return stored ? JSON.parse(stored) : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveHoldings(holdings: HoldingStock[]) {
-  if (typeof window === "undefined") return;
-  try {
-    localStorage.setItem(PORTFOLIO_KEY, JSON.stringify(holdings));
-  } catch {}
-}
-
-function formatMoney(n: number): string {
-  if (Math.abs(n) >= 10000) return (n / 10000).toFixed(2) + "万";
-  return n.toFixed(2);
 }
 
 /* ─────────────────────────────────────────────
@@ -179,6 +232,11 @@ function PasswordModal({
 /* ─────────────────────────────────────────────
    Add / Edit Holding Modal
 ───────────────────────────────────────────── */
+interface StockOption {
+  code: string;
+  name: string;
+}
+
 interface HoldingFormProps {
   initial?: HoldingStock;
   onSave: (stock: HoldingStock) => void;
@@ -195,12 +253,68 @@ function HoldingFormModal({ initial, onSave, onClose }: HoldingFormProps) {
     initial?.shares ? String(initial.shares) : "",
   );
 
+  const [searchQuery, setSearchQuery] = useState(
+    initial ? `${initial.code} ${initial.name}` : "",
+  );
+  const [dropdownResults, setDropdownResults] = useState<StockOption[]>([]);
+  const [showDropdown, setShowDropdown] = useState(false);
+  const [activeIdx, setActiveIdx] = useState(0);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (initial) return;
+    const q = searchQuery.trim();
+    if (!q) {
+      setDropdownResults([]);
+      setShowDropdown(false);
+      return;
+    }
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(() => {
+      fetch(`http://localhost:8000/api/quote/search?q=${encodeURIComponent(q)}`)
+        .then((r) => r.json())
+        .then((d) => {
+          setDropdownResults(d.results ?? []);
+          setShowDropdown((d.results ?? []).length > 0);
+          setActiveIdx(0);
+        })
+        .catch(() => {});
+    }, 150);
+    return () => {
+      if (searchTimer.current) clearTimeout(searchTimer.current);
+    };
+  }, [searchQuery, initial]);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        searchRef.current &&
+        !searchRef.current.contains(e.target as Node) &&
+        dropdownRef.current &&
+        !dropdownRef.current.contains(e.target as Node)
+      ) {
+        setShowDropdown(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const selectStock = (stock: StockOption) => {
+    setCode(stock.code);
+    setName(stock.name);
+    setSearchQuery(`${stock.code} ${stock.name}`);
+    setShowDropdown(false);
+  };
+
   const handleSave = () => {
     const cp = parseFloat(costPrice);
     const sh = parseInt(shares);
     if (!code.trim() || isNaN(cp) || isNaN(sh) || cp <= 0 || sh <= 0) return;
 
-    const stock: HoldingStock = {
+    onSave({
       id: initial?.id ?? `holding-${Date.now()}`,
       code: code.trim(),
       name: name.trim() || code.trim(),
@@ -208,8 +322,7 @@ function HoldingFormModal({ initial, onSave, onClose }: HoldingFormProps) {
       shares: sh,
       currentPrice: initial?.currentPrice,
       trades: initial?.trades ?? [],
-    };
-    onSave(stock);
+    });
   };
 
   return (
@@ -224,59 +337,149 @@ function HoldingFormModal({ initial, onSave, onClose }: HoldingFormProps) {
         <h3 className="text-[13px] font-semibold text-[var(--text-primary)]">
           {initial ? "编辑持仓" : "添加持仓"}
         </h3>
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="text-[11px] text-[var(--text-tertiary)] block mb-1">
-              股票代码 *
-            </label>
-            <input
-              className="w-full px-3 py-2 rounded-lg bg-[var(--bg-tertiary)] border border-[var(--border-color)] text-[var(--text-primary)] text-[12px] outline-none focus:border-[var(--accent)]"
-              placeholder="如 002463"
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-              disabled={!!initial}
-            />
-          </div>
-          <div>
-            <label className="text-[11px] text-[var(--text-tertiary)] block mb-1">
-              股票名称
-            </label>
-            <input
-              className="w-full px-3 py-2 rounded-lg bg-[var(--bg-tertiary)] border border-[var(--border-color)] text-[var(--text-primary)] text-[12px] outline-none focus:border-[var(--accent)]"
-              placeholder="如 沪电股份"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-            />
-          </div>
-          <div>
-            <label className="text-[11px] text-[var(--text-tertiary)] block mb-1">
-              成本价 (元) *
-            </label>
-            <input
-              className="w-full px-3 py-2 rounded-lg bg-[var(--bg-tertiary)] border border-[var(--border-color)] text-[var(--text-primary)] text-[12px] font-mono outline-none focus:border-[var(--accent)]"
-              placeholder="0.00"
-              type="number"
-              min="0"
-              step="0.001"
-              value={costPrice}
-              onChange={(e) => setCostPrice(e.target.value)}
-            />
-          </div>
-          <div>
-            <label className="text-[11px] text-[var(--text-tertiary)] block mb-1">
-              持仓股数 *
-            </label>
-            <input
-              className="w-full px-3 py-2 rounded-lg bg-[var(--bg-tertiary)] border border-[var(--border-color)] text-[var(--text-primary)] text-[12px] font-mono outline-none focus:border-[var(--accent)]"
-              placeholder="100"
-              type="number"
-              min="1"
-              step="100"
-              value={shares}
-              onChange={(e) => setShares(e.target.value)}
-            />
+
+        <div className="space-y-3">
+          {!initial ? (
+            <div>
+              <label className="text-[11px] text-[var(--text-tertiary)] block mb-1">
+                搜索股票 *
+              </label>
+              <div className="relative">
+                <Search
+                  size={13}
+                  className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)] pointer-events-none"
+                />
+                <input
+                  ref={searchRef}
+                  className="w-full pl-8 pr-7 py-2 rounded-lg bg-[var(--bg-tertiary)] border border-[var(--border-color)] text-[var(--text-primary)] text-[12px] outline-none focus:border-[var(--accent)] transition-colors"
+                  placeholder="输入代码或名称，如 002463 或 沪电"
+                  value={searchQuery}
+                  onChange={(e) => {
+                    setSearchQuery(e.target.value);
+                    if (!e.target.value.trim()) {
+                      setCode("");
+                      setName("");
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "ArrowDown") {
+                      setActiveIdx((i) =>
+                        Math.min(i + 1, dropdownResults.length - 1),
+                      );
+                    } else if (e.key === "ArrowUp") {
+                      setActiveIdx((i) => Math.max(i - 1, 0));
+                    } else if (
+                      e.key === "Enter" &&
+                      dropdownResults.length > 0
+                    ) {
+                      selectStock(dropdownResults[activeIdx]);
+                    } else if (e.key === "Escape") {
+                      setShowDropdown(false);
+                    }
+                  }}
+                  onFocus={() =>
+                    dropdownResults.length > 0 && setShowDropdown(true)
+                  }
+                  autoFocus
+                />
+                {searchQuery && (
+                  <button
+                    onClick={() => {
+                      setSearchQuery("");
+                      setCode("");
+                      setName("");
+                      setShowDropdown(false);
+                      searchRef.current?.focus();
+                    }}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]"
+                  >
+                    <X size={12} />
+                  </button>
+                )}
+                {showDropdown && dropdownResults.length > 0 && (
+                  <div
+                    ref={dropdownRef}
+                    className="absolute top-full mt-1 left-0 right-0 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg shadow-2xl z-50 max-h-52 overflow-y-auto"
+                  >
+                    {dropdownResults.map((stock, idx) => (
+                      <button
+                        key={stock.code}
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          selectStock(stock);
+                        }}
+                        className={cn(
+                          "w-full flex items-center justify-between px-3 py-2 text-left text-[12px] transition-colors",
+                          idx === activeIdx
+                            ? "bg-[var(--accent)]/15 text-[var(--text-primary)]"
+                            : "hover:bg-[var(--bg-hover)] text-[var(--text-secondary)]",
+                        )}
+                      >
+                        <span className="text-[var(--text-primary)]">
+                          {stock.name}
+                        </span>
+                        <span className="font-mono text-[11px] text-[var(--text-tertiary)]">
+                          {stock.code}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              {code && (
+                <div className="mt-1.5 flex items-center gap-2 text-[11px] text-[var(--text-tertiary)]">
+                  <span className="text-[var(--accent)]">✓</span>
+                  已选：
+                  <span className="text-[var(--text-secondary)] font-medium">
+                    {name}
+                  </span>
+                  <span className="font-mono">{code}</span>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="flex items-center gap-3 px-3 py-2 rounded-lg bg-[var(--bg-tertiary)] border border-[var(--border-color)]">
+              <span className="text-[12px] font-medium text-[var(--text-primary)]">
+                {name}
+              </span>
+              <span className="text-[11px] font-mono text-[var(--text-tertiary)]">
+                {code}
+              </span>
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-[11px] text-[var(--text-tertiary)] block mb-1">
+                成本价 (元) *
+              </label>
+              <input
+                className="w-full px-3 py-2 rounded-lg bg-[var(--bg-tertiary)] border border-[var(--border-color)] text-[var(--text-primary)] text-[12px] font-mono outline-none focus:border-[var(--accent)]"
+                placeholder="0.0000"
+                type="number"
+                min="0"
+                step="0.0001"
+                value={costPrice}
+                onChange={(e) => setCostPrice(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="text-[11px] text-[var(--text-tertiary)] block mb-1">
+                持仓股数 *
+              </label>
+              <input
+                className="w-full px-3 py-2 rounded-lg bg-[var(--bg-tertiary)] border border-[var(--border-color)] text-[var(--text-primary)] text-[12px] font-mono outline-none focus:border-[var(--accent)]"
+                placeholder="100"
+                type="number"
+                min="1"
+                step="100"
+                value={shares}
+                onChange={(e) => setShares(e.target.value)}
+              />
+            </div>
           </div>
         </div>
+
         <div className="flex justify-end gap-2">
           <button
             onClick={onClose}
@@ -286,7 +489,8 @@ function HoldingFormModal({ initial, onSave, onClose }: HoldingFormProps) {
           </button>
           <button
             onClick={handleSave}
-            className="px-4 py-1.5 text-[12px] rounded-lg bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)]"
+            disabled={!code || !costPrice || !shares}
+            className="px-4 py-1.5 text-[12px] rounded-lg bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)] disabled:opacity-40 disabled:cursor-not-allowed"
           >
             保存
           </button>
@@ -330,6 +534,9 @@ function TradeFormModal({
       shares: sh,
       note: note.trim(),
     });
+    setPrice("");
+    setShares("");
+    setNote("");
   };
 
   return (
@@ -383,10 +590,10 @@ function TradeFormModal({
             </label>
             <input
               className="w-full px-3 py-2 rounded-lg bg-[var(--bg-tertiary)] border border-[var(--border-color)] text-[var(--text-primary)] text-[12px] font-mono outline-none focus:border-[var(--accent)]"
-              placeholder="0.00"
+              placeholder="0.0000"
               type="number"
               min="0"
-              step="0.001"
+              step="0.0001"
               value={price}
               onChange={(e) => setPrice(e.target.value)}
             />
@@ -507,14 +714,14 @@ function HoldingCard({
             <div>
               <span className="text-[var(--text-tertiary)]">成本 </span>
               <span className="text-[var(--text-secondary)] font-mono">
-                ¥{stock.costPrice.toFixed(3)}
+                ¥{stock.costPrice.toFixed(4)}
               </span>
             </div>
             {stock.currentPrice && (
               <div>
                 <span className="text-[var(--text-tertiary)]">现价 </span>
                 <span className={cn("font-mono", getPriceColor(pnlPct))}>
-                  ¥{stock.currentPrice.toFixed(3)}
+                  ¥{stock.currentPrice.toFixed(4)}
                 </span>
               </div>
             )}
@@ -655,7 +862,7 @@ function HoldingCard({
                         {trade.date}
                       </td>
                       <td className="px-3 py-1.5 text-right font-mono text-[var(--text-secondary)]">
-                        {trade.price.toFixed(3)}
+                        {trade.price.toFixed(4)}
                       </td>
                       <td className="px-3 py-1.5 text-right font-mono text-[var(--text-secondary)]">
                         {trade.shares.toLocaleString()}
@@ -765,6 +972,7 @@ function SummaryBar({
 ───────────────────────────────────────────── */
 export function PortfolioPanel() {
   const [holdings, setHoldings] = useState<HoldingStock[]>([]);
+  const [loading, setLoading] = useState(true);
   const [unlocked, setUnlocked] = useState(false);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [pendingAction, setPendingAction] = useState<(() => void) | null>(null);
@@ -777,35 +985,39 @@ export function PortfolioPanel() {
   );
 
   useEffect(() => {
-    setHoldings(loadHoldings());
+    apiFetchHoldings()
+      .then((data) => {
+        setHoldings(data);
+        setLoading(false);
+      })
+      .catch((e) => {
+        console.error("[portfolio] fetch failed:", e);
+        setLoading(false);
+      });
   }, []);
 
-  useEffect(() => {
-    if (holdings.length > 0 || localStorage.getItem(PORTFOLIO_KEY)) {
-      saveHoldings(holdings);
-    }
-  }, [holdings]);
+  const fetchCurrentPrices = async (targets: HoldingStock[]) => {
+    if (targets.length === 0) return;
+    try {
+      const codes = targets.map((s) => s.code).join(",");
+      const r = await fetch(
+        `http://localhost:8000/api/industry/stocks?codes=${codes}`,
+      );
+      const data = await r.json();
+      const quotes = data?.quotes ?? {};
+      setHoldings((prev) =>
+        prev.map((s) => {
+          const q = quotes[s.code];
+          return q && q.price > 0 ? { ...s, currentPrice: q.price } : s;
+        }),
+      );
+    } catch {}
+  };
 
-  // fetch current prices
   useEffect(() => {
-    holdings.forEach(async (stock) => {
-      try {
-        const r = await fetch(
-          `http://localhost:8000/api/kline/${stock.code}?period=daily&count=2`,
-        );
-        const data = await r.json();
-        const bars = Array.isArray(data) ? data : (data?.bars ?? []);
-        const last = bars[bars.length - 1];
-        if (last) {
-          setHoldings((prev) =>
-            prev.map((s) =>
-              s.code === stock.code ? { ...s, currentPrice: last.close } : s,
-            ),
-          );
-        }
-      } catch {}
-    });
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    if (holdings.length === 0) return;
+    fetchCurrentPrices(holdings);
+  }, [holdings.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const requireAuth = (action: () => void) => {
     if (unlocked) {
@@ -835,12 +1047,15 @@ export function PortfolioPanel() {
       if (exists) return prev.map((s) => (s.id === stock.id ? stock : s));
       return [...prev, stock];
     });
+    apiUpsertHolding(stock).catch(() => {});
+    fetchCurrentPrices([stock]);
     setShowAddHolding(false);
     setEditingHolding(null);
   };
 
   const handleDeleteHolding = (id: string) => {
     setHoldings((prev) => prev.filter((s) => s.id !== id));
+    apiDeleteHolding(id).catch(() => {});
   };
 
   const handleAddTrade = (trade: TradeRecord) => {
@@ -850,7 +1065,7 @@ export function PortfolioPanel() {
         s.id === addingTradeFor.id ? { ...s, trades: [...s.trades, trade] } : s,
       ),
     );
-    setAddingTradeFor(null);
+    apiAddTrade(addingTradeFor.id, trade).catch(() => {});
   };
 
   const handleDeleteTrade = (holdingId: string, tradeId: string) => {
@@ -861,6 +1076,7 @@ export function PortfolioPanel() {
           : s,
       ),
     );
+    apiDeleteTrade(holdingId, tradeId).catch(() => {});
   };
 
   const blurred = !unlocked;
@@ -873,42 +1089,28 @@ export function PortfolioPanel() {
           <span className="text-[13px] font-semibold text-[var(--text-primary)]">
             持仓管理
           </span>
-          <span
+          <button
+            onClick={() =>
+              unlocked ? handleLock() : setShowPasswordModal(true)
+            }
             className={cn(
               "flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium border transition-colors",
               unlocked
-                ? "text-[#09d464] border-[#09d464]/30 bg-[#09d464]/10"
-                : "text-[var(--text-tertiary)] border-[var(--border-color)] bg-[var(--bg-tertiary)]",
+                ? "text-[#09d464] border-[#09d464]/30 bg-[#09d464]/10 hover:bg-[#09d464]/20"
+                : "text-[var(--text-tertiary)] border-[var(--border-color)] bg-[var(--bg-tertiary)] hover:bg-[var(--bg-hover)]",
             )}
           >
-            {unlocked ? <Unlock size={9} /> : <Lock size={9} />}
+            {unlocked ? <Lock size={9} /> : <Lock size={9} />}
             {unlocked ? "已解锁" : "已锁定"}
-          </span>
+          </button>
         </div>
         <div className="flex items-center gap-2">
-          {unlocked ? (
-            <>
-              <button
-                onClick={() => setShowAddHolding(true)}
-                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[var(--accent)]/10 hover:bg-[var(--accent)]/20 text-[var(--accent)] text-[11px] border border-[var(--accent)]/30 transition-colors"
-              >
-                <Plus size={11} /> 添加持仓
-              </button>
-              <button
-                onClick={handleLock}
-                className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-[var(--border-color)] text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] text-[11px] hover:bg-[var(--bg-hover)] transition-colors"
-                title="锁定"
-              >
-                <Lock size={11} />
-                锁定
-              </button>
-            </>
-          ) : (
+          {unlocked && (
             <button
-              onClick={() => setShowPasswordModal(true)}
+              onClick={() => setShowAddHolding(true)}
               className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[var(--accent)]/10 hover:bg-[var(--accent)]/20 text-[var(--accent)] text-[11px] border border-[var(--accent)]/30 transition-colors"
             >
-              <Eye size={11} /> 查看
+              <Plus size={11} /> 添加持仓
             </button>
           )}
         </div>
@@ -921,7 +1123,12 @@ export function PortfolioPanel() {
 
       {/* Holdings list */}
       <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
-        {holdings.length === 0 ? (
+        {loading ? (
+          <div className="flex flex-col items-center justify-center h-40 text-[var(--text-tertiary)] text-[12px] gap-2">
+            <div className="w-5 h-5 border-2 border-[var(--accent)] border-t-transparent rounded-full animate-spin" />
+            <span>加载中...</span>
+          </div>
+        ) : holdings.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-40 text-[var(--text-tertiary)] text-[12px] gap-3">
             <DollarSign size={28} className="opacity-30" />
             <span>暂无持仓，点击"添加持仓"开始记录</span>

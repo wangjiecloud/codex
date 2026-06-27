@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from datetime import datetime, date, timedelta
@@ -7,6 +7,26 @@ from db import get_db, SessionLocal, StockQuote, StockMeta
 from bs_session import get_bs, reset_bs
 
 router = APIRouter()
+
+
+@router.get("/search")
+async def search_stocks(
+    q: str = Query("", description="股票代码或名称关键字"),
+    db: Session = Depends(get_db),
+):
+    if not q.strip():
+        return {"results": []}
+    keyword = q.strip().lower()
+    rows = (
+        db.query(StockMeta.code, StockMeta.name).filter(StockMeta.market == "A股").all()
+    )
+    results = [
+        {"code": r.code, "name": r.name}
+        for r in rows
+        if keyword in r.code.lower() or keyword in (r.name or "").lower()
+    ]
+    results.sort(key=lambda x: (not x["code"].startswith(q.strip()), x["code"]))
+    return {"results": results[:20]}
 
 
 def get_stock_name(code: str) -> str:
@@ -73,25 +93,25 @@ def _fetch_and_cache_quote(code: str) -> dict:
             raise HTTPException(status_code=404, detail=f"Stock {code} not found")
 
         r = row_data[-1]
-        close = _safe_float(r[5])
-        preclose = _safe_float(r[6])
+        close = round(_safe_float(r[5]), 4)
+        preclose = round(_safe_float(r[6]), 4)
 
         result = {
             "code": code,
             "name": get_stock_name(code),
             "price": close,
-            "change": _safe_float(r[10]),
+            "change": round(_safe_float(r[10]), 4),
             "changeAmt": round(close - preclose, 4),
-            "open": _safe_float(r[2]),
+            "open": round(_safe_float(r[2]), 4),
             "prevClose": preclose,
-            "high": _safe_float(r[3]),
-            "low": _safe_float(r[4]),
+            "high": round(_safe_float(r[3]), 4),
+            "low": round(_safe_float(r[4]), 4),
             "volume": _safe_float(r[7]),
             "turnover": _safe_float(r[8]),
             "marketCap": 0.0,
-            "pe": _safe_float(r[11]),
-            "pb": _safe_float(r[12]),
-            "turnoverRate": _safe_float(r[9]),
+            "pe": round(_safe_float(r[11]), 4),
+            "pb": round(_safe_float(r[12]), 4),
+            "turnoverRate": round(_safe_float(r[9]), 4),
             "amplitude": 0.0,
             "updatedAt": datetime.utcnow().isoformat(),
         }

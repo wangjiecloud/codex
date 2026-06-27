@@ -128,6 +128,7 @@ def _sync_all_quotes():
 
                 if rs.error_code != "0":
                     print(f"[sync_quotes] {raw_code} baostock error: {rs.error_msg}")
+                    reset_bs()
                     continue
 
                 row_data = []
@@ -144,29 +145,29 @@ def _sync_all_quotes():
                 continue
 
             r = row_data[-1]
-            close = _safe_float(r[5])
-            preclose = _safe_float(r[6])
-            high = _safe_float(r[3])
-            low = _safe_float(r[4])
+            close = round(_safe_float(r[5]), 4)
+            preclose = round(_safe_float(r[6]), 4)
+            high = round(_safe_float(r[3]), 4)
+            low = round(_safe_float(r[4]), 4)
             change_amt = round(close - preclose, 4)
-            amplitude = round((high - low) / preclose * 100, 2) if preclose > 0 else 0.0
+            amplitude = round((high - low) / preclose * 100, 4) if preclose > 0 else 0.0
 
             stmt = sqlite_insert(StockQuote).values(
                 code=raw_code,
                 name=get_stock_name(raw_code),
                 price=close,
-                change=_safe_float(r[10]),
+                change=round(_safe_float(r[10]), 4),
                 change_amt=change_amt,
-                open=_safe_float(r[2]),
+                open=round(_safe_float(r[2]), 4),
                 prev_close=preclose,
                 high=high,
                 low=low,
                 volume=_safe_float(r[7]),
                 turnover=_safe_float(r[8]),
                 market_cap=0.0,
-                pe=_safe_float(r[11]),
-                pb=_safe_float(r[12]),
-                turnover_rate=_safe_float(r[9]),
+                pe=round(_safe_float(r[11]), 4),
+                pb=round(_safe_float(r[12]), 4),
+                turnover_rate=round(_safe_float(r[9]), 4),
                 amplitude=amplitude,
                 updated_at=datetime.utcnow(),
             )
@@ -237,6 +238,7 @@ def _sync_klines(code: str, period: str = "daily"):
 
         if rs.error_code != "0":
             print(f"[sync_klines] {code} baostock error: {rs.error_msg}")
+            reset_bs()
             return
 
         rows_saved = 0
@@ -250,13 +252,13 @@ def _sync_klines(code: str, period: str = "daily"):
                 code=code,
                 period=period,
                 trade_date=r[0],
-                open=_safe_float(r[2]),
-                high=_safe_float(r[3]),
-                low=_safe_float(r[4]),
-                close=_safe_float(r[5]),
+                open=round(_safe_float(r[2]), 4),
+                high=round(_safe_float(r[3]), 4),
+                low=round(_safe_float(r[4]), 4),
+                close=round(_safe_float(r[5]), 4),
                 volume=int(_safe_float(r[6])),
                 turnover=_safe_float(r[7]),
-                change_pct=_safe_float(r[9]),
+                change_pct=round(_safe_float(r[9]), 4),
                 updated_at=datetime.utcnow(),
             )
             stmt = stmt.on_conflict_do_update(
@@ -394,23 +396,64 @@ async def get_industry_quotes(
     rows = db.query(StockQuote).filter(StockQuote.code.in_(code_list)).all()
     result = {}
     for row in rows:
+        price = row.price
+        change = row.change
+        change_amt = row.change_amt
+        open_ = row.open
+        prev_close = row.prev_close
+        high = row.high
+        low = row.low
+        volume = row.volume
+        turnover = row.turnover
+        turnover_rate = row.turnover_rate
+        amplitude = row.amplitude
+
+        if amplitude == 0.0 and high > 0 and low > 0 and prev_close > 0:
+            amplitude = round((high - low) / prev_close * 100, 2)
+
+        quote_never_synced = price == 0.0 and row.updated_at is None
+        if quote_never_synced:
+            kline_rows = (
+                db.query(StockKline)
+                .filter(StockKline.code == row.code, StockKline.period == "daily")
+                .order_by(StockKline.trade_date.desc())
+                .limit(2)
+                .all()
+            )
+            if kline_rows:
+                latest = kline_rows[0]
+                price = latest.close
+                change = latest.change_pct
+                open_ = latest.open
+                high = latest.high
+                low = latest.low
+                volume = float(latest.volume)
+                turnover = latest.turnover
+                turnover_rate = latest.turn_rate if latest.turn_rate else 0.0
+                prev_k = kline_rows[1] if len(kline_rows) > 1 else None
+                prev_close = prev_k.close if prev_k else 0.0
+                change_amt = round(price - prev_close, 4) if prev_close else 0.0
+                amplitude = (
+                    round((high - low) / prev_close * 100, 2) if prev_close > 0 else 0.0
+                )
+
         result[row.code] = {
             "code": row.code,
             "name": row.name,
-            "price": row.price,
-            "change": row.change,
-            "changeAmt": row.change_amt,
-            "open": row.open,
-            "prevClose": row.prev_close,
-            "high": row.high,
-            "low": row.low,
-            "volume": row.volume,
-            "turnover": row.turnover,
+            "price": price,
+            "change": change,
+            "changeAmt": change_amt,
+            "open": open_,
+            "prevClose": prev_close,
+            "high": high,
+            "low": low,
+            "volume": volume,
+            "turnover": turnover,
             "marketCap": row.market_cap,
             "pe": row.pe,
             "pb": row.pb,
-            "turnoverRate": row.turnover_rate,
-            "amplitude": row.amplitude,
+            "turnoverRate": turnover_rate,
+            "amplitude": amplitude,
             "updatedAt": row.updated_at.isoformat() if row.updated_at else None,
         }
     return {"quotes": result, "total": len(result)}

@@ -4427,6 +4427,58 @@ function buildEdge(
   };
 }
 
+const COMPANY_CHAIN_IDS = new Set(["nvidia_chain", "changxin_chain"]);
+
+function buildRadialLayout(rawNodes: ComponentNode[]): ComponentNode[] {
+  const centerNode = rawNodes.find(
+    (n) => n.data.layer === "application" && n.data.stocks.length === 0,
+  );
+  if (!centerNode) return rawNodes;
+
+  const suppliers = rawNodes.filter((n) => n.id !== centerNode.id);
+
+  const layerRadii: Record<string, number> = {
+    upstream: 380,
+    core: 620,
+    downstream: 860,
+  };
+
+  const byLayer: Record<string, ComponentNode[]> = {};
+  for (const n of suppliers) {
+    const l = n.data.layer ?? "core";
+    if (!byLayer[l]) byLayer[l] = [];
+    byLayer[l].push(n);
+  }
+
+  const cx = 900;
+  const cy = 480;
+
+  const result: ComponentNode[] = [
+    { ...centerNode, position: { x: cx - 90, y: cy - 50 } },
+  ];
+
+  const layerOrder = ["upstream", "core", "downstream"] as const;
+  for (const layer of layerOrder) {
+    const group = byLayer[layer] ?? [];
+    if (group.length === 0) continue;
+    const radius = layerRadii[layer];
+    const total = group.length;
+    const startAngle = -Math.PI / 2;
+    group.forEach((n, i) => {
+      const angle = startAngle + (2 * Math.PI * i) / total;
+      result.push({
+        ...n,
+        position: {
+          x: cx + radius * Math.cos(angle) - 90,
+          y: cy + radius * Math.sin(angle) - 50,
+        },
+      });
+    });
+  }
+
+  return result;
+}
+
 export default function IndustryCanvasPage() {
   const params = useParams();
   const router = useRouter();
@@ -4635,6 +4687,11 @@ export default function IndustryCanvasPage() {
   );
 
   const isPcb = industryId === "pcb";
+  const isCompanyChain = COMPANY_CHAIN_IDS.has(industryId);
+  const chainDisplayNodes = React.useMemo(
+    () => (isCompanyChain ? buildRadialLayout(nodes) : nodes),
+    [isCompanyChain, nodes],
+  );
   const flowLayerLabels = graph?.layerLabels ?? [];
 
   const selectedFlowNode = nodes.find((n) => n.id === selectedId) as
@@ -4969,7 +5026,7 @@ export default function IndustryCanvasPage() {
         ) : activeTab === "chain" ? (
           <div className="flex-1 bg-[var(--bg-primary)] relative">
             <ReactFlow
-              nodes={nodes.map((n) => ({
+              nodes={chainDisplayNodes.map((n) => ({
                 ...n,
                 selected: n.id === selectedId,
                 style: selectedId
@@ -4978,7 +5035,16 @@ export default function IndustryCanvasPage() {
                     : { opacity: 0.2, filter: "grayscale(0.6)" }
                   : { opacity: 1 },
               }))}
-              edges={edges.map((edge) => {
+              edges={(isCompanyChain
+                ? edges.filter(
+                    (e) =>
+                      e.source === "nv_nvidia" ||
+                      e.target === "nv_nvidia" ||
+                      e.source === "cx_changxin" ||
+                      e.target === "cx_changxin",
+                  )
+                : edges
+              ).map((edge) => {
                 const isConnected =
                   !selectedId ||
                   edge.source === selectedId ||

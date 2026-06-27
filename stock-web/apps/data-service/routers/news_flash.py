@@ -4,7 +4,6 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from datetime import datetime
 import threading
 import requests
-import re
 
 from db import get_db, SessionLocal, NewsFlash
 
@@ -12,17 +11,16 @@ router = APIRouter()
 
 _HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Referer": "https://www.eastmoney.com/",
+    "Referer": "https://www.10jqka.com.cn/",
 }
 
 _CATEGORY_MAP = {
-    "a": {"label": "A股", "type_id": 104},
-    "important": {"label": "重要", "type_id": 103},
-    "notice": {"label": "公告", "type_id": 109},
-    "futures": {"label": "期货", "type_id": 102},
-    "abnormal": {"label": "异动", "type_id": 106},
-    "hk": {"label": "港股", "type_id": 105},
-    "us": {"label": "美股", "type_id": 107},
+    "important": {"label": "重要", "tag_id": "-21101"},
+    "a": {"label": "A股", "tag_id": "21103"},
+    "hk": {"label": "港股", "tag_id": "21105"},
+    "us": {"label": "美股", "tag_id": "21107"},
+    "abnormal": {"label": "异动", "tag_id": "21111"},
+    "notice": {"label": "公告", "tag_id": "34843"},
 }
 
 _PAGE_SIZE = 20
@@ -32,54 +30,48 @@ _syncing_cats: set[str] = set()
 _syncing_lock = threading.Lock()
 
 
-def _fetch_em_page(type_id: int, page: int) -> list[dict]:
+def _fetch_ths_page(tag_id: str, last_seq: str = "0") -> list[dict]:
     url = (
-        f"https://newsapi.eastmoney.com/kuaixun/v1/"
-        f"getlist_{type_id}_ajaxResult_{_PAGE_SIZE}_{page}_.html"
+        f"https://news.10jqka.com.cn/app/flash/flashnews/v1/list"
+        f"?tagId={tag_id}&pageSize={_PAGE_SIZE}&seq={last_seq}&envTag=reqfix"
     )
     try:
         r = requests.get(url, headers=_HEADERS, timeout=12)
-        raw = r.text.strip()
-        if raw.startswith("var ajaxResult="):
-            raw = raw[len("var ajaxResult=") :]
-        raw = re.sub(r";?\s*$", "", raw)
-        import json
-
-        d = json.loads(raw)
-        return d.get("LivesList", [])
+        d = r.json()
+        return d.get("data", {}).get("list", [])
     except Exception as e:
-        print(f"[news_flash] fetch type={type_id} page={page} error: {e}")
+        print(f"[news_flash] fetch tag_id={tag_id} last_seq={last_seq} error: {e}")
         return []
 
 
 def _parse_item(it: dict, cate_key: str) -> dict | None:
-    news_id = str(it.get("id") or it.get("newsid") or "")
+    news_id = str(it.get("id") or it.get("seq") or "")
     if not news_id:
         return None
-    ctime_raw = str(it.get("showtime") or it.get("ordertime") or "")
+    ctime_raw = it.get("createTime") or it.get("ctime") or ""
     try:
-        ctime = datetime.strptime(ctime_raw, "%Y-%m-%d %H:%M:%S").strftime(
-            "%Y-%m-%d %H:%M:%S"
-        )
+        ts = int(ctime_raw)
+        ctime = datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
     except Exception:
-        ctime = ctime_raw
+        ctime = str(ctime_raw)
     return {
         "id": f"{cate_key}_{news_id}",
+        "seq": str(it.get("seq") or news_id),
         "title": str(it.get("title") or ""),
-        "digest": str(it.get("digest") or ""),
-        "url": str(it.get("url_w") or it.get("url_m") or ""),
+        "digest": str(it.get("summary") or it.get("digest") or ""),
+        "url": str(it.get("url") or ""),
         "ctime": ctime,
         "category": cate_key,
     }
 
 
-def _get_latest_ctime(cate_key: str) -> str | None:
+def _get_latest_seq(cate_key: str) -> str | None:
     db = SessionLocal()
     try:
         row = (
-            db.query(NewsFlash.ctime)
+            db.query(NewsFlash.seq)
             .filter(NewsFlash.category == cate_key)
-            .order_by(NewsFlash.ctime.desc())
+            .order_by(NewsFlash.seq.desc())
             .first()
         )
         return row[0] if row else None
@@ -97,11 +89,13 @@ def sync_category(cate_key: str, pages: int | None = None) -> int:
     with _syncing_lock:
         _syncing_cats.add(cate_key)
     try:
-        latest_ctime = _get_latest_ctime(cate_key)
+        latest_seq = _get_latest_seq(cate_key)
         items_all = []
         max_pages = pages if pages is not None else _MAX_PAGES
-        for page in range(1, max_pages + 1):
-            raw_items = _fetch_em_page(cfg["type_id"], page)
+        last_seq = "0"
+
+        for _ in range(max_pages):
+            raw_items = _fetch_ths_page(cfg["tag_id"], last_seq)
             if not raw_items:
                 break
             found_overlap = False
@@ -109,11 +103,12 @@ def sync_category(cate_key: str, pages: int | None = None) -> int:
                 parsed = _parse_item(it, cate_key)
                 if not parsed:
                     continue
-                if latest_ctime and parsed["ctime"] <= latest_ctime:
+                if latest_seq and parsed["seq"] <= latest_seq:
                     found_overlap = True
                     continue
                 items_all.append(parsed)
-            if found_overlap:
+            last_seq = str(raw_items[-1].get("seq") or "0")
+            if found_overlap or last_seq == "0":
                 break
 
         if not items_all:
@@ -124,6 +119,7 @@ def sync_category(cate_key: str, pages: int | None = None) -> int:
             for it in items_all:
                 stmt = sqlite_insert(NewsFlash).values(
                     id=it["id"],
+                    seq=it["seq"],
                     title=it["title"],
                     digest=it["digest"],
                     url=it["url"],
@@ -134,6 +130,7 @@ def sync_category(cate_key: str, pages: int | None = None) -> int:
                 stmt = stmt.on_conflict_do_update(
                     index_elements=["id"],
                     set_={
+                        "seq": stmt.excluded.seq,
                         "title": stmt.excluded.title,
                         "digest": stmt.excluded.digest,
                         "url": stmt.excluded.url,
@@ -164,7 +161,7 @@ def sync_news_flash() -> int:
     results: dict[str, int] = {}
 
     def _run(key: str):
-        results[key] = sync_category(key, pages=3)
+        results[key] = sync_category(key)
 
     for key in _CATEGORY_MAP:
         t = threading.Thread(target=_run, args=(key,), daemon=True)

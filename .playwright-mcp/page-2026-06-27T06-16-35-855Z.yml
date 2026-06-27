@@ -1,0 +1,544 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e3]:
+    - generic [ref=e6]:
+      - generic [ref=e7]:
+        - generic "返回首页" [ref=e9] [cursor=pointer]:
+          - img "同花顺 Logo" [ref=e10]
+        - generic [ref=e12]:
+          - link "A股" [ref=e13] [cursor=pointer]:
+            - /url: https://www.10jqka.com.cn/
+          - link "港股" [ref=e14] [cursor=pointer]:
+            - /url: https://stock.10jqka.com.cn/hks/
+          - link "美股" [ref=e15] [cursor=pointer]:
+            - /url: https://stock.10jqka.com.cn/usstock/mgyw_list/
+          - link "期货" [ref=e16] [cursor=pointer]:
+            - /url: https://goodsfu.10jqka.com.cn/
+          - link "基金" [ref=e17] [cursor=pointer]:
+            - /url: https://fund.10jqka.com.cn/
+        - generic [ref=e19]:
+          - img [ref=e20] [cursor=pointer]
+          - textbox [ref=e23]
+        - img "AIME助手" [ref=e26] [cursor=pointer]
+      - generic [ref=e28]:
+        - button "返回旧版" [ref=e29] [cursor=pointer]
+        - button "下载客户端" [ref=e30] [cursor=pointer]
+        - button "登录" [ref=e31] [cursor=pointer]
+    - generic [ref=e33]:
+      - navigation "主导航 Tab" [ref=e36]:
+        - list [ref=e38]:
+          - listitem [ref=e39]:
+            - generic [ref=e40] [cursor=pointer]: 首页
+          - listitem [ref=e42]:
+            - generic [ref=e43] [cursor=pointer]: 行情
+          - listitem [ref=e44]:
+            - generic [ref=e45] [cursor=pointer]: 商城
+      - generic [ref=e46]:
+        - generic [ref=e47]:
+          - generic [ref=e49]:
+            - generic [ref=e50]:
+              - generic [ref=e51]:
+                - generic [ref=e52]:
+                  - button "向右滚动" [ref=e54] [cursor=pointer]:
+                    - img [ref=e56]
+                  - generic:
+                    - button "向左滚动":
+                      - generic:
+                        - img
+                  - generic [ref=e58]:
+                    - generic [ref=e59] [cursor=pointer]:
+                      - generic [ref=e60]: 上证指数
+                      - generic [ref=e61]: "--"
+                    - generic [ref=e62] [cursor=pointer]:
+                      - generic [ref=e63]: 深证成指
+                      - generic [ref=e64]: "--"
+                    - generic [ref=e65] [cursor=pointer]:
+                      - generic [ref=e66]: 创业板指
+                      - generic [ref=e67]: "--"
+                    - generic [ref=e68] [cursor=pointer]:
+                      - generic [ref=e69]: 科创50
+                      - generic [ref=e70]: "--"
+                    - generic [ref=e71] [cursor=pointer]:
+                      - generic [ref=e72]: 北证50
+                      - generic [ref=e73]: "--"
+                    - generic [ref=e74] [cursor=pointer]:
+                      - generic [ref=e75]: 科创综指
+                      - generic [ref=e76]: "--"
+                    - generic [ref=e77] [cursor=pointer]:
+                      - generic [ref=e78]: 同花顺全A(沪深京)
+                      - generic [ref=e79]: "--"
+                    - generic [ref=e80] [cursor=pointer]:
+                      - generic [ref=e81]: 中证A500
+                      - generic [ref=e82]: "--"
+                    - generic [ref=e83] [cursor=pointer]:
+                      - generic [ref=e84]: 沪深300
+                      - generic [ref=e85]: "--"
+                    - generic [ref=e86] [cursor=pointer]:
+                      - generic [ref=e87]: 中证1000
+                      - generic [ref=e88]: "--"
+                    - generic [ref=e89] [cursor=pointer]:
+                      - generic [ref=e90]: 上证50
+                      - generic [ref=e91]: "--"
+                    - generic [ref=e92] [cursor=pointer]:
+                      - generic [ref=e93]: 深证100
+                      - generic [ref=e94]: "--"
+                    - generic [ref=e95] [cursor=pointer]:
+                      - generic [ref=e96]: 中证500
+                      - generic [ref=e97]: "--"
+                    - generic [ref=e98] [cursor=pointer]:
+                      - generic [ref=e99]: 创业板50
+                      - generic [ref=e100]: "--"
+                    - generic [ref=e101] [cursor=pointer]:
+                      - generic [ref=e102]: 科创100
+                      - generic [ref=e103]: "--"
+                - generic [ref=e106]:
+                  - generic [ref=e107]:
+                    - generic [ref=e108]: 最新
+                    - generic [ref=e109]: "--"
+                  - generic [ref=e110]:
+                    - generic [ref=e111]: 最高
+                    - generic [ref=e112]: "--"
+                  - generic [ref=e113]:
+                    - generic [ref=e114]: 最低
+                    - generic [ref=e115]: "--"
+                  - generic [ref=e116]:
+                    - generic [ref=e117]: 成交额
+                    - generic [ref=e118]: "--"
+              - generic [ref=e133]:
+                - generic [ref=e134]:
+                  - generic [ref=e135]:
+                    - generic [ref=e136]: 今日实时成交额
+                    - generic [ref=e137]:
+                      - generic [ref=e138]: "--"
+                      - generic [ref=e139]:
+                        - generic [ref=e140]: 较上一日
+                        - generic [ref=e141]: "--"
+                  - generic [ref=e142]:
+                    - generic [ref=e144]: 预测全天成交额
+                    - generic [ref=e145]: "--"
+                - generic [ref=e147]:
+                  - generic [ref=e148]: 5日均额
+                  - generic [ref=e149]: "--"
+                - generic [ref=e151]:
+                  - generic [ref=e152]: 60日均额
+                  - generic [ref=e153]: "--"
+                - 'button "问财: 今日量能如何评？" [ref=e154] [cursor=pointer]':
+                  - img "AIME 问财助手" [ref=e155]
+                  - generic [ref=e157]:
+                    - generic [ref=e158]: 今日量能如何评？
+                    - generic [ref=e159]: 成交额历史对比？
+                    - generic [ref=e160]: 今日成交放量股
+                    - generic [ref=e161]: 今日量能如何评？
+            - generic [ref=e166]:
+              - generic [ref=e169] [cursor=pointer]: 今天炒什么
+              - generic [ref=e172] [cursor=pointer]: 融资融券
+              - generic [ref=e175] [cursor=pointer]: 同花顺热榜
+              - generic [ref=e178] [cursor=pointer]: 龙虎榜
+              - generic [ref=e181] [cursor=pointer]: 科创板
+              - generic [ref=e184] [cursor=pointer]: 投资日历
+              - generic [ref=e187] [cursor=pointer]: 公告速递
+              - generic [ref=e190] [cursor=pointer]: 业绩预告
+              - generic [ref=e193] [cursor=pointer]: 新股申购
+              - generic [ref=e196] [cursor=pointer]: 盘面分析
+              - generic [ref=e199] [cursor=pointer]: 涨停聚焦
+            - generic [ref=e200]:
+              - tablist [ref=e206]:
+                - tab "头条" [selected] [ref=e207] [cursor=pointer]:
+                  - generic [ref=e208]: 头条
+                - tab "CPO概念" [ref=e210] [cursor=pointer]:
+                  - generic [ref=e211]: CPO概念
+                - tab "PCB概念" [ref=e212] [cursor=pointer]:
+                  - generic [ref=e213]: PCB概念
+                - tab "算力租赁" [ref=e214] [cursor=pointer]:
+                  - generic [ref=e215]: 算力租赁
+                - tab "商业航天" [ref=e216] [cursor=pointer]:
+                  - generic [ref=e217]: 商业航天
+                - tab "小金属" [ref=e218] [cursor=pointer]:
+                  - generic [ref=e219]: 小金属
+                - tab "有色金属" [ref=e220] [cursor=pointer]:
+                  - generic [ref=e221]: 有色金属
+                - tab "化工" [ref=e222] [cursor=pointer]:
+                  - generic [ref=e223]: 化工
+                - tab "油气开采" [ref=e224] [cursor=pointer]:
+                  - generic [ref=e225]: 油气开采
+                - tab "创新药" [ref=e226] [cursor=pointer]:
+                  - generic [ref=e227]: 创新药
+                - tab "电力" [ref=e228] [cursor=pointer]:
+                  - generic [ref=e229]: 电力
+                - tab "锂电池" [ref=e230] [cursor=pointer]:
+                  - generic [ref=e231]: 锂电池
+                - tab "黄金" [ref=e232] [cursor=pointer]:
+                  - generic [ref=e233]: 黄金
+                - tab "存储芯片" [ref=e234] [cursor=pointer]:
+                  - generic [ref=e235]: 存储芯片
+                - tab "智能电网" [ref=e236] [cursor=pointer]:
+                  - generic [ref=e237]: 智能电网
+                - tab "煤炭开采加工" [ref=e238] [cursor=pointer]:
+                  - generic [ref=e239]: 煤炭开采加工
+                - tab "天然气" [ref=e240] [cursor=pointer]:
+                  - generic [ref=e241]: 天然气
+                - tab "碳纤维" [ref=e242] [cursor=pointer]:
+                  - generic [ref=e243]: 碳纤维
+                - tab "脑机接口" [ref=e244] [cursor=pointer]:
+                  - generic [ref=e245]: 脑机接口
+                - tab "氢能源" [ref=e246] [cursor=pointer]:
+                  - generic [ref=e247]: 氢能源
+                - tab "可控核聚变" [ref=e248] [cursor=pointer]:
+                  - generic [ref=e249]: 可控核聚变
+                - tab "MicroLED概念" [ref=e250] [cursor=pointer]:
+                  - generic [ref=e251]: MicroLED概念
+                - tab "液冷服务器" [ref=e252] [cursor=pointer]:
+                  - generic [ref=e253]: 液冷服务器
+                - tab "人形机器人" [ref=e254] [cursor=pointer]:
+                  - generic [ref=e255]: 人形机器人
+              - generic [ref=e257]:
+                - generic [ref=e258]:
+                  - link "1 昨夜，美股芯片巨头暴跌 AI交易遭遇年内最猛烈的一轮降温。 当地时间周五（6月26日）美国三大股指集体下挫，纳指周跌幅近5%，半导体板块遭重创。费城半导体指数跌5.29%，安森美半导体跌23.66%并创2020年以来最大单日跌幅，西部数据跌超13%。受美联储 上海证券报·中国证券网 5小时前" [ref=e259] [cursor=pointer]:
+                    - /url: https://news.10jqka.com.cn/20260627/c677763649.shtml
+                    - generic [ref=e260]:
+                      - generic [ref=e261]:
+                        - generic [ref=e262]:
+                          - generic [ref=e265]: "1"
+                          - heading "昨夜，美股芯片巨头暴跌" [level=3] [ref=e267]
+                        - paragraph [ref=e268]: AI交易遭遇年内最猛烈的一轮降温。 当地时间周五（6月26日）美国三大股指集体下挫，纳指周跌幅近5%，半导体板块遭重创。费城半导体指数跌5.29%，安森美半导体跌23.66%并创2020年以来最大单日跌幅，西部数据跌超13%。受美联储
+                      - generic [ref=e270]:
+                        - generic [ref=e271]: 上海证券报·中国证券网
+                        - generic [ref=e272]: 5小时前
+                  - generic [ref=e274]:
+                    - link "2 国家统计局：1—5月份全国规模以上工业企业利润增长18.8% 人民财讯6月27日电，据国家统计局，2026年1—5月份，全国规模以上工业企业实现利润总额31439.6亿元，同比增长18.8%。1—5月份，规模以上工业企业中，国有控股企业实现利润总额10486.6亿元，同比增长19.6%；股份制企业 证券时报网 4小时前" [ref=e275] [cursor=pointer]:
+                      - /url: https://news.10jqka.com.cn/20260627/c677764031.shtml
+                      - generic [ref=e276]:
+                        - generic [ref=e277]:
+                          - generic [ref=e278]:
+                            - generic [ref=e281]: "2"
+                            - heading "国家统计局：1—5月份全国规模以上工业企业利润增长18.8%" [level=4] [ref=e282]
+                          - paragraph [ref=e283]: 人民财讯6月27日电，据国家统计局，2026年1—5月份，全国规模以上工业企业实现利润总额31439.6亿元，同比增长18.8%。1—5月份，规模以上工业企业中，国有控股企业实现利润总额10486.6亿元，同比增长19.6%；股份制企业
+                        - generic [ref=e285]:
+                          - generic [ref=e286]: 证券时报网
+                          - generic [ref=e287]: 4小时前
+                    - link "3 特朗普威胁：征收100%报复性关税！ 美国总统特朗普26日在社交媒体发文，威胁向对美国企业征收数字服务税的欧洲国家收取100%报复性关税。特朗普称，如果相关数字服务税落地，报复性关税将立即实施，但他并未提及此举的法律依据。 特朗普说，很多欧洲国家在讨论将对美国企业征收数字 证券时报 4小时前" [ref=e289] [cursor=pointer]:
+                      - /url: https://news.10jqka.com.cn/20260627/c677764178.shtml
+                      - generic [ref=e290]:
+                        - generic [ref=e291]:
+                          - generic [ref=e292]:
+                            - generic [ref=e295]: "3"
+                            - heading "特朗普威胁：征收100%报复性关税！" [level=4] [ref=e297]
+                          - paragraph [ref=e298]: 美国总统特朗普26日在社交媒体发文，威胁向对美国企业征收数字服务税的欧洲国家收取100%报复性关税。特朗普称，如果相关数字服务税落地，报复性关税将立即实施，但他并未提及此举的法律依据。 特朗普说，很多欧洲国家在讨论将对美国企业征收数字
+                        - generic [ref=e300]:
+                          - generic [ref=e301]: 证券时报
+                          - generic [ref=e302]: 4小时前
+                - generic [ref=e305]:
+                  - link "消息称OpenAI倾向于等到2027年再进行IPO 同花顺7x24快讯 昨天 22:45 消息称OpenAI倾向于等到2027年再进行IPO" [ref=e306] [cursor=pointer]:
+                    - /url: https://news.10jqka.com.cn/20260626/c677759412.shtml
+                    - generic [ref=e308]:
+                      - generic [ref=e309]:
+                        - heading "消息称OpenAI倾向于等到2027年再进行IPO" [level=4] [ref=e310]
+                        - generic [ref=e312]:
+                          - generic [ref=e313]: 同花顺7x24快讯
+                          - generic [ref=e314]: 昨天 22:45
+                      - img "消息称OpenAI倾向于等到2027年再进行IPO" [ref=e316]
+                  - link "昨夜，美股芯片巨头暴跌 上海证券报·中国证券网 5小时前 昨夜，美股芯片巨头暴跌" [ref=e318] [cursor=pointer]:
+                    - /url: https://news.10jqka.com.cn/20260627/c677763649.shtml
+                    - generic [ref=e320]:
+                      - generic [ref=e321]:
+                        - heading "昨夜，美股芯片巨头暴跌" [level=4] [ref=e323]
+                        - generic [ref=e325]:
+                          - generic [ref=e326]: 上海证券报·中国证券网
+                          - generic [ref=e327]: 5小时前
+                      - img "昨夜，美股芯片巨头暴跌" [ref=e329]
+                  - link "40年来从未见过的景象！数据中心与内存成本激增正在推动第三波通胀浪潮 华尔街见闻 昨天 20:20 40年来从未见过的景象！数据中心与内存成本激增正在推动第三波通胀浪潮" [ref=e331] [cursor=pointer]:
+                    - /url: https://t.10jqka.com.cn/pid_649947133.shtml
+                    - generic [ref=e333]:
+                      - generic [ref=e334]:
+                        - heading "40年来从未见过的景象！数据中心与内存成本激增正在推动第三波通胀浪潮" [level=4] [ref=e335]
+                        - generic [ref=e337]:
+                          - generic [ref=e338]: 华尔街见闻
+                          - generic [ref=e339]: 昨天 20:20
+                      - img "40年来从未见过的景象！数据中心与内存成本激增正在推动第三波通胀浪潮" [ref=e341]
+                  - link "今夜！40倍大牛股，连发公告！事关风险和减持 券商中国 昨天 20:56 今夜！40倍大牛股，连发公告！事关风险和减持" [ref=e343] [cursor=pointer]:
+                    - /url: https://t.10jqka.com.cn/pid_649953614.shtml
+                    - generic [ref=e345]:
+                      - generic [ref=e346]:
+                        - heading "今夜！40倍大牛股，连发公告！事关风险和减持" [level=4] [ref=e347]
+                        - generic [ref=e349]:
+                          - generic [ref=e350]: 券商中国
+                          - generic [ref=e351]: 昨天 20:56
+                      - img "今夜！40倍大牛股，连发公告！事关风险和减持" [ref=e353]
+                  - link "利好来了！A股大牛股，突发公告！狂砸103亿元 券商中国 昨天 19:39 利好来了！A股大牛股，突发公告！狂砸103亿元" [ref=e355] [cursor=pointer]:
+                    - /url: https://t.10jqka.com.cn/pid_649940150.shtml
+                    - generic [ref=e357]:
+                      - generic [ref=e358]:
+                        - heading "利好来了！A股大牛股，突发公告！狂砸103亿元" [level=4] [ref=e359]
+                        - generic [ref=e361]:
+                          - generic [ref=e362]: 券商中国
+                          - generic [ref=e363]: 昨天 19:39
+                      - img "利好来了！A股大牛股，突发公告！狂砸103亿元" [ref=e365]
+                  - link "亚洲市场全线大跌！日股暴跌3000点，韩股暴跌近6%，原因找到了！ 中国基金报 昨天 16:07 亚洲市场全线大跌！日股暴跌3000点，韩股暴跌近6%，原因找到了！" [ref=e367] [cursor=pointer]:
+                    - /url: https://news.10jqka.com.cn/20260626/c677744744.shtml
+                    - generic [ref=e369]:
+                      - generic [ref=e370]:
+                        - heading "亚洲市场全线大跌！日股暴跌3000点，韩股暴跌近6%，原因找到了！" [level=4] [ref=e372]
+                        - generic [ref=e374]:
+                          - generic [ref=e375]: 中国基金报
+                          - generic [ref=e376]: 昨天 16:07
+                      - img "亚洲市场全线大跌！日股暴跌3000点，韩股暴跌近6%，原因找到了！" [ref=e378]
+                  - link "苹果涨价——压垮AI存储泡沫的最后一根稻草？ 华尔街见闻 昨天 16:27 苹果涨价——压垮AI存储泡沫的最后一根稻草？" [ref=e380] [cursor=pointer]:
+                    - /url: https://t.10jqka.com.cn/pid_649899362.shtml
+                    - generic [ref=e382]:
+                      - generic [ref=e383]:
+                        - heading "苹果涨价——压垮AI存储泡沫的最后一根稻草？" [level=4] [ref=e384]
+                        - generic [ref=e386]:
+                          - generic [ref=e387]: 华尔街见闻
+                          - generic [ref=e388]: 昨天 16:27
+                      - img "苹果涨价——压垮AI存储泡沫的最后一根稻草？" [ref=e390]
+                  - link "《人工智能 智能体互联》系列7项国家标准发布 同花顺7x24快讯 昨天 17:02 《人工智能 智能体互联》系列7项国家标准发布" [ref=e392] [cursor=pointer]:
+                    - /url: https://news.10jqka.com.cn/20260626/c677747768.shtml
+                    - generic [ref=e394]:
+                      - generic [ref=e395]:
+                        - heading "《人工智能 智能体互联》系列7项国家标准发布" [level=4] [ref=e396]
+                        - generic [ref=e398]:
+                          - generic [ref=e399]: 同花顺7x24快讯
+                          - generic [ref=e400]: 昨天 17:02
+                      - img "《人工智能 智能体互联》系列7项国家标准发布" [ref=e402]
+                  - link "“国补”继续！第三批625亿元资金已下达 同花顺7x24快讯 昨天 15:12 “国补”继续！第三批625亿元资金已下达" [ref=e404] [cursor=pointer]:
+                    - /url: https://news.10jqka.com.cn/20260626/c677741567.shtml
+                    - generic [ref=e406]:
+                      - generic [ref=e407]:
+                        - heading "“国补”继续！第三批625亿元资金已下达" [level=4] [ref=e409]
+                        - generic [ref=e411]:
+                          - generic [ref=e412]: 同花顺7x24快讯
+                          - generic [ref=e413]: 昨天 15:12
+                      - img "“国补”继续！第三批625亿元资金已下达" [ref=e415]
+                  - link "大众汽车计划裁员至多10万人，并关闭4家德国工厂 华尔街见闻 昨天 16:25 大众汽车计划裁员至多10万人，并关闭4家德国工厂" [ref=e417] [cursor=pointer]:
+                    - /url: https://t.10jqka.com.cn/pid_649898817.shtml
+                    - generic [ref=e419]:
+                      - generic [ref=e420]:
+                        - heading "大众汽车计划裁员至多10万人，并关闭4家德国工厂" [level=4] [ref=e421]
+                        - generic [ref=e423]:
+                          - generic [ref=e424]: 华尔街见闻
+                          - generic [ref=e425]: 昨天 16:25
+                      - img "大众汽车计划裁员至多10万人，并关闭4家德国工厂" [ref=e427]
+                  - link "由于企业盈利依然强劲，花旗称现在就断言AI交易终结还为时尚早 同花顺7x24快讯 昨天 15:30 由于企业盈利依然强劲，花旗称现在就断言AI交易终结还为时尚早" [ref=e429] [cursor=pointer]:
+                    - /url: https://news.10jqka.com.cn/20260626/c677742160.shtml
+                    - generic [ref=e431]:
+                      - generic [ref=e432]:
+                        - heading "由于企业盈利依然强劲，花旗称现在就断言AI交易终结还为时尚早" [level=4] [ref=e433]
+                        - generic [ref=e435]:
+                          - generic [ref=e436]: 同花顺7x24快讯
+                          - generic [ref=e437]: 昨天 15:30
+                      - img "由于企业盈利依然强劲，花旗称现在就断言AI交易终结还为时尚早" [ref=e439]
+                  - link "美团CFO：当前公司价值被严重低估，美团计划进行股票回购 美团-W 同花顺7x24快讯 昨天 14:52 美团CFO：当前公司价值被严重低估，美团计划进行股票回购" [ref=e441] [cursor=pointer]:
+                    - /url: https://news.10jqka.com.cn/20260626/c677740711.shtml
+                    - generic [ref=e443]:
+                      - generic [ref=e444]:
+                        - heading "美团CFO：当前公司价值被严重低估，美团计划进行股票回购" [level=4] [ref=e445]
+                        - generic [ref=e446]:
+                          - generic [ref=e449]: 美团-W
+                          - generic [ref=e450]:
+                            - generic [ref=e451]: 同花顺7x24快讯
+                            - generic [ref=e452]: 昨天 14:52
+                      - img "美团CFO：当前公司价值被严重低估，美团计划进行股票回购" [ref=e454]
+                  - link "“K型分化”是“技术革命”的宿命？ 华尔街见闻 昨天 10:58 “K型分化”是“技术革命”的宿命？" [ref=e456] [cursor=pointer]:
+                    - /url: https://t.10jqka.com.cn/pid_649662898.shtml
+                    - generic [ref=e458]:
+                      - generic [ref=e459]:
+                        - heading "“K型分化”是“技术革命”的宿命？" [level=4] [ref=e460]
+                        - generic [ref=e462]:
+                          - generic [ref=e463]: 华尔街见闻
+                          - generic [ref=e464]: 昨天 10:58
+                      - img "“K型分化”是“技术革命”的宿命？" [ref=e466]
+                  - link "科技股大跌！亚太股市，集体重挫！ 证券时报网 昨天 13:01 科技股大跌！亚太股市，集体重挫！" [ref=e468] [cursor=pointer]:
+                    - /url: https://news.10jqka.com.cn/20260626/c677738806.shtml
+                    - generic [ref=e470]:
+                      - generic [ref=e471]:
+                        - heading "科技股大跌！亚太股市，集体重挫！" [level=4] [ref=e473]
+                        - generic [ref=e475]:
+                          - generic [ref=e476]: 证券时报网
+                          - generic [ref=e477]: 昨天 13:01
+                      - img "科技股大跌！亚太股市，集体重挫！" [ref=e479]
+                  - link "板块逆市拉升！自动驾驶大消息，10股获融资大幅净买入 证券时报数据宝 昨天 12:48 板块逆市拉升！自动驾驶大消息，10股获融资大幅净买入" [ref=e481] [cursor=pointer]:
+                    - /url: https://news.10jqka.com.cn/20260626/c677738574.shtml
+                    - generic [ref=e483]:
+                      - generic [ref=e484]:
+                        - heading "板块逆市拉升！自动驾驶大消息，10股获融资大幅净买入" [level=4] [ref=e486]
+                        - generic [ref=e488]:
+                          - generic [ref=e489]: 证券时报数据宝
+                          - generic [ref=e490]: 昨天 12:48
+                      - img "板块逆市拉升！自动驾驶大消息，10股获融资大幅净买入" [ref=e492]
+                  - link "SpaceX光环消退，美股航天概念股集体重挫，多只个股6月跌幅逾50% 华尔街见闻 昨天 11:51 SpaceX光环消退，美股航天概念股集体重挫，多只个股6月跌幅逾50%" [ref=e494] [cursor=pointer]:
+                    - /url: https://t.10jqka.com.cn/pid_649710378.shtml
+                    - generic [ref=e496]:
+                      - generic [ref=e497]:
+                        - heading "SpaceX光环消退，美股航天概念股集体重挫，多只个股6月跌幅逾50%" [level=4] [ref=e498]
+                        - generic [ref=e500]:
+                          - generic [ref=e501]: 华尔街见闻
+                          - generic [ref=e502]: 昨天 11:51
+                      - img "SpaceX光环消退，美股航天概念股集体重挫，多只个股6月跌幅逾50%" [ref=e504]
+                  - link "全球巨头今年两轮涨价！AI催热半导体硅片赛道，国内已有厂商调价！ 证券时报e公司 昨天 08:16 全球巨头今年两轮涨价！AI催热半导体硅片赛道，国内已有厂商调价！" [ref=e506] [cursor=pointer]:
+                    - /url: https://t.10jqka.com.cn/pid_649524604.shtml
+                    - generic [ref=e508]:
+                      - generic [ref=e509]:
+                        - heading "全球巨头今年两轮涨价！AI催热半导体硅片赛道，国内已有厂商调价！" [level=4] [ref=e510]
+                        - generic [ref=e512]:
+                          - generic [ref=e513]: 证券时报e公司
+                          - generic [ref=e514]: 昨天 08:16
+                      - img "全球巨头今年两轮涨价！AI催热半导体硅片赛道，国内已有厂商调价！" [ref=e516]
+          - generic [ref=e520]:
+            - generic [ref=e521] [cursor=pointer]:
+              - img [ref=e522]
+              - img [ref=e530]
+            - generic [ref=e535]:
+              - button "A股" [ref=e536] [cursor=pointer]:
+                - generic [ref=e537]: A股
+              - button "重要" [ref=e539] [cursor=pointer]:
+                - generic [ref=e540]: 重要
+              - button "公告" [ref=e541] [cursor=pointer]:
+                - generic [ref=e542]: 公告
+              - button "期货" [ref=e543] [cursor=pointer]:
+                - generic [ref=e544]: 期货
+              - button "异动" [ref=e545] [cursor=pointer]:
+                - generic [ref=e546]: 异动
+              - button "港股" [ref=e547] [cursor=pointer]:
+                - generic [ref=e548]: 港股
+              - button "美股" [ref=e549] [cursor=pointer]:
+                - generic [ref=e550]: 美股
+            - generic [ref=e553]:
+              - generic [ref=e559]:
+                - generic [ref=e561]: 14:00
+                - heading "中国大唐与四川省政府签署全面深化战略合作协议" [level=3] [ref=e562] [cursor=pointer]
+                - paragraph [ref=e563] [cursor=pointer]: 6月26日，中国大唐与四川省人民政府签署全面深化战略合作协议。根据协议，双方将围绕清洁能源开发利用、能源基础设施建设、能源产业建圈强链、能源科技创新与成果转化等方面开展深入合作，共同培育发展能源新质生产力，更好服务国家发展大局和四川现代化建设。（人民财讯）
+              - generic [ref=e569]:
+                - generic [ref=e571]: 13:40
+                - heading "我国机电产品加速出海 有企业今年以来800G以上光模块出口同比增长超过100倍" [level=3] [ref=e572] [cursor=pointer]
+                - paragraph [ref=e573] [cursor=pointer]: 今年前5个月，我国机电产品出口额7.58万亿元，占我国出口总值的比重达到63.6%。自2025年3月起，连续15个月刷新同期月度最高值。记者在浙江嘉兴的一家工厂看到，这里有近1000台织布机正在织布，它是人工智能服务器中的电子布。电子布，是电子信息产业当中的关键材料。随着算力需求爆发，电子布需求也随之增加。企业车间里，产线24小时满产运行。今年以来，和算力有关的相关产品加速出海。在武汉，光模块的生产线同样24小时不停机。随着全球算力基础设施建设加速推进，今年以来，这家企业800G以上光模块出口同比增长超过100倍。数据显示，今年以来，人工智能产业链相关产品贡献了机电产品出口增量的五成以上，成为重要拉动力。（央视财经）
+              - generic [ref=e579]:
+                - generic [ref=e581]: 13:32
+                - heading "娃哈哈回应纯净水涨价" [level=3] [ref=e582] [cursor=pointer]
+                - paragraph [ref=e583] [cursor=pointer]: 6月27日，据娃哈哈微博，娃哈哈发布针对近日网传娃哈哈纯净水涨价相关消息的统一说明：受包材成本波动，公司调整不同包装规格水产品的渠道批发价，有升有降以保障经销商伙伴稳定经营。全线纯净水终端零售价不变，消费者购买价格无变化。（人民财讯）
+              - generic [ref=e589]:
+                - generic [ref=e591]: 13:21
+                - heading "海南调整住房公积金缴存基数 7月起执行" [level=3] [ref=e592] [cursor=pointer]
+                - paragraph [ref=e593] [cursor=pointer]: 海南省住房公积金管理局6月26日发布《关于2026年度住房公积金缴存基数范围的通告》。公告提出，职工住房公积金缴存基数，不低于职工工作所在市县上一年度最低工资标准，不高于职工工作所在市县上一年度职工月平均工资的3倍。通告的住房公积金缴存基数范围适用于城镇非私营单位，城镇私营单位参照标准执行。2026年度住房公积金缴存基数范围适用时间：2026年7月1日至2027年6月30日。（财联社）
+              - generic [ref=e599]:
+                - generic [ref=e601]: 13:07
+                - heading "沙特重启海湾原油出口终端" [level=3] [ref=e602] [cursor=pointer]
+                - paragraph [ref=e603] [cursor=pointer]: 专业机构提供的数据显示，沙特阿拉伯国家石油公司（沙特阿美）26日在时隔近4个月后重启其海湾一侧的石油出口终端，开始为超大型油轮装货。欧盟“哥白尼哨兵”卫星系统26日拍摄的图像显示，沙特东部塔努拉角油港当天已经恢复运转，有两艘可装200万桶原油的超大型油轮正在港口装货，另一艘油轮在附近等待，第四艘油轮正驶向港口。正在装货的油轮由沙特巴赫里航运公司运营。（央视新闻）
+              - generic [ref=e609]:
+                - generic [ref=e611]: 12:56
+                - heading "碳化硅器件价格止跌趋稳 高压MOS、IGBT等产品仍有涨价空间" [level=3] [ref=e612] [cursor=pointer]
+                - paragraph [ref=e613] [cursor=pointer]: 三安光电公司人士透露，目前国内的碳化硅功率半导体暂时还没有看到涨价，只能说价格“止跌趋稳”。中科英智基金合伙人王洲表示，碳化硅今年已有反转趋势，高压MOS、IGBT等产品均呈现了比较大的价格上涨的弹性，并且今年下半年可能仍有上涨空间。（科创板日报）
+                - generic [ref=e615] [cursor=pointer]:
+                  - generic [ref=e616]: 三安光电
+                  - generic [ref=e617]: "--"
+              - generic [ref=e623]:
+                - generic [ref=e625]: 12:45
+                - heading "以总理称以军将长期驻留黎巴嫩南部" [level=3] [ref=e626] [cursor=pointer]
+                - paragraph [ref=e627] [cursor=pointer]: 当地时间6月26日，以色列与黎巴嫩就以军从黎南部部分地区撤军达成框架协议。以色列总理内塔尼亚胡当天发表电视讲话称，根据协议，以军将继续驻留在其控制的“绝大部分”黎南部“安全区”内，他还称这是“以色列的重大成就”。内塔尼亚胡称，只要以色列仍面临威胁，以军将继续驻留在“安全区”，并拒绝黎巴嫩真主党和当地居民进入相关区域。内塔尼亚胡还说，这项协议也是对伊朗的“一次重大打击”。(CCTV国际时讯)
+              - generic [ref=e633]:
+                - generic [ref=e635]: 12:41
+                - heading "全国13条河流发生超警洪水" [level=3] [ref=e636] [cursor=pointer]
+                - paragraph [ref=e637] [cursor=pointer]: 记者从水利部了解到，受降雨影响，昨天到今天，广西西江桂平江段及支流白沙江、红水河支流盘阳河、郁江支流猪儿河、画眉河、武思江及桂南沿海南流江，广东西江支流蟠龙水、北江支流水边河，云南澜沧江支流凤庆河，福建闽江支流吉木溪、文江溪，内蒙古额尔古纳河支流海拉尔河等13条河流发生超警洪水，最大超警幅度0.86米，目前大部已退至警戒以下。（央视新闻）
+              - generic [ref=e643]:
+                - generic [ref=e645]: 12:41
+                - heading "伊朗称受袭锡里克港运营正常" [level=3] [ref=e646] [cursor=pointer]
+                - paragraph [ref=e647] [cursor=pointer]: 伊朗霍尔木兹甘省有关负责人表示，受到袭击的锡里克港目前运营正常，港口设备和设施并未受损。26日，锡里克一处码头当晚传出数次爆炸声。消息人士表示，爆炸起因是码头遭发射物击中。还有消息称两枚发射物击中了该地区的一座电信塔。27日凌晨，美国袭击了伊朗锡里克地区。当地消息人士称，当地时间26日23时30分左右，霍尔木兹甘省锡里克地区发生数次爆炸。（央视新闻）
+              - generic [ref=e653]:
+                - generic [ref=e655]: 12:41
+                - heading "委内瑞拉官员：石油生产未受地震影响" [level=3] [ref=e656] [cursor=pointer]
+                - paragraph [ref=e657] [cursor=pointer]: 委内瑞拉官员：石油生产未受地震影响 委内瑞拉接连发生两次强震后，当地时间6月26日，该国人民政权油气部长葆拉·埃瑙说，石油生产未受地震影响。埃瑙接受媒体采访时说，委内瑞拉目前日均原油产量为120万桶，政府已评估国内库存情况，国内天然气和燃料供应有保障。“我们处于正常运转状态，所有油井在运转和生产中。”据悉，委内瑞拉石油企业管理层和油田工人反馈，油气设施没有受到严重影响。稍早前有消息称，初步评估显示，由于远离受地震波及的城市，委内瑞拉大型油气设施在强震中受损有限，不过电力短缺情况可能影响石油产能。（央视新闻）
+              - generic [ref=e663]:
+                - generic [ref=e665]: 11:30
+                - heading "国家税务总局深圳市税务局党委委员、副局长吴德接受纪律审查和监察调查" [level=3] [ref=e666] [cursor=pointer]
+                - paragraph [ref=e667] [cursor=pointer]: 国家税务总局深圳市税务局党委委员、副局长吴德涉嫌严重违纪违法，目前正接受中央纪委国家监委驻国家税务总局纪检监察组纪律审查和广东省湛江市监察委员会监察调查。（人民财讯）
+              - generic [ref=e673]:
+                - generic [ref=e675]: 11:13
+                - heading "英国6月最高气温纪录连续3天被打破" [level=3] [ref=e676] [cursor=pointer]
+                - paragraph [ref=e677] [cursor=pointer]: 当地时间6月26日，英国气象局发布的最新数据显示，当天在该国萨福克郡录得37.3摄氏度的高温，连续3天刷新该国6月最高气温纪录。持续的热浪侵袭使英国6月的气温纪录近期多次被刷新。24日、25日两天都出现破纪录高温，26日再次刷新纪录。在这周之前，英国有记录的6月最高气温为35.6摄氏度，在1957年和1976年都录得该温度。（央视新闻）
+              - generic [ref=e683]:
+                - generic [ref=e685]: 11:04
+                - heading "开山集团土耳其伊兹密尔压缩机工厂建成投产" [level=3] [ref=e686] [cursor=pointer]
+                - paragraph [ref=e687] [cursor=pointer]: 当地时间2026年6月26日下午，开山集团土耳其伊兹密尔压缩机工厂(KCT)建成投产。工厂具备完整的空气压缩机制造能力，涵盖主机制造、整机装配生产及测试等全流程制造环节。这是开山集团在海外布局的第三座工厂，是面向北美、欧洲市场的重要制造基地。工厂达产后预计可实现年产值约5000万美元。（人民财讯）
+              - generic [ref=e693]:
+                - generic [ref=e695]: 11:03
+                - heading "纳米比亚旅游局首席执行官：将进一步加强对华旅游合作，大力吸引中国游客" [level=3] [ref=e696] [cursor=pointer]
+                - paragraph [ref=e697] [cursor=pointer]: 纳米比亚旅游局首席执行官塞布隆·奇卡卢26日在首都温得和克举行的业界会议上说，纳米比亚将进一步加强对华旅游合作，大力吸引中国游客。此次业界会议以“加强伙伴关系，促进中国旅游市场增长”为主题。奇卡卢说，中国是全球最具活力的出境旅游市场之一，纳米比亚高度重视中国市场的战略价值，拓展中国市场对于该国旅游业可持续增长至关重要。奇卡卢说，纳旅游局将继续提升该国旅游目的地认知度，开发创新旅游产品，将纳米比亚打造为中国游客难忘的非洲旅游目的地。根据最近发布的游客到访统计报告，2025年中国首次进入纳米比亚前十大海外旅游客源市场。（新华社）
+              - generic [ref=e703]:
+                - generic [ref=e705]: 10:55
+                - heading "115家中外企业签约参展第五届中国国际供应链促进博览会" [level=3] [ref=e706] [cursor=pointer]
+                - paragraph [ref=e707] [cursor=pointer]: 2026年6月26日，第五届链博会参展签约仪式暨2026年链博会参展商联盟大会在北京举行。会上，霍尼韦尔、GE医疗、西门子、康宁、住友电工等115家中外企业及机构，与链博会承办单位中展集团签署第五届展会参展意向协议。（人民财讯）
+              - generic [ref=e713]:
+                - generic [ref=e715]: 10:48
+                - heading "我国在聚变堆超导磁体研发领域取得新突破" [level=3] [ref=e716] [cursor=pointer]
+                - paragraph [ref=e717] [cursor=pointer]: 中国科学院合肥物质科学研究院等离子体物理研究所“人造太阳”项目取得最新进展，环向场超导磁体、高温超导中心螺管线圈等两套聚变堆关键超导磁体先后完成研制验收与满参数测试，核心技术实现100%国产化，综合性能跃升至国际前列。（新华社）
+              - generic [ref=e723]:
+                - generic [ref=e725]: 10:42
+                - heading "德媒：大众汽车计划扩大裁员规模至10万人" [level=3] [ref=e726] [cursor=pointer]
+                - paragraph [ref=e727] [cursor=pointer]: 德国《经理人杂志》26日报道，德国汽车制造商大众汽车集团计划扩大裁员规模至10万人，同时关停4家德国工厂。这或将成为该集团成立以来的最大规模重组。这家媒体援引消息人士的话报道，大众汽车计划在今年3月宣布削减约5万个岗位的基础上，进一步将削减岗位数增至10万个。2025财年，大众汽车在全球共有约66.7万名员工，近43%在德国工作。（新华社）
+              - generic [ref=e733]:
+                - generic [ref=e735]: 10:40
+                - heading "伊朗革命卫队：打击美军多个目标以回应美空袭伊朗" [level=3] [ref=e736] [cursor=pointer]
+                - paragraph [ref=e737] [cursor=pointer]: 伊朗伊斯兰革命卫队27日发表声明说，革命卫队海军已对中东地区美军多个目标实施打击，以回应美方对伊朗沿海地区的空袭。声明说，继以色列在黎巴嫩南部违反停火协议之后，美国再一次“违背承诺”，以“船只在霍尔木兹海峡违规航行”为由，对伊朗沿海地区发动空袭。声明说，根据伊美谅解备忘录，霍尔木兹海峡的交通管制安排由伊朗负责。然而，美国煽动有关方面试图加以破坏，伊方已对此作出必要回应。若再次发生侵犯行为，伊方回应将更加严厉。（新华社）
+              - generic [ref=e743]:
+                - generic [ref=e745]: 10:32
+                - heading "西康高铁全线进入联调联试阶段" [level=3] [ref=e746] [cursor=pointer]
+                - paragraph [ref=e747] [cursor=pointer]: 6月27日上午，西康高铁正式进入联调联试阶段。联调联试是高铁从建设阶段迈向运营阶段的关键环节，如同为线路开展“全身体检”。此次西康高铁联调联试，铁路部门通过模拟开通运营的行车状态，对轨道、路基、桥隧、供电、信号、通信、客服等各系统及接口匹配关系进行综合检测、验证与优化，及时发现并整改设备运行中的问题，为线路开通运营提供重要的技术保障。（央视新闻）
+              - generic [ref=e753]:
+                - generic [ref=e755]: 10:32
+                - heading "韩国政府组建跨部门机构应对涉AI犯罪" [level=3] [ref=e756] [cursor=pointer]
+                - paragraph [ref=e757] [cursor=pointer]: 韩国政府26日组建一个跨部门协商机构，以应对“数字性犯罪”、金融诈骗、虚假广告等利用人工智能(AI)技术实施的犯罪行为。这一新机构名为“应对涉AI犯罪跨部门协商机构”，成员分别来自广播媒体通信委员会、科学技术信息通信部、性别平等家族部、金融委员会、警察厅等10个政府部门。按韩国媒体说法，随着涉AI犯罪日益猖獗，单一机构通常难以应对，因此有必要设立跨部门机构协同配合。韩国广播媒体通信委员会26日牵头召开启动会议，讨论制定应对相关犯罪的方案。与会人员表示，各政府部门将在涉AI犯罪的各环节展开合作，包括预防、调查、执法和信息共享等，同时为受害者提供支持。（新华社）
+        - generic [ref=e761]:
+          - generic [ref=e762]:
+            - link "投资者关系" [ref=e764] [cursor=pointer]:
+              - /url: https://news.10jqka.com.cn/homepage/intro/investor-relations
+            - link "关于同花顺" [ref=e767] [cursor=pointer]:
+              - /url: https://news.10jqka.com.cn/homepage/intro/about-us
+            - link "软件下载" [ref=e770] [cursor=pointer]:
+              - /url: https://download.10jqka.com.cn/
+            - link "法律声明" [ref=e773] [cursor=pointer]:
+              - /url: https://www.10jqka.com.cn/ia/pass_buck.php
+            - link "运营许可" [ref=e776] [cursor=pointer]:
+              - /url: https://news.10jqka.com.cn/homepage/intro/about-us?subRoute=OperationalLicense
+            - link "联系我们" [ref=e779] [cursor=pointer]:
+              - /url: https://news.10jqka.com.cn/homepage/intro/contact-us
+            - link "友情链接" [ref=e782] [cursor=pointer]:
+              - /url: https://news.10jqka.com.cn/homepage/intro/links
+            - link "招聘英才" [ref=e785] [cursor=pointer]:
+              - /url: https://job.10jqka.com.cn/
+            - link "用户体验计划" [ref=e788] [cursor=pointer]:
+              - /url: https://vote.10jqka.com.cn/webvote/14a66a8943c72215b7639d36f6be26fe
+          - generic [ref=e789]:
+            - generic [ref=e790]:
+              - generic [ref=e791]: 不良信息举报与个人信息保护咨询专线：10100571
+              - generic [ref=e792] [cursor=pointer]: 违法和不良信息
+              - generic [ref=e793] [cursor=pointer]: 涉企侵权举报
+              - generic [ref=e794] [cursor=pointer]: 涉算法推荐举报专区
+              - generic [ref=e795] [cursor=pointer]: 涉青少年不良信息举报专区
+            - paragraph [ref=e797]: 浙江同花顺互联信息技术有限公司版权所有
+            - generic [ref=e798]:
+              - generic [ref=e799]:
+                - text: 网站备案号：
+                - link "浙ICP备18032105号" [ref=e800] [cursor=pointer]:
+                  - /url: https://beian.miit.gov.cn/#/Integrated/index
+              - generic [ref=e801]: 证券投资咨询服务提供：浙江同花顺云软件有限公司 （中国证监会核发证书编号：ZX0050）
+          - generic [ref=e802]:
+            - generic [ref=e803]:
+              - img "不良信息举报" [ref=e804]
+              - link "不良信息举报" [ref=e805] [cursor=pointer]:
+                - /url: https://www.12377.cn/
+            - generic [ref=e806]:
+              - img "浙江市场监管" [ref=e807]
+              - link "浙江市场监管" [ref=e808] [cursor=pointer]:
+                - /url: https://zjamr.zj.gov.cn/
+    - generic [ref=e812]:
+      - img "AIME" [ref=e813]
+      - textbox "有问题，尽管问..." [ref=e814]
+  - generic [ref=e816]:
+    - generic [ref=e818] [cursor=pointer]:
+      - img "举报" [ref=e819]
+      - generic [ref=e820]: 举报
+    - link "反馈 反馈" [ref=e821] [cursor=pointer]:
+      - /url: "#"
+      - generic [ref=e822]:
+        - img "反馈" [ref=e823]
+        - generic [ref=e824]: 反馈
+  - region "Notifications alt+T"
+  - alert [ref=e825]

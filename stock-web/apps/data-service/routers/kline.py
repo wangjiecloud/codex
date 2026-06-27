@@ -55,6 +55,7 @@ def _fetch_and_cache_klines(code: str, period: str, count: int) -> list:
                 close=_safe_float(r[5]),
                 volume=int(_safe_float(r[6])),
                 turnover=_safe_float(r[7]),
+                turn_rate=_safe_float(r[8]),
                 change_pct=_safe_float(r[9]),
                 updated_at=datetime.utcnow(),
             )
@@ -67,6 +68,7 @@ def _fetch_and_cache_klines(code: str, period: str, count: int) -> list:
                     "close": stmt.excluded.close,
                     "volume": stmt.excluded.volume,
                     "turnover": stmt.excluded.turnover,
+                    "turn_rate": stmt.excluded.turn_rate,
                     "change_pct": stmt.excluded.change_pct,
                     "updated_at": stmt.excluded.updated_at,
                 },
@@ -80,6 +82,7 @@ def _fetch_and_cache_klines(code: str, period: str, count: int) -> list:
                     "low": _safe_float(r[4]),
                     "close": _safe_float(r[5]),
                     "volume": int(_safe_float(r[6])),
+                    "turnRate": _safe_float(r[8]),
                     "changePct": _safe_float(r[9]),
                 }
             )
@@ -118,6 +121,7 @@ async def get_kline(
                 "low": r.low,
                 "close": r.close,
                 "volume": r.volume,
+                "turnRate": r.turn_rate or 0.0,
                 "changePct": r.change_pct,
             }
             for r in reversed(rows)
@@ -142,6 +146,7 @@ async def get_kline(
                     "low": r.low,
                     "close": r.close,
                     "volume": r.volume,
+                    "turnRate": r.turn_rate or 0.0,
                     "changePct": r.change_pct,
                 }
                 for r in reversed(rows)

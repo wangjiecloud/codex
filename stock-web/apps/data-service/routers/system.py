@@ -2,7 +2,16 @@ import json
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from db import get_db, GubaPost, StockMeta, StockQuote, StockFundamental, IndustryNode
+from db import (
+    get_db,
+    GubaPost,
+    StockMeta,
+    StockQuote,
+    StockFundamental,
+    StockKline,
+    IndustryNode,
+    NewsFlash,
+)
 from datetime import datetime, timedelta
 
 router = APIRouter()
@@ -26,6 +35,11 @@ async def get_system_stats(db: Session = Depends(get_db)):
     total_guba_data = db.query(func.count(GubaPost.id)).scalar() or 0
     total_quote_data = db.query(func.count(StockQuote.code)).scalar() or 0
     total_fundamental_data = db.query(func.count(StockFundamental.code)).scalar() or 0
+    total_stock_info_data = db.query(func.count(StockMeta.code)).scalar() or 0
+    total_kline_data = db.query(func.count(StockKline.id)).scalar() or 0
+    stocks_with_kline = (
+        db.query(func.count(func.distinct(StockKline.code))).scalar() or 0
+    )
 
     total_data = total_guba_data + total_quote_data + total_fundamental_data
 
@@ -71,11 +85,15 @@ async def get_system_stats(db: Session = Depends(get_db)):
             "guba": total_guba_data,
             "quote": total_quote_data,
             "fundamental": total_fundamental_data,
+            "stock_info": total_stock_info_data,
+            "kline": total_kline_data,
         },
         "stocksByDataType": {
             "guba": stocks_with_guba,
             "quote": stocks_with_quote,
             "fundamental": stocks_with_fundamental,
+            "stock_info": total_stock_info_data,
+            "kline": stocks_with_kline,
         },
         "categories": {
             "announcement": announcement_count,
@@ -91,3 +109,48 @@ async def get_system_stats(db: Session = Depends(get_db)):
             for update in recent_updates
         ],
     }
+
+
+_FLASH_CATEGORIES = {
+    "important": "重要",
+    "a": "A股",
+    "hk": "港股",
+    "us": "美股",
+    "abnormal": "异动",
+    "notice": "公告",
+}
+
+
+@router.get("/flash-stats")
+async def get_flash_stats(db: Session = Depends(get_db)):
+    from routers.news_flash import _syncing_cats, _syncing_lock
+
+    with _syncing_lock:
+        syncing = set(_syncing_cats)
+
+    rows = (
+        db.query(
+            NewsFlash.category,
+            func.count(NewsFlash.id).label("count"),
+            func.max(NewsFlash.ctime).label("latest_ctime"),
+            func.max(NewsFlash.updated_at).label("last_sync"),
+        )
+        .group_by(NewsFlash.category)
+        .all()
+    )
+
+    stats_map = {r.category: r for r in rows}
+    result = []
+    for key, label in _FLASH_CATEGORIES.items():
+        r = stats_map.get(key)
+        result.append(
+            {
+                "key": key,
+                "label": label,
+                "count": r.count if r else 0,
+                "latestCtime": r.latest_ctime if r else None,
+                "lastSync": r.last_sync.isoformat() if r and r.last_sync else None,
+                "syncing": key in syncing,
+            }
+        )
+    return result

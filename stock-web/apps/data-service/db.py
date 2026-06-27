@@ -7,6 +7,7 @@ from sqlalchemy import (
     Text,
     DateTime,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import declarative_base, sessionmaker
 from datetime import datetime
@@ -74,6 +75,7 @@ class StockKline(Base):
     volume = Column(Integer)
     turnover = Column(Float)
     change_pct = Column(Float)
+    turn_rate = Column(Float)
     updated_at = Column(DateTime, default=datetime.utcnow)
     __table_args__ = (UniqueConstraint("code", "period", "trade_date"),)
 
@@ -185,6 +187,7 @@ class IndustryList(Base):
 class NewsFlash(Base):
     __tablename__ = "news_flash"
     id = Column(String(50), primary_key=True)
+    seq = Column(String(30), index=True, default="")
     title = Column(Text)
     digest = Column(Text, default="")
     url = Column(Text, default="")
@@ -237,3 +240,15 @@ def get_db():
 
 def init_db():
     Base.metadata.create_all(bind=engine)
+    with engine.connect() as conn:
+        existing = {
+            row[1] for row in conn.execute(text("PRAGMA table_info(news_flash)"))
+        }
+        if "seq" not in existing:
+            conn.execute(
+                text("ALTER TABLE news_flash ADD COLUMN seq VARCHAR(30) DEFAULT ''")
+            )
+            conn.execute(
+                text("CREATE INDEX IF NOT EXISTS ix_news_flash_seq ON news_flash (seq)")
+            )
+            conn.commit()

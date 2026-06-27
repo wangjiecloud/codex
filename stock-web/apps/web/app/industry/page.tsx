@@ -12,6 +12,7 @@ import {
   Layers,
   Search,
   X,
+  Network,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -215,6 +216,19 @@ export default function IndustryPage() {
             </p>
           </div>
 
+          <button
+            onClick={() => router.push("/industry/overview")}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition-all hover:border-[#f5a623]/50 hover:text-[#f5a623]"
+            style={{
+              background: "var(--bg-secondary)",
+              borderColor: "var(--border-color)",
+              color: "var(--text-secondary)",
+            }}
+          >
+            <Network size={14} />
+            全景图
+          </button>
+
           <div className="relative" ref={searchInputRef}>
             <div className="relative">
               <Search
@@ -291,15 +305,6 @@ export default function IndustryPage() {
             )}
           </div>
         </div>
-
-        <button
-          onClick={handleAdd}
-          className="flex items-center gap-2 text-black font-medium px-4 py-2 rounded-lg text-sm transition-colors"
-          style={{ background: "var(--accent)" }}
-        >
-          <Plus size={16} />
-          新增产业
-        </button>
       </div>
 
       <div className="space-y-3">

@@ -31,6 +31,8 @@ interface KLineBar {
   low: number;
   close: number;
   volume: number;
+  turnRate?: number;
+  changePct?: number;
 }
 
 interface NewsItem {
@@ -58,6 +60,27 @@ interface GubaPageData {
   total: number;
   total_pages: number;
   syncing: boolean;
+}
+
+interface FundamentalData {
+  report_date?: string;
+  revenue?: string;
+  revenue_yoy?: string;
+  net_profit?: string;
+  net_profit_yoy?: string;
+  deducted_profit?: string;
+  eps?: string;
+  nav_per_share?: string;
+  cfps?: string;
+  net_margin?: string;
+  gross_margin?: string;
+  roe?: string;
+  debt_ratio?: string;
+  current_ratio?: string;
+  quick_ratio?: string;
+  inventory_turnover?: string;
+  ar_days?: string;
+  updated_at?: string;
 }
 
 const DEFAULT_QUOTE: QuoteData = {
@@ -138,7 +161,7 @@ function removeFromRecentlyViewed(code: string) {
 
 const INDICATORS = ["VOL", "MACD", "KDJ", "BOLL", "RSI", "DMI", "CCI", "W&R"];
 const PERIODS = ["日K", "周K", "月K"];
-const BOTTOM_TABS = ["全部", "公告", "研报", "资讯", "AI分析"];
+const BOTTOM_TABS = ["全部", "公告", "研报", "资讯", "财务", "AI分析"];
 
 const TAB_CATEGORY_MAP: Record<string, string> = {
   全部: "all",
@@ -202,6 +225,7 @@ export default function StockDetailPage() {
   const [isResizing, setIsResizing] = useState(false);
   const [quoteLoading, setQuoteLoading] = useState(true);
   const [gubaLoading, setGubaLoading] = useState(true);
+  const [fundamental, setFundamental] = useState<FundamentalData | null>(null);
 
   useEffect(() => {
     setWatchlist(getRecentlyViewed());
@@ -251,6 +275,15 @@ export default function StockDetailPage() {
       .then((r) => r.json())
       .then((data) => {
         if (data.news) setNews(data.news);
+      })
+      .catch(() => {});
+  }, [code]);
+
+  useEffect(() => {
+    fetch(`http://localhost:8000/api/fundamental/${code}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data?.data) setFundamental(data.data as FundamentalData);
       })
       .catch(() => {});
   }, [code]);
@@ -604,7 +637,7 @@ export default function StockDetailPage() {
                   setActiveTab(tab);
                   setGubaCurrentPage(1);
                   setGubaItems([]);
-                  if (tab !== "AI分析") {
+                  if (tab !== "AI分析" && tab !== "财务") {
                     fetch(`http://localhost:8000/api/guba/sync/${code}`, {
                       method: "POST",
                     }).catch(() => {});
@@ -628,7 +661,63 @@ export default function StockDetailPage() {
           </div>
 
           {/* Tab content */}
-          {activeTab !== "AI分析" && (
+          {activeTab === "财务" && (
+            <div
+              className="overflow-y-auto bg-[var(--bg-primary)] p-3"
+              style={{ height: `${bottomHeight}px` }}
+            >
+              {!fundamental ? (
+                <div className="text-center py-6 text-[var(--text-tertiary)] text-[11px]">
+                  暂无财务数据
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div className="text-[10px] text-[var(--text-tertiary)]">
+                    报告期: {fundamental.report_date || "--"}
+                    {fundamental.updated_at && (
+                      <span className="ml-3">
+                        更新: {fundamental.updated_at}
+                      </span>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 gap-x-6 gap-y-1.5">
+                    {[
+                      ["营业总收入", fundamental.revenue],
+                      ["收入同比", fundamental.revenue_yoy],
+                      ["净利润", fundamental.net_profit],
+                      ["净利润同比", fundamental.net_profit_yoy],
+                      ["每股收益 EPS", fundamental.eps],
+                      ["每股净资产", fundamental.nav_per_share],
+                      ["净资产收益率 ROE", fundamental.roe],
+                      ["销售毛利率", fundamental.gross_margin],
+                      ["销售净利率", fundamental.net_margin],
+                      ["资产负债率", fundamental.debt_ratio],
+                      ["流动比率", fundamental.current_ratio],
+                      ["速动比率", fundamental.quick_ratio],
+                      ["存货周转率", fundamental.inventory_turnover],
+                      ["应收账款周转天数", fundamental.ar_days],
+                    ]
+                      .filter(([, v]) => v && v !== "--")
+                      .map(([label, val]) => (
+                        <div
+                          key={label}
+                          className="flex justify-between items-center border-b border-[var(--border-color)] pb-1"
+                        >
+                          <span className="text-[10px] text-[var(--text-tertiary)]">
+                            {label}
+                          </span>
+                          <span className="text-[11px] font-mono text-[var(--text-primary)]">
+                            {val}
+                          </span>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeTab !== "AI分析" && activeTab !== "财务" && (
             <div
               className="flex flex-col"
               style={{ height: `${bottomHeight}px` }}

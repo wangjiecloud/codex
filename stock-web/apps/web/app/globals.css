@@ -62,3 +62,89 @@ body {
 .react-flow__attribution {
   display: none;
 }
+
+@keyframes glass-rise {
+  0% {
+    transform: translateY(0px);
+    opacity: 0.6;
+  }
+  50% {
+    transform: translateY(-6px);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(0px);
+    opacity: 0.6;
+  }
+}
+@keyframes rdl-glow {
+  0% {
+    box-shadow: 0 0 0 0 #f5a62300;
+  }
+  50% {
+    box-shadow: 0 0 12px 4px #f5a62366;
+  }
+  100% {
+    box-shadow: 0 0 0 0 #f5a62300;
+  }
+}
+@keyframes chip-float {
+  0% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
+  100% {
+    transform: translateY(0px);
+  }
+}
+@keyframes bump-pulse {
+  0% {
+    opacity: 0.4;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.4);
+  }
+  100% {
+    opacity: 0.4;
+    transform: scale(1);
+  }
+}
+@keyframes scan-line {
+  0% {
+    top: 0%;
+    opacity: 0;
+  }
+  10% {
+    opacity: 0.6;
+  }
+  90% {
+    opacity: 0.6;
+  }
+  100% {
+    top: 100%;
+    opacity: 0;
+  }
+}
+@keyframes assemble-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.ov-flow-view .react-flow__node {
+  cursor: pointer !important;
+}
+
+.ov-flow-view .react-flow__node.selected > div {
+  outline: none !important;
+  box-shadow: none !important;
+}

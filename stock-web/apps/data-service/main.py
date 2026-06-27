@@ -12,6 +12,7 @@ from routers import (
     global_market,
     news_flash,
     concept_board,
+    theme,
 )
 import akshare as ak
 from fastapi import HTTPException
@@ -41,6 +42,7 @@ app.include_router(system.router, prefix="/api/system", tags=["系统监控"])
 app.include_router(global_market.router, prefix="/api/global", tags=["全球市场"])
 app.include_router(news_flash.router, prefix="/api/flash", tags=["快讯"])
 app.include_router(concept_board.router, prefix="/api/board", tags=["概念板块"])
+app.include_router(theme.router, prefix="/api/theme", tags=["主题板块"])
 
 _scheduler = BackgroundScheduler(timezone="Asia/Shanghai")
 

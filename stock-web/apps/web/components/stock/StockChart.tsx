@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useMemo } from "react";
+import { useEffect, useRef, useMemo, useState, useCallback } from "react";
 import {
   createChart,
   IChartApi,
@@ -17,11 +17,30 @@ interface KLineBar {
   low: number;
   close: number;
   volume: number;
+  turnRate?: number;
+  changePct?: number;
 }
 
 interface StockChartProps {
   data: KLineBar[];
   activeIndicators: string[];
+}
+
+interface HoverInfo {
+  time: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+  changePct: number;
+  amplitude: number;
+  turnRate: number;
+  ma5: number | null;
+  ma10: number | null;
+  ma20: number | null;
+  ma30: number | null;
+  ma60: number | null;
 }
 
 function generateMockKLine(code: string): KLineBar[] {
@@ -44,6 +63,8 @@ function generateMockKLine(code: string): KLineBar[] {
       low: parseFloat(low.toFixed(3)),
       close: parseFloat(close.toFixed(3)),
       volume,
+      changePct: parseFloat(((change / open) * 100).toFixed(2)),
+      turnRate: parseFloat((Math.random() * 5).toFixed(2)),
     });
     base = close;
   }
@@ -68,7 +89,6 @@ function calcMACD(
   data: KLineBar[],
 ): { time: string; macd: number; signal: number; hist: number }[] {
   const k = (period: number) => 2 / (period + 1);
-  const emas: number[] = [];
   const ema12: number[] = [];
   const ema26: number[] = [];
   data.forEach((bar, i) => {
@@ -162,12 +182,27 @@ function getCssVar(name: string): string {
     .trim();
 }
 
+function formatVolume(vol: number): string {
+  if (vol >= 1e8) return (vol / 1e8).toFixed(2) + "亿手";
+  if (vol >= 1e4) return (vol / 1e4).toFixed(2) + "万手";
+  return vol.toFixed(0) + "手";
+}
+
+const MA_CONFIG = [
+  { period: 5, color: "#f5a623", label: "MA5" },
+  { period: 10, color: "#4ade80", label: "MA10" },
+  { period: 20, color: "#60a5fa", label: "MA20" },
+  { period: 30, color: "#c084fc", label: "MA30" },
+  { period: 60, color: "#f472b6", label: "MA60" },
+];
+
 export function StockChart({ data, activeIndicators }: StockChartProps) {
   const { theme } = useTheme();
   const mainRef = useRef<HTMLDivElement>(null);
   const subRef = useRef<HTMLDivElement>(null);
   const sub2Ref = useRef<HTMLDivElement>(null);
   const volRef = useRef<HTMLDivElement>(null);
+  const [hoverInfo, setHoverInfo] = useState<HoverInfo | null>(null);
 
   const indicators = useMemo(() => {
     if (data.length === 0) return null;
@@ -183,6 +218,94 @@ export function StockChart({ data, activeIndicators }: StockChartProps) {
       boll: calcBOLL(data),
     };
   }, [data]);
+
+  const maByTime = useMemo(() => {
+    if (!indicators) return null;
+    const map: Record<
+      string,
+      {
+        ma5: number | null;
+        ma10: number | null;
+        ma20: number | null;
+        ma30: number | null;
+        ma60: number | null;
+      }
+    > = {};
+    const maSources = [
+      indicators.ma5,
+      indicators.ma10,
+      indicators.ma20,
+      indicators.ma30,
+      indicators.ma60,
+    ];
+    const keys = ["ma5", "ma10", "ma20", "ma30", "ma60"] as const;
+    data.forEach((bar) => {
+      map[bar.time] = {
+        ma5: null,
+        ma10: null,
+        ma20: null,
+        ma30: null,
+        ma60: null,
+      };
+    });
+    maSources.forEach((maArr, idx) => {
+      maArr.forEach((pt) => {
+        if (map[pt.time]) {
+          map[pt.time][keys[idx]] = pt.value;
+        }
+      });
+    });
+    return map;
+  }, [data, indicators]);
+
+  const barByTime = useMemo(() => {
+    const map: Record<string, KLineBar & { prevClose: number }> = {};
+    data.forEach((bar, i) => {
+      map[bar.time] = {
+        ...bar,
+        prevClose: i > 0 ? data[i - 1].close : bar.open,
+      };
+    });
+    return map;
+  }, [data]);
+
+  const handleCrosshairMove = useCallback(
+    (param: { time?: unknown; point?: { x: number; y: number } }) => {
+      if (!param.time || !maByTime) {
+        setHoverInfo(null);
+        return;
+      }
+      const timeStr = param.time as string;
+      const bar = barByTime[timeStr];
+      const ma = maByTime[timeStr];
+      if (!bar) {
+        setHoverInfo(null);
+        return;
+      }
+      const changePct =
+        bar.changePct != null
+          ? bar.changePct
+          : ((bar.close - bar.prevClose) / bar.prevClose) * 100;
+      const amplitude = ((bar.high - bar.low) / bar.prevClose) * 100;
+      setHoverInfo({
+        time: timeStr,
+        open: bar.open,
+        high: bar.high,
+        low: bar.low,
+        close: bar.close,
+        volume: bar.volume,
+        changePct,
+        amplitude,
+        turnRate: bar.turnRate ?? 0,
+        ma5: ma?.ma5 ?? null,
+        ma10: ma?.ma10 ?? null,
+        ma20: ma?.ma20 ?? null,
+        ma30: ma?.ma30 ?? null,
+        ma60: ma?.ma60 ?? null,
+      });
+    },
+    [barByTime, maByTime],
+  );
 
   useEffect(() => {
     if (!mainRef.current || data.length === 0 || !indicators) return;
@@ -202,7 +325,6 @@ export function StockChart({ data, activeIndicators }: StockChartProps) {
       rightPriceScale: { borderColor },
     };
 
-    // Main chart
     const main = createChart(mainRef.current, { ...opts, height: 280 });
     const candles = main.addSeries(CandlestickSeries, {
       upColor: "#e84444",
@@ -222,7 +344,6 @@ export function StockChart({ data, activeIndicators }: StockChartProps) {
       })),
     );
 
-    const MA_COLORS = ["#f5a623", "#4ade80", "#60a5fa", "#c084fc", "#f472b6"];
     const MA_DATA = [
       indicators.ma5,
       indicators.ma10,
@@ -232,7 +353,7 @@ export function StockChart({ data, activeIndicators }: StockChartProps) {
     ];
     MA_DATA.forEach((maData, i) => {
       const ma = main.addSeries(LineSeries, {
-        color: MA_COLORS[i],
+        color: MA_CONFIG[i].color,
         lineWidth: 1,
         priceLineVisible: false,
         lastValueVisible: false,
@@ -272,8 +393,8 @@ export function StockChart({ data, activeIndicators }: StockChartProps) {
     }
 
     main.timeScale().fitContent();
+    main.subscribeCrosshairMove(handleCrosshairMove);
 
-    // MACD sub-chart
     let macdChart: IChartApi | null = null;
     if (activeIndicators.includes("MACD") && subRef.current) {
       macdChart = createChart(subRef.current, { ...opts, height: 120 });
@@ -309,7 +430,6 @@ export function StockChart({ data, activeIndicators }: StockChartProps) {
       macdChart.timeScale().fitContent();
     }
 
-    // KDJ sub-chart
     let kdjChart: IChartApi | null = null;
     if (activeIndicators.includes("KDJ") && sub2Ref.current) {
       kdjChart = createChart(sub2Ref.current, { ...opts, height: 120 });
@@ -338,7 +458,6 @@ export function StockChart({ data, activeIndicators }: StockChartProps) {
       kdjChart.timeScale().fitContent();
     }
 
-    // Volume
     let volChart: IChartApi | null = null;
     if (activeIndicators.includes("VOL") && volRef.current) {
       volChart = createChart(volRef.current, { ...opts, height: 100 });
@@ -347,7 +466,7 @@ export function StockChart({ data, activeIndicators }: StockChartProps) {
         lastValueVisible: false,
       });
       vol.setData(
-        data.map((b, i) => ({
+        data.map((b) => ({
           time: b.time,
           value: b.volume,
           color: b.close >= b.open ? "#e84444" : "#09d464",
@@ -370,30 +489,177 @@ export function StockChart({ data, activeIndicators }: StockChartProps) {
 
     return () => {
       window.removeEventListener("resize", handleResize);
+      main.unsubscribeCrosshairMove(handleCrosshairMove);
       main.remove();
       macdChart?.remove();
       kdjChart?.remove();
       volChart?.remove();
     };
-  }, [data, activeIndicators, theme]);
+  }, [data, activeIndicators, theme, handleCrosshairMove]);
+
+  const changeColor =
+    hoverInfo && hoverInfo.changePct >= 0 ? "#e84444" : "#09d464";
 
   return (
     <div className="flex flex-col">
-      {/* MA indicators header */}
-      <div className="flex items-center gap-3 px-3 py-1.5 text-xs border-b border-[var(--border-color)]">
-        {[
-          { period: 5, color: "#f5a623" },
-          { period: 10, color: "#4ade80" },
-          { period: 20, color: "#60a5fa" },
-          { period: 30, color: "#c084fc" },
-          { period: 60, color: "#f472b6" },
-        ].map(({ period, color }) => (
-          <span key={period} style={{ color }} className="font-mono">
-            MA{period}
-          </span>
-        ))}
+      {/* MA header: shows MA values on hover, else shows labels */}
+      <div className="flex items-center gap-3 px-3 py-1.5 text-xs border-b border-[var(--border-color)] h-8">
+        {hoverInfo ? (
+          <>
+            {MA_CONFIG.map(({ label, color, period }) => {
+              const key = `ma${period}` as keyof Pick<
+                HoverInfo,
+                "ma5" | "ma10" | "ma20" | "ma30" | "ma60"
+              >;
+              const val = hoverInfo[key];
+              return (
+                <span
+                  key={label}
+                  className="font-mono flex items-baseline gap-0.5"
+                >
+                  <span style={{ color }} className="text-[10px]">
+                    {label}
+                  </span>
+                  {val != null ? (
+                    <span
+                      style={{ color }}
+                      className="text-[11px] font-semibold"
+                    >
+                      {val.toFixed(2)}
+                    </span>
+                  ) : (
+                    <span className="text-[var(--text-tertiary)] text-[10px]">
+                      --
+                    </span>
+                  )}
+                </span>
+              );
+            })}
+          </>
+        ) : (
+          MA_CONFIG.map(({ label, color }) => (
+            <span
+              key={label}
+              style={{ color }}
+              className="font-mono text-[11px]"
+            >
+              {label}
+            </span>
+          ))
+        )}
       </div>
-      <div ref={mainRef} className="w-full" />
+
+      {/* Main chart container (relative for tooltip overlay) */}
+      <div className="relative">
+        <div ref={mainRef} className="w-full" />
+
+        {/* Hover tooltip */}
+        {hoverInfo && (
+          <div
+            className="absolute top-2 left-3 pointer-events-none z-10"
+            style={{
+              background: "var(--bg-secondary)",
+              border: "1px solid var(--border-color)",
+              borderRadius: 8,
+              padding: "7px 10px",
+              minWidth: 200,
+              boxShadow: "0 2px 12px #00000033",
+            }}
+          >
+            <div
+              className="text-[10px] font-mono mb-1.5"
+              style={{ color: "var(--text-tertiary)" }}
+            >
+              {hoverInfo.time}
+            </div>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
+              {[
+                ["开盘", hoverInfo.open.toFixed(3)],
+                ["收盘", hoverInfo.close.toFixed(3)],
+                ["最高", hoverInfo.high.toFixed(3)],
+                ["最低", hoverInfo.low.toFixed(3)],
+              ].map(([label, val]) => (
+                <div key={label} className="flex justify-between gap-2">
+                  <span
+                    className="text-[10px]"
+                    style={{ color: "var(--text-tertiary)" }}
+                  >
+                    {label}
+                  </span>
+                  <span
+                    className="text-[10px] font-mono"
+                    style={{ color: "var(--text-secondary)" }}
+                  >
+                    {val}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <div className="mt-1.5 pt-1.5 border-t border-[var(--border-color)] grid grid-cols-2 gap-x-4 gap-y-0.5">
+              <div className="flex justify-between gap-2">
+                <span
+                  className="text-[10px]"
+                  style={{ color: "var(--text-tertiary)" }}
+                >
+                  涨幅
+                </span>
+                <span
+                  className="text-[10px] font-mono font-semibold"
+                  style={{ color: changeColor }}
+                >
+                  {hoverInfo.changePct >= 0 ? "+" : ""}
+                  {hoverInfo.changePct.toFixed(2)}%
+                </span>
+              </div>
+              <div className="flex justify-between gap-2">
+                <span
+                  className="text-[10px]"
+                  style={{ color: "var(--text-tertiary)" }}
+                >
+                  振幅
+                </span>
+                <span
+                  className="text-[10px] font-mono"
+                  style={{ color: "var(--text-secondary)" }}
+                >
+                  {hoverInfo.amplitude.toFixed(2)}%
+                </span>
+              </div>
+              <div className="flex justify-between gap-2">
+                <span
+                  className="text-[10px]"
+                  style={{ color: "var(--text-tertiary)" }}
+                >
+                  换手
+                </span>
+                <span
+                  className="text-[10px] font-mono"
+                  style={{ color: "var(--text-secondary)" }}
+                >
+                  {hoverInfo.turnRate > 0
+                    ? hoverInfo.turnRate.toFixed(2) + "%"
+                    : "--"}
+                </span>
+              </div>
+              <div className="flex justify-between gap-2">
+                <span
+                  className="text-[10px]"
+                  style={{ color: "var(--text-tertiary)" }}
+                >
+                  成交量
+                </span>
+                <span
+                  className="text-[10px] font-mono"
+                  style={{ color: "var(--text-secondary)" }}
+                >
+                  {formatVolume(hoverInfo.volume)}
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
       {activeIndicators.includes("MACD") && (
         <>
           <div className="flex items-center gap-3 px-3 py-1 text-xs border-t border-[var(--border-color)] bg-[var(--bg-primary)]">

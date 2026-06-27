@@ -156,8 +156,8 @@ async def get_quote(code: str, db: Session = Depends(get_db)):
             else 9999
         )
 
-        # 如果缓存较新(24小时内)，直接返回
-        if cache_age_hours < 24:
+        # 如果缓存较新(24小时内)且价格有效，直接返回
+        if cache_age_hours < 24 and row.price > 0:
             return {
                 "code": row.code,
                 "name": row.name,

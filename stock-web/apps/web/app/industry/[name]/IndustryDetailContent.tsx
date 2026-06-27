@@ -9,6 +9,7 @@ import {
   Edge,
   Background,
   Controls,
+  Panel,
   useNodesState,
   useEdgesState,
   BackgroundVariant,
@@ -17,6 +18,7 @@ import {
   Handle,
   Position,
   NodeMouseHandler,
+  ReactFlowInstance,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import {
@@ -77,22 +79,30 @@ type ComponentNode = Node<ComponentData>;
 
 const LAYER_STYLES: Record<
   ComponentData["layer"],
-  { border: string; text: string; badge: string }
+  { border: string; lightText: string; darkText: string; badge: string }
 > = {
   upstream: {
     border: "#3b5bdb",
-    text: "#3b5bdb",
+    lightText: "#3b5bdb",
+    darkText: "#7c9ff5",
     badge: "#1e3a5f",
   },
-  core: { border: "#f5a623", text: "#d97706", badge: "#3d2c00" },
+  core: {
+    border: "#f5a623",
+    lightText: "#d97706",
+    darkText: "#fbbf24",
+    badge: "#3d2c00",
+  },
   downstream: {
     border: "#10b981",
-    text: "#059669",
+    lightText: "#059669",
+    darkText: "#34d399",
     badge: "#0d3d2a",
   },
   application: {
     border: "#8b5cf6",
-    text: "#7c3aed",
+    lightText: "#7c3aed",
+    darkText: "#a78bfa",
     badge: "#2d1f4e",
   },
 };
@@ -110,18 +120,20 @@ function ComponentNodeCard({ data, selected }: NodeProps<ComponentNode>) {
   const s = data.isNvidia
     ? {
         border: "#76b900",
-        text: "#76b900",
+        lightText: "#76b900",
+        darkText: "#a3e635",
         badge: "#1a2e00",
       }
     : LAYER_STYLES[data.layer];
+  const text = isLight ? s.lightText : s.darkText;
   const mb = data.market ? MARKET_BADGE[data.market] : null;
   const cardBg = data.isNvidia
     ? isLight
       ? "linear-gradient(135deg, #f0fff0 0%, #e8f5e9 100%)"
-      : "linear-gradient(135deg, #0a0a1a 0%, #0d1a00 100%)"
+      : "linear-gradient(135deg, #0d1f03 0%, #091500 100%)"
     : isLight
       ? `linear-gradient(135deg, ${s.border}08 0%, var(--bg-secondary) 100%)`
-      : `linear-gradient(135deg, ${s.border}18 0%, var(--bg-secondary) 100%)`;
+      : `linear-gradient(135deg, ${s.border}2a 0%, #1a1d28 100%)`;
   return (
     <div
       style={{
@@ -170,7 +182,7 @@ function ComponentNodeCard({ data, selected }: NodeProps<ComponentNode>) {
           <div style={{ flex: 1, minWidth: 0 }}>
             <div
               style={{
-                color: s.text,
+                color: text,
                 fontWeight: 700,
                 fontSize: "13px",
                 lineHeight: 1.3,
@@ -184,7 +196,9 @@ function ComponentNodeCard({ data, selected }: NodeProps<ComponentNode>) {
             {data.ticker && (
               <div
                 style={{
-                  color: "var(--text-tertiary)",
+                  color: isLight
+                    ? "var(--text-tertiary)"
+                    : "var(--text-secondary)",
                   fontSize: "10px",
                   marginTop: 1,
                   fontFamily: "monospace",
@@ -198,7 +212,7 @@ function ComponentNodeCard({ data, selected }: NodeProps<ComponentNode>) {
                   <span
                     style={{
                       marginLeft: 4,
-                      background: `${mb.text}18`,
+                      background: `${mb.text}25`,
                       color: mb.text,
                       fontSize: 9,
                       padding: "1px 5px",
@@ -215,7 +229,7 @@ function ComponentNodeCard({ data, selected }: NodeProps<ComponentNode>) {
         </div>
         <p
           style={{
-            color: "var(--text-tertiary)",
+            color: isLight ? "var(--text-tertiary)" : "var(--text-secondary)",
             fontSize: "11px",
             margin: "0 0 6px 0",
             lineHeight: 1.4,
@@ -232,13 +246,13 @@ function ComponentNodeCard({ data, selected }: NodeProps<ComponentNode>) {
           <div
             style={{
               marginTop: "8px",
-              background: `${s.border}18`,
+              background: `${s.border}28`,
               borderRadius: "6px",
               padding: "3px 8px",
               display: "inline-block",
             }}
           >
-            <span style={{ color: s.text, fontSize: "10px", fontWeight: 500 }}>
+            <span style={{ color: text, fontSize: "10px", fontWeight: 600 }}>
               {data.stocks.length} 家龙头
             </span>
           </div>
@@ -261,7 +275,13 @@ function ComponentNodeCard({ data, selected }: NodeProps<ComponentNode>) {
                 boxShadow: "0 0 6px #76b900",
               }}
             />
-            <span style={{ color: "#76b900", fontSize: 10, fontWeight: 600 }}>
+            <span
+              style={{
+                color: isLight ? "#76b900" : "#a3e635",
+                fontSize: 10,
+                fontWeight: 600,
+              }}
+            >
               全球 AI 算力核心客户
             </span>
           </div>
@@ -364,18 +384,15 @@ function ProcessFlowView({
   const isLight = theme === "light";
   const [zoom, setZoom] = React.useState(1);
   const containerRef = React.useRef<HTMLDivElement>(null);
-  const tickRef = React.useRef(0);
+  const startTimeRef = React.useRef(Date.now());
   const frameRef = React.useRef<number | undefined>(undefined);
   const [, forceUpdate] = React.useReducer((x: number) => x + 1, 0);
 
-  // 优化的动画循环: 使用 RAF 代替 setInterval，降低更新频率到 500ms
   React.useEffect(() => {
     let lastUpdate = Date.now();
     const animate = () => {
       const now = Date.now();
-      if (now - lastUpdate >= 500) {
-        // 每 500ms 更新一次 (从 150ms 降低)
-        tickRef.current += 1;
+      if (now - lastUpdate >= 50) {
         forceUpdate();
         lastUpdate = now;
       }
@@ -415,32 +432,33 @@ function ProcessFlowView({
   const LAYER_COLORS = [
     {
       accent: "#3b82f6",
-      bg: isLight ? "#3b82f608" : "#050d1a",
-      border: isLight ? "#3b82f630" : "var(--bg-tertiary)",
+      bg: isLight ? "#3b82f606" : "#3b82f60e",
+      border: isLight ? "#3b82f640" : "#3b82f635",
     },
     {
       accent: "#06b6d4",
-      bg: isLight ? "#06b6d408" : "#050f14",
-      border: isLight ? "#06b6d430" : "#0e4050",
+      bg: isLight ? "#06b6d406" : "#06b6d40e",
+      border: isLight ? "#06b6d440" : "#06b6d435",
     },
     {
       accent: "#f5a623",
-      bg: isLight ? "#f5a62308" : "#14100002",
-      border: isLight ? "#f5a62330" : "#6e4200",
+      bg: isLight ? "#f5a62306" : "#f5a6230e",
+      border: isLight ? "#f5a62340" : "#f5a62335",
     },
     {
       accent: "#10b981",
-      bg: isLight ? "#10b98108" : "#02140a",
-      border: isLight ? "#10b98130" : "#0a4a28",
+      bg: isLight ? "#10b98106" : "#10b9810e",
+      border: isLight ? "#10b98140" : "#10b98135",
     },
     {
       accent: "#8b5cf6",
-      bg: isLight ? "#8b5cf608" : "#0a051a",
-      border: isLight ? "#8b5cf630" : "#3a1a7e",
+      bg: isLight ? "#8b5cf606" : "#8b5cf60e",
+      border: isLight ? "#8b5cf640" : "#8b5cf635",
     },
   ];
 
-  const particleOffset = (tickRef.current * 2) % 100;
+  const particleOffset =
+    (((Date.now() - startTimeRef.current) / 1500) * 100) % 100;
 
   const CtrlBtn = ({
     onClick,
@@ -515,7 +533,9 @@ function ProcessFlowView({
               transformStyle: "preserve-3d",
               transform: `scale(${zoom}) rotateX(8deg)`,
               transformOrigin: "50% 0%",
+              paddingTop: 32,
               paddingBottom: 48,
+              paddingLeft: 16,
               minWidth: "max-content",
               width: "100%",
             }}
@@ -581,8 +601,8 @@ function ProcessFlowView({
                                 x2={`${dstX}%`}
                                 y2={52}
                                 stroke={lc.accent}
-                                strokeWidth="1"
-                                strokeOpacity="0.25"
+                                strokeWidth={isLight ? "1.5" : "1"}
+                                strokeOpacity={isLight ? "0.55" : "0.3"}
                                 strokeDasharray="4 6"
                                 markerEnd={`url(#arr-${li})`}
                               />
@@ -1087,6 +1107,24 @@ const OVERVIEW_INDUSTRIES = [
     x: 1350,
     y: 220,
   },
+  {
+    id: "aiserver",
+    label: "AI服务器\n整机",
+    icon: "🖥️",
+    color: "#f43f5e",
+    reps: ["工业富联", "浪潮信息", "中科曙光"],
+    x: 560,
+    y: 880,
+  },
+  {
+    id: "semieq",
+    label: "半导体设备",
+    icon: "⚙️",
+    color: "#6366f1",
+    reps: ["北方华创", "中微公司", "华海清科"],
+    x: 980,
+    y: 880,
+  },
 ];
 
 const OVERVIEW_EDGES_DEF = [
@@ -1107,11 +1145,1524 @@ const OVERVIEW_EDGES_DEF = [
   { src: "aigpu", tgt: "idc", label: "GPU装入算力中心" },
   { src: "glasssub", tgt: "pcb", label: "IC载板→PCB基材" },
   { src: "glasssub", tgt: "aigpu", label: "先进封装基板" },
+  { src: "aigpu", tgt: "aiserver", label: "GPU装入服务器" },
+  { src: "memory", tgt: "aiserver", label: "HBM/DDR内存集成" },
+  { src: "pcb", tgt: "aiserver", label: "AI加速卡PCB" },
+  { src: "optics", tgt: "aiserver", label: "光模块集成" },
+  { src: "liquidcool", tgt: "aiserver", label: "液冷整机配套" },
+  { src: "semieq", tgt: "aigpu", label: "先进制程设备" },
+  { src: "semieq", tgt: "memory", label: "存储制造设备" },
+  { src: "aiserver", tgt: "idc", label: "整机部署算力中心" },
 ];
+
+type AnimStep = { icon: string; label: string; color: string; sub?: string };
+type EdgeAnim = {
+  title: string;
+  desc: string;
+  analogy: string;
+  whyMatters: string;
+  steps: AnimStep[];
+  tags: { term: string; plain: string }[];
+};
+
+const EDGE_ANIMATIONS: Record<string, EdgeAnim> = {
+  "aigpu->pcb": {
+    title: "GPU芯片 → 电路板",
+    desc: "GPU芯片必须焊在一块电路板上才能使用，就像CPU需要主板一样。AI加速卡就是把GPU和高级电路板合在一起的产品。",
+    analogy:
+      "就像手机芯片必须焊在手机主板上才能工作——电路板是芯片的'家'，给它供电、连接其他零件。",
+    whyMatters:
+      "GPU越卖越好，电路板需求就越大。GPU订单增加 → 电路板厂商订单也增加 → 相关股票涨。",
+    steps: [
+      {
+        icon: "🔮",
+        label: "GPU芯片",
+        color: "#a78bfa",
+        sub: "AI计算的核心大脑",
+      },
+      {
+        icon: "⬇",
+        label: "焊接上板",
+        color: "#f5a623",
+        sub: "用锡球把芯片固定在板上",
+      },
+      {
+        icon: "🟦",
+        label: "AI加速卡电路板",
+        color: "#34d399",
+        sub: "专为高速AI运算设计的板子",
+      },
+      {
+        icon: "⬇",
+        label: "插入服务器",
+        color: "#818cf8",
+        sub: "像插显卡一样装进服务器",
+      },
+      {
+        icon: "🖥",
+        label: "AI服务器整机",
+        color: "#94a3b8",
+        sub: "卖给数据中心使用",
+      },
+    ],
+    tags: [
+      { term: "BGA封装", plain: "芯片底部焊球连接" },
+      { term: "高速差分", plain: "高速信号传输方式" },
+      { term: "阻抗控制", plain: "信号不失真的关键" },
+    ],
+  },
+  "aigpu->mlcc": {
+    title: "GPU芯片 → 小电容",
+    desc: "每块AI加速卡上密密麻麻贴着数千颗芝麻大小的电容，专门防止GPU供电忽大忽小、保持稳定。",
+    analogy:
+      "就像汽车油箱旁边的缓冲装置——让发动机不会因为油压突变而抖动。这种小电容就是GPU供电的'缓冲垫'。",
+    whyMatters:
+      "一块GPU加速卡要用几千颗这样的小电容，AI服务器订单爆发 → 小电容需求暴增 → 相关公司业绩大涨。",
+    steps: [
+      {
+        icon: "🔮",
+        label: "GPU芯片工作",
+        color: "#a78bfa",
+        sub: "用电量每秒急剧变化",
+      },
+      {
+        icon: "⬇",
+        label: "供电出现波动",
+        color: "#f59e0b",
+        sub: "电压忽高忽低会损坏芯片",
+      },
+      {
+        icon: "🟡",
+        label: "MLCC小电容",
+        color: "#fbbf24",
+        sub: "芝麻大小，贴在GPU旁边",
+      },
+      {
+        icon: "⬇",
+        label: "吸收波动",
+        color: "#f5a623",
+        sub: "像海绵一样吸收电压抖动",
+      },
+      {
+        icon: "⚡",
+        label: "GPU稳定运行",
+        color: "#10b981",
+        sub: "供电平稳不出错",
+      },
+    ],
+    tags: [
+      { term: "去耦滤波", plain: "消除供电杂音" },
+      { term: "高频低ESL", plain: "高速响应不失效" },
+      { term: "大容量", plain: "能存更多电能缓冲" },
+    ],
+  },
+  "aigpu->coppercable": {
+    title: "GPU集群 → 短距铜缆",
+    desc: "同一个机柜或相邻机柜里的GPU之间，用铜缆连接比用光纤更便宜、速度一样快。",
+    analogy:
+      "就像家里路由器和电脑之间用网线连——距离近的时候，普通网线比光纤更划算。",
+    whyMatters:
+      "AI数据中心大量建设 → 机柜内短距离连接需求激增 → 铜缆厂商订单暴涨。",
+    steps: [
+      {
+        icon: "🔮",
+        label: "GPU服务器",
+        color: "#a78bfa",
+        sub: "需要与旁边的GPU快速通信",
+      },
+      {
+        icon: "⬇",
+        label: "选择连接方式",
+        color: "#94a3b8",
+        sub: "3米以内用铜缆更划算",
+      },
+      {
+        icon: "🔗",
+        label: "高速铜缆",
+        color: "#f97316",
+        sub: "专用高速铜缆，非普通网线",
+      },
+      {
+        icon: "⬇",
+        label: "接入交换机",
+        color: "#64748b",
+        sub: "所有GPU通过交换机互联",
+      },
+      {
+        icon: "🌐",
+        label: "GPU集群网络",
+        color: "#06b6d4",
+        sub: "几百甚至几千个GPU协同工作",
+      },
+    ],
+    tags: [
+      { term: "DAC直连", plain: "铜缆直接连两端" },
+      { term: "超低时延", plain: "信号几乎无延迟" },
+      { term: "机柜内互联", plain: "同一个柜子里连接" },
+    ],
+  },
+  "memory->aigpu": {
+    title: "存储芯片 → GPU超高速内存",
+    desc: "AI训练需要超快的内存，HBM内存芯片被叠放在GPU旁边、几乎紧贴在一起，速度比普通内存快10倍以上。",
+    analogy:
+      "就像把书桌从隔壁房间搬到手边——内存离GPU越近、越多层叠放，AI计算就越快。",
+    whyMatters:
+      "每块H100 GPU需要配80GB HBM，算力越强需要的HBM越多。HBM是AI芯片的'黄金搭档'，供不应求。",
+    steps: [
+      {
+        icon: "💾",
+        label: "HBM内存芯片",
+        color: "#38bdf8",
+        sub: "多层叠放，容量是普通内存数倍",
+      },
+      {
+        icon: "⬇",
+        label: "垂直打通孔",
+        color: "#818cf8",
+        sub: "上下层之间打通微小孔洞传信号",
+      },
+      {
+        icon: "🔷",
+        label: "硅中介层",
+        color: "#64748b",
+        sub: "像砧板一样承托GPU和内存",
+      },
+      {
+        icon: "⬇",
+        label: "微小焊点连接",
+        color: "#f5a623",
+        sub: "比头发丝还细的焊点固定",
+      },
+      {
+        icon: "🔮",
+        label: "GPU Die",
+        color: "#a78bfa",
+        sub: "与内存紧密相连，传输极快",
+      },
+    ],
+    tags: [
+      { term: "2.5D封装", plain: "芯片并排贴近封装" },
+      { term: "TSV通孔", plain: "垂直打孔传信号" },
+      { term: "超宽带宽", plain: "数据传输超级快" },
+    ],
+  },
+  "memory->pcb": {
+    title: "内存芯片 → 内存条",
+    desc: "散装内存芯片需要焊在内存条电路板上，才能插进服务器使用。AI服务器内存容量比普通电脑大10倍以上。",
+    analogy:
+      "就像电池单独放着没法用，装进手电筒（内存条PCB）才能正常供电——内存条是内存芯片的'载具'。",
+    whyMatters:
+      "AI服务器配置超大内存 → 带动DDR5内存条需求 → 内存芯片和内存条厂商双双受益。",
+    steps: [
+      {
+        icon: "💾",
+        label: "内存芯片颗粒",
+        color: "#38bdf8",
+        sub: "一颗颗小方块，存储数据",
+      },
+      {
+        icon: "⬇",
+        label: "贴片焊接",
+        color: "#94a3b8",
+        sub: "用机器把芯片精准贴在板子两面",
+      },
+      {
+        icon: "🟦",
+        label: "内存条电路板",
+        color: "#34d399",
+        sub: "一根长条板，可插入服务器",
+      },
+      {
+        icon: "⬇",
+        label: "金手指插槽",
+        color: "#f5a623",
+        sub: "板子边缘的金色接触点",
+      },
+      {
+        icon: "🖥",
+        label: "AI服务器主板",
+        color: "#818cf8",
+        sub: "每台服务器装多根大容量内存",
+      },
+    ],
+    tags: [
+      { term: "DDR5", plain: "最新一代内存规格" },
+      { term: "ECC校验", plain: "自动纠错防数据损坏" },
+      { term: "高密度", plain: "单条容量更大" },
+    ],
+  },
+  "pcb->optics": {
+    title: "电路板 → 光模块",
+    desc: "光模块内部有一小块特殊电路板，上面装着把电信号变成光信号的激光器。没有这块板子，光模块就无法工作。",
+    analogy:
+      "就像手电筒需要电路板控制亮度——光模块里的电路板控制激光的开关和强弱，把网络信号变成光脉冲。",
+    whyMatters:
+      "数据中心大量采购光模块 → 对特殊电路板需求激增 → 能做高频光模块电路板的企业订单爆发。",
+    steps: [
+      {
+        icon: "🟦",
+        label: "光模块专用电路板",
+        color: "#34d399",
+        sub: "用特殊材料，信号损耗极低",
+      },
+      {
+        icon: "⬇",
+        label: "焊接激光驱动芯片",
+        color: "#818cf8",
+        sub: "控制激光器的大脑",
+      },
+      {
+        icon: "💡",
+        label: "激光器",
+        color: "#06b6d4",
+        sub: "把电信号变成光脉冲",
+      },
+      {
+        icon: "⬇",
+        label: "封装成模块",
+        color: "#94a3b8",
+        sub: "热插拔，可随时换",
+      },
+      {
+        icon: "🌐",
+        label: "接入光纤网络",
+        color: "#10b981",
+        sub: "连接机房内外的光纤",
+      },
+    ],
+    tags: [
+      { term: "低损耗PCB", plain: "信号传输不失真" },
+      { term: "光电集成", plain: "光和电在同一块板上" },
+      { term: "高速SerDes", plain: "超高速数据收发" },
+    ],
+  },
+  "pcb->liquidcool": {
+    title: "电路板 → 液冷散热",
+    desc: "GPU电路板发热极大，液冷板直接贴在板背面带走热量，就像给发烫的板子贴上'冰袋'。",
+    analogy:
+      "就像发烧时贴退烧贴——液冷板紧贴GPU电路板背面，用流动的冷水把热量带走，比风扇高效10倍。",
+    whyMatters:
+      "GPU功耗越来越高，液冷成为必须 → AI数据中心每个机柜都需要液冷 → 液冷设备厂商迎来爆发期。",
+    steps: [
+      {
+        icon: "🟦",
+        label: "GPU电路板",
+        color: "#34d399",
+        sub: "满载运行时发热超过700瓦",
+      },
+      {
+        icon: "⬇",
+        label: "涂导热硅脂",
+        color: "#f5a623",
+        sub: "让热量更好地从板传到冷板",
+      },
+      {
+        icon: "❄️",
+        label: "液冷冷板",
+        color: "#818cf8",
+        sub: "贴着板背，内部有细小水道",
+      },
+      {
+        icon: "⬇",
+        label: "冷却液循环",
+        color: "#06b6d4",
+        sub: "水或防冻液不断流动带走热",
+      },
+      {
+        icon: "🏢",
+        label: "冷却设备",
+        color: "#94a3b8",
+        sub: "最终把热量散到室外",
+      },
+    ],
+    tags: [
+      { term: "直接液冷", plain: "冷板直接接触发热源" },
+      { term: "微通道", plain: "冷板内密集细小水道" },
+      { term: "PUE<1.1", plain: "用电效率极高" },
+    ],
+  },
+  "mlcc->aipower": {
+    title: "小电容 → 电源模块",
+    desc: "给AI服务器供电的电源模块里，大量使用小电容来稳定电压，就像电源里的'稳压器'。",
+    analogy:
+      "就像家用稳压器防止电压波动——电源模块里的小电容把波动的市电整理成平稳的直流电，才能给GPU安全供电。",
+    whyMatters:
+      "一台AI服务器要用几十个电源模块，每个模块需要数百颗小电容 → 电源需求暴增带动小电容需求同步暴增。",
+    steps: [
+      {
+        icon: "🟡",
+        label: "大容量小电容",
+        color: "#fbbf24",
+        sub: "耐高温、高容量规格",
+      },
+      {
+        icon: "⬇",
+        label: "装入电源模块",
+        color: "#f59e0b",
+        sub: "输入输出端各装一批",
+      },
+      {
+        icon: "⚡",
+        label: "AI服务器电源",
+        color: "#f59e0b",
+        sub: "把220V变成GPU需要的低压",
+      },
+      {
+        icon: "⬇",
+        label: "精细调压",
+        color: "#f5a623",
+        sub: "多级降压到GPU所需电压",
+      },
+      {
+        icon: "🔮",
+        label: "GPU稳定供电",
+        color: "#a78bfa",
+        sub: "电压稳定，不损坏芯片",
+      },
+    ],
+    tags: [
+      { term: "纹波滤波", plain: "消除电源杂波" },
+      { term: "高频电源", plain: "高速开关供电" },
+      { term: "低ESR", plain: "内阻低，损耗少" },
+    ],
+  },
+  "coppercable->optics": {
+    title: "铜缆 ↔ 光模块互补",
+    desc: "短距离（3米以内）用铜缆，长距离用光模块——两者像接力棒一样，分工覆盖不同场景。",
+    analogy:
+      "就像短途骑自行车、长途坐高铁——铜缆和光模块各有优势，覆盖不同距离，缺一不可。",
+    whyMatters:
+      "数据中心同时需要铜缆和光模块 → 两个行业都有订单 → 关注哪个比例更大决定哪个更受益。",
+    steps: [
+      {
+        icon: "🔗",
+        label: "铜缆（3米内）",
+        color: "#f97316",
+        sub: "成本低，不需要光电转换",
+      },
+      {
+        icon: "⬇⬆",
+        label: "根据距离选择",
+        color: "#94a3b8",
+        sub: "同一接口，灵活切换",
+      },
+      {
+        icon: "💡",
+        label: "光模块（3米以上）",
+        color: "#06b6d4",
+        sub: "最远可达2公里",
+      },
+      {
+        icon: "⬇",
+        label: "统一接口插槽",
+        color: "#64748b",
+        sub: "两种都能插，无需改交换机",
+      },
+      {
+        icon: "🌐",
+        label: "数据中心网络",
+        color: "#10b981",
+        sub: "灵活覆盖各种距离需求",
+      },
+    ],
+    tags: [
+      { term: "光铜互补", plain: "各管各的距离范围" },
+      { term: "距离选择", plain: "近铜远光" },
+      { term: "同一接口", plain: "两种线都能插同一口" },
+    ],
+  },
+  "optics->fiber": {
+    title: "光模块 → 光纤光缆",
+    desc: "光模块把电信号变成光，然后光信号通过光纤跑到几公里甚至几百公里外的另一个机房。",
+    analogy:
+      "就像路灯（光模块）发光，光通过玻璃管道（光纤）传到远处——光模块负责发光，光纤负责传光。",
+    whyMatters:
+      "数据中心之间需要超大带宽互联 → 光模块和光纤需求同步增长 → 两个产业链同时受益AI基建浪潮。",
+    steps: [
+      {
+        icon: "💡",
+        label: "光模块发光",
+        color: "#06b6d4",
+        sub: "把网络信号变成光脉冲",
+      },
+      {
+        icon: "⬇",
+        label: "光纤接头连接",
+        color: "#94a3b8",
+        sub: "专用接头插入光纤端口",
+      },
+      {
+        icon: "🌐",
+        label: "光纤",
+        color: "#10b981",
+        sub: "比头发细的玻璃丝，传光极快",
+      },
+      {
+        icon: "⬇",
+        label: "信号放大中继",
+        color: "#818cf8",
+        sub: "长距离中途补充信号强度",
+      },
+      {
+        icon: "🏢",
+        label: "目标机房接收",
+        color: "#e879f9",
+        sub: "跨城甚至跨国数据互通",
+      },
+    ],
+    tags: [
+      { term: "单模光纤", plain: "适合长距离传输" },
+      { term: "低损耗", plain: "光信号跑很远不衰减" },
+      { term: "长距传输", plain: "几百公里不失真" },
+    ],
+  },
+  "optics->idc": {
+    title: "光模块 → 数据中心互联",
+    desc: "数据中心内部几千台服务器之间的通信，几乎全靠光模块连接，是机房里用量最大的网络器件。",
+    analogy:
+      "就像城市道路系统——光模块是路口的交通灯和指路牌，确保数据'车辆'不堵塞、快速到达目的地。",
+    whyMatters:
+      "一个万卡AI集群需要数万个光模块 → 数据中心投资规模越大，光模块用量越惊人 → 直接拉动业绩。",
+    steps: [
+      {
+        icon: "💡",
+        label: "高速光模块",
+        color: "#06b6d4",
+        sub: "800G规格，一秒传800GB数据",
+      },
+      {
+        icon: "⬇",
+        label: "接入架顶交换机",
+        color: "#34d399",
+        sub: "每个机架顶部的汇聚交换机",
+      },
+      {
+        icon: "⬇",
+        label: "汇入核心交换机",
+        color: "#818cf8",
+        sub: "整个机房的流量核心",
+      },
+      {
+        icon: "⬇",
+        label: "超级骨干层",
+        color: "#a78bfa",
+        sub: "连接多个机房区域",
+      },
+      {
+        icon: "🏢",
+        label: "全光数据中心",
+        color: "#e879f9",
+        sub: "总带宽超过100万亿比特每秒",
+      },
+    ],
+    tags: [
+      { term: "CPO共封装", plain: "光模块直接焊在芯片旁" },
+      { term: "全光网络", plain: "全部用光纤连接" },
+      { term: "低时延", plain: "数据传输几乎无延迟" },
+    ],
+  },
+  "fiber->idc": {
+    title: "光纤光缆 → 数据中心骨干",
+    desc: "数据中心园区内所有机房之间，用大量光纤光缆组成高速'信息高速公路'，传输海量数据。",
+    analogy:
+      "就像城市地下的自来水管网——光纤光缆是数据中心的'数据管道'，几乎所有信息都流经这里。",
+    whyMatters:
+      "大型数据中心园区动辄铺设几千公里光纤 → AI基建潮带动光纤光缆需求长期高增长。",
+    steps: [
+      {
+        icon: "🌐",
+        label: "大容量光缆",
+        color: "#10b981",
+        sub: "一根缆内含上千根光纤",
+      },
+      {
+        icon: "⬇",
+        label: "配线架管理",
+        color: "#94a3b8",
+        sub: "统一管理机房内光纤连接",
+      },
+      {
+        icon: "⬇",
+        label: "波分复用设备",
+        color: "#818cf8",
+        sub: "一根光纤同时传多路信号",
+      },
+      {
+        icon: "⬇",
+        label: "光传输网络",
+        color: "#06b6d4",
+        sub: "高速长距离稳定传输",
+      },
+      {
+        icon: "🏢",
+        label: "各数据中心节点",
+        color: "#e879f9",
+        sub: "多个机房互联互通",
+      },
+    ],
+    tags: [
+      { term: "WDM波分", plain: "一根光纤传多路信号" },
+      { term: "预连接", plain: "提前做好接头的光缆" },
+      { term: "骨干组网", plain: "机房之间的主干网络" },
+    ],
+  },
+  "liquidcool->idc": {
+    title: "液冷散热 → 数据中心节能",
+    desc: "用液冷代替风冷，数据中心耗电量可降低30%，同样的电费能跑更多AI计算。",
+    analogy:
+      "就像换用节能空调——液冷让数据中心从'电老虎'变成'节能达人'，同样的电费能多跑30%算力。",
+    whyMatters:
+      "国家要求数据中心节能 + 电费是运营最大成本 → 液冷成为新建数据中心的标配 → 液冷设备需求长期增长。",
+    steps: [
+      {
+        icon: "❄️",
+        label: "液冷冷板/浸没槽",
+        color: "#818cf8",
+        sub: "直接带走GPU热量",
+      },
+      {
+        icon: "⬇",
+        label: "机架级冷量分配",
+        color: "#38bdf8",
+        sub: "每个机架统一分配冷水",
+      },
+      {
+        icon: "⬇",
+        label: "楼层级热交换",
+        color: "#06b6d4",
+        sub: "把热水变回冷水循环",
+      },
+      {
+        icon: "⬇",
+        label: "冷却塔最终散热",
+        color: "#10b981",
+        sub: "把热量散到室外空气",
+      },
+      {
+        icon: "🏢",
+        label: "节能数据中心",
+        color: "#e879f9",
+        sub: "用电效率极高，绿色环保",
+      },
+    ],
+    tags: [
+      { term: "PUE<1.1", plain: "电能几乎全用于计算" },
+      { term: "浸没/直冷", plain: "两种主流液冷方式" },
+      { term: "绿色IDC", plain: "低碳节能数据中心" },
+    ],
+  },
+  "aipower->idc": {
+    title: "供配电系统 → 数据中心用电",
+    desc: "数据中心的电从市电进来，经过多次变压和备电，最终稳稳地送到每块GPU，供配电是整个机房的生命线。",
+    analogy:
+      "就像小区配电房——市电进来后降压、过滤、备用电池兜底，最后干净稳定的电才送到每家每户（每个GPU）。",
+    whyMatters:
+      "一个大型AI数据中心用电量相当于一个县城 → 供配电设备采购量巨大 → 电源相关企业订单大幅增长。",
+    steps: [
+      {
+        icon: "⚡",
+        label: "高压市电进线",
+        color: "#f59e0b",
+        sub: "10千伏高压从电网引入",
+      },
+      {
+        icon: "⬇",
+        label: "备用电池保障",
+        color: "#f5a623",
+        sub: "停电时电池顶上，不间断供电",
+      },
+      {
+        icon: "⬇",
+        label: "高效直流母线",
+        color: "#fbbf24",
+        sub: "统一用48V直流分配更省电",
+      },
+      {
+        icon: "⬇",
+        label: "服务器电源模块",
+        color: "#f59e0b",
+        sub: "再降压到GPU能用的低压",
+      },
+      {
+        icon: "🏢",
+        label: "GPU稳定供电",
+        color: "#e879f9",
+        sub: "全年不停机，算力不中断",
+      },
+    ],
+    tags: [
+      { term: "HVDC高压直流", plain: "高效直流配电方式" },
+      { term: "BBU锂电", plain: "机柜级锂电备用电源" },
+      { term: "高效供电", plain: "损耗极低，省电省钱" },
+    ],
+  },
+  "aigpu->idc": {
+    title: "GPU芯片 → 智算中心",
+    desc: "GPU是AI算力的核心，从一颗芯片到一台服务器，再到一个机架，最终组成能训练大模型的智算中心。",
+    analogy:
+      "就像砖头→房间→楼层→大厦——GPU是'砖头'，一块块堆起来就是能跑大模型的'算力大厦'。",
+    whyMatters:
+      "AI大模型需求爆发 → 训练一个模型需要成千上万块GPU → 智算中心建设潮直接带动GPU及整个产业链。",
+    steps: [
+      {
+        icon: "🔮",
+        label: "GPU芯片",
+        color: "#a78bfa",
+        sub: "AI计算的最小单元",
+      },
+      {
+        icon: "⬇",
+        label: "装成AI加速卡",
+        color: "#818cf8",
+        sub: "H100/A100等产品形态",
+      },
+      {
+        icon: "⬇",
+        label: "8块卡组成服务器",
+        color: "#64748b",
+        sub: "一台AI服务器算力极强",
+      },
+      {
+        icon: "⬇",
+        label: "几十台装一个机架",
+        color: "#94a3b8",
+        sub: "高密度机架，节省空间",
+      },
+      {
+        icon: "🏢",
+        label: "万卡智算中心",
+        color: "#e879f9",
+        sub: "可训练GPT-4级别大模型",
+      },
+    ],
+    tags: [
+      { term: "HGX平台", plain: "英伟达多GPU服务器方案" },
+      { term: "万卡集群", plain: "上万块GPU协同工作" },
+      { term: "算力即服务", plain: "租用算力，无需买硬件" },
+    ],
+  },
+  "glasssub->pcb": {
+    title: "玻璃基板 → 高端电路板",
+    desc: "玻璃做成的基板比传统塑料基板更平整、更稳定，用来承载最精密的芯片封装，是下一代先进电路板的核心材料。",
+    analogy:
+      "就像换用石英玻璃做砧板代替木头砧板——玻璃更平整、不变形，让芯片焊接更精准、连接更可靠。",
+    whyMatters:
+      "AI芯片越来越先进，对基板要求越来越高 → 玻璃基板是未来方向 → 能做玻璃基板的公司有先发优势。",
+    steps: [
+      {
+        icon: "🔷",
+        label: "玻璃核心基材",
+        color: "#64748b",
+        sub: "受热不变形，极度平整",
+      },
+      {
+        icon: "⬇",
+        label: "激光打微孔",
+        color: "#94a3b8",
+        sub: "用激光在玻璃上打出微小通孔",
+      },
+      {
+        icon: "⬇",
+        label: "铜填充导电",
+        color: "#f5a623",
+        sub: "把铜填进孔里，形成导电通路",
+      },
+      {
+        icon: "⬇",
+        label: "布线层制作",
+        color: "#fbbf24",
+        sub: "在玻璃上刻出精细电路线路",
+      },
+      {
+        icon: "🟦",
+        label: "高端芯片封装基板",
+        color: "#34d399",
+        sub: "承载最先进的AI芯片",
+      },
+    ],
+    tags: [
+      { term: "TGV激光孔", plain: "激光在玻璃上打孔" },
+      { term: "低CTE", plain: "受热几乎不膨胀" },
+      { term: "高平整度", plain: "比塑料板平整100倍" },
+    ],
+  },
+  "glasssub->aigpu": {
+    title: "玻璃基板 → GPU先进封装",
+    desc: "玻璃基板作为GPU和内存芯片之间的'中间桥梁'，让两者可以紧密排列、高速互联，是AI芯片封装的未来方向。",
+    analogy:
+      "就像精密手表的表盘底板——玻璃基板为GPU和HBM内存提供超精准的'安装底板'，精度比头发丝还细。",
+    whyMatters:
+      "英特尔、英伟达、台积电都在研究玻璃基板 → 一旦量产，国内玻璃基板厂商将获得巨大订单机会。",
+    steps: [
+      {
+        icon: "🔷",
+        label: "玻璃基板",
+        color: "#64748b",
+        sub: "超平整，热稳定性极好",
+      },
+      {
+        icon: "⬇",
+        label: "精细布线",
+        color: "#f5a623",
+        sub: "在玻璃上刻出比头发细的电路",
+      },
+      {
+        icon: "⬇",
+        label: "通孔信号传递",
+        color: "#94a3b8",
+        sub: "上下层信号穿过玻璃互通",
+      },
+      {
+        icon: "⬇",
+        label: "铜柱焊接芯片",
+        color: "#fbbf24",
+        sub: "把GPU和内存固定在基板上",
+      },
+      {
+        icon: "🔮",
+        label: "GPU+HBM封装整体",
+        color: "#a78bfa",
+        sub: "最先进的2.5D/3D封装形态",
+      },
+    ],
+    tags: [
+      { term: "CoWoS封装", plain: "台积电先进封装技术" },
+      { term: "2.5D集成", plain: "芯片并排贴近封装" },
+      { term: "超低损耗", plain: "信号传输几乎无损失" },
+    ],
+  },
+  "semieq->aigpu": {
+    title: "半导体设备 → AI芯片制造",
+    desc: "光刻机、刻蚀机、CVD等半导体设备是AI芯片从设计图纸变成实体的必备工具，没有先进设备就无法制造先进芯片。",
+    analogy:
+      "就像没有精密机床就造不出汽车发动机——半导体设备是制造AI芯片的'工厂母机'，决定了芯片的制程精度上限。",
+    whyMatters:
+      "AI芯片需求爆发 → 台积电/中芯大幅扩产 → 设备订单激增 → 北方华创/中微公司等国产设备商直接受益。",
+    steps: [
+      {
+        icon: "⚙️",
+        label: "半导体设备",
+        color: "#6366f1",
+        sub: "光刻/刻蚀/CVD/CMP全套",
+      },
+      {
+        icon: "⬇",
+        label: "晶圆制程",
+        color: "#94a3b8",
+        sub: "在硅片上一层层刻出电路",
+      },
+      {
+        icon: "⬇",
+        label: "先进制程节点",
+        color: "#f5a623",
+        sub: "7nm/5nm/3nm越来越精细",
+      },
+      {
+        icon: "⬇",
+        label: "AI芯片晶圆",
+        color: "#a78bfa",
+        sub: "百亿晶体管集成在指甲盖上",
+      },
+      {
+        icon: "🔮",
+        label: "GPU/AI芯片",
+        color: "#a78bfa",
+        sub: "H100/B200算力核心",
+      },
+    ],
+    tags: [
+      { term: "光刻机", plain: "用光线在硅片上刻电路的设备" },
+      { term: "刻蚀机", plain: "精确去除多余材料的设备" },
+      { term: "国产替代", plain: "减少对ASML等海外设备依赖" },
+    ],
+  },
+  "semieq->memory": {
+    title: "半导体设备 → 存储芯片制造",
+    desc: "HBM/DRAM/NAND的生产同样依赖光刻、刻蚀、CMP等全套半导体设备，存储芯片扩产直接带动设备需求。",
+    analogy:
+      "就像印刷厂的印刷机——CMP、CVD等设备决定了存储颗粒的层数和密度，设备越好存储容量越大。",
+    whyMatters:
+      "长鑫存储/长江存储扩产 + SK海力士HBM3E产能扩张 → 国产设备商订单大幅增加。",
+    steps: [
+      {
+        icon: "⚙️",
+        label: "CMP/CVD设备",
+        color: "#6366f1",
+        sub: "华海清科/拓荆科技供应",
+      },
+      {
+        icon: "⬇",
+        label: "存储堆叠制程",
+        color: "#94a3b8",
+        sub: "HBM 12层堆叠精细工艺",
+      },
+      {
+        icon: "⬇",
+        label: "存储晶圆",
+        color: "#38bdf8",
+        sub: "DRAM/NAND存储颗粒",
+      },
+      { icon: "⬇", label: "封测组装", color: "#f5a623", sub: "颗粒封装成模组" },
+      {
+        icon: "💾",
+        label: "HBM/DRAM模组",
+        color: "#38bdf8",
+        sub: "AI服务器标配内存",
+      },
+    ],
+    tags: [
+      { term: "HBM堆叠", plain: "内存芯片垂直堆叠技术" },
+      { term: "CMP平坦化", plain: "让每层表面绝对平整" },
+      { term: "国产DRAM", plain: "长鑫存储自主DRAM" },
+    ],
+  },
+  "aigpu->aiserver": {
+    title: "AI芯片 → AI服务器整机",
+    desc: "GPU/AI芯片是AI服务器的大脑，工业富联、浪潮信息等ODM厂商把GPU和PCB、内存、散热、电源组装成完整的AI服务器产品。",
+    analogy:
+      "就像发动机装入汽车——GPU是发动机，AI服务器是整车，ODM厂商是汽车组装工厂。",
+    whyMatters:
+      "英伟达GB200出货量 → 直接决定工业富联/浪潮信息的AI服务器组装订单，一比一强绑定关系。",
+    steps: [
+      {
+        icon: "🔮",
+        label: "GPU/AI芯片",
+        color: "#a78bfa",
+        sub: "H100/B200/国产AI芯片",
+      },
+      {
+        icon: "⬇",
+        label: "装入加速卡",
+        color: "#f5a623",
+        sub: "GPU焊在PCB上成AI加速卡",
+      },
+      {
+        icon: "⬇",
+        label: "整机组装",
+        color: "#f43f5e",
+        sub: "8卡/16卡装入机箱",
+      },
+      {
+        icon: "⬇",
+        label: "液冷+供电集成",
+        color: "#818cf8",
+        sub: "液冷散热+GB200供配电",
+      },
+      {
+        icon: "🖥️",
+        label: "AI服务器整机",
+        color: "#f43f5e",
+        sub: "DGX H100/GB200 NVL72",
+      },
+    ],
+    tags: [
+      { term: "ODM代工", plain: "原始设计制造商，按规格生产" },
+      { term: "MGX认证", plain: "英伟达官方服务器设计规范" },
+      { term: "NVL72机柜", plain: "72块GPU组成的超算机柜" },
+    ],
+  },
+  "memory->aiserver": {
+    title: "存储芯片 → AI服务器内存",
+    desc: "HBM内存直接封装在GPU旁边，DDR5/LPDDR5作为主内存，每台AI服务器需要数TB内存，存储是AI服务器最重要的配套组件之一。",
+    analogy:
+      "就像电脑的内存条——没有足够大的内存，再强的GPU也无法处理大模型的海量参数。",
+    whyMatters:
+      "AI大模型参数量越来越大 → 需要更多HBM和DDR内存 → 澜起科技内存接口芯片、佰维存储模组订单暴增。",
+    steps: [
+      {
+        icon: "💾",
+        label: "HBM/DDR内存",
+        color: "#38bdf8",
+        sub: "SK海力士HBM3E+DDR5",
+      },
+      {
+        icon: "⬇",
+        label: "内存接口芯片",
+        color: "#06b6d4",
+        sub: "澜起科技RCD/MXC芯片",
+      },
+      {
+        icon: "⬇",
+        label: "内存模组",
+        color: "#38bdf8",
+        sub: "DIMM/HBM封装组件",
+      },
+      {
+        icon: "⬇",
+        label: "装入服务器主板",
+        color: "#f43f5e",
+        sub: "插槽/焊接集成",
+      },
+      {
+        icon: "🖥️",
+        label: "AI服务器整机",
+        color: "#f43f5e",
+        sub: "内存带宽决定AI算力上限",
+      },
+    ],
+    tags: [
+      { term: "HBM带宽", plain: "单GPU超3TB/s内存带宽" },
+      { term: "DDR5", plain: "第五代双倍速率内存" },
+      { term: "内存接口芯片", plain: "保证高速内存稳定读写" },
+    ],
+  },
+  "pcb->aiserver": {
+    title: "PCB → AI服务器主板/加速卡",
+    desc: "AI服务器的主板、GPU加速卡、网络互联板全部基于高端PCB，深南电路、沪电股份等PCB厂直接供应AI服务器厂商。",
+    analogy:
+      "就像房子的地基和框架——PCB是AI服务器所有零件的'载体'，信号、电力都在PCB上传输。",
+    whyMatters:
+      "每台AI服务器需要多块高端PCB → 工业富联/浪潮订单增长 → 沪电/深南PCB出货同步增长。",
+    steps: [
+      {
+        icon: "🟦",
+        label: "AI服务器PCB",
+        color: "#34d399",
+        sub: "16层以上高速多层板",
+      },
+      {
+        icon: "⬇",
+        label: "贴片焊接",
+        color: "#f5a623",
+        sub: "CPU/GPU/内存焊接上板",
+      },
+      {
+        icon: "⬇",
+        label: "AI加速卡",
+        color: "#34d399",
+        sub: "GPU+HBM+NVLink组件",
+      },
+      {
+        icon: "⬇",
+        label: "系统总装",
+        color: "#f43f5e",
+        sub: "加速卡插入服务器主板",
+      },
+      {
+        icon: "🖥️",
+        label: "AI服务器整机",
+        color: "#f43f5e",
+        sub: "全部互联组成完整系统",
+      },
+    ],
+    tags: [
+      { term: "AI加速卡", plain: "GPU+PCB组成的算力插卡" },
+      { term: "高速信号完整性", plain: "PCB确保高速信号不失真" },
+      { term: "HDI高密互联", plain: "超细线路满足AI板高密度需求" },
+    ],
+  },
+  "optics->aiserver": {
+    title: "光模块 → AI服务器光互联",
+    desc: "AI服务器机柜内GPU之间、机柜之间的高速互联大量使用光模块，400G/800G光模块是GB200 NVL72机柜的标配互联器件。",
+    analogy:
+      "就像高速公路的匝道——光模块把AI服务器内部和外部的数据高速传输，瓶颈决定整体AI训练速度。",
+    whyMatters:
+      "每套GB200 NVL72需要超过1000个光模块 → 中际旭创/新易盛等光模块厂直接受益。",
+    steps: [
+      {
+        icon: "💡",
+        label: "800G光模块",
+        color: "#06b6d4",
+        sub: "中际旭创/新易盛供应",
+      },
+      {
+        icon: "⬇",
+        label: "插入交换机/NIC",
+        color: "#94a3b8",
+        sub: "装入InfiniBand/以太网卡",
+      },
+      {
+        icon: "⬇",
+        label: "GPU间互联",
+        color: "#06b6d4",
+        sub: "NVLink/RoCE高速互联",
+      },
+      {
+        icon: "⬇",
+        label: "机柜间组网",
+        color: "#f43f5e",
+        sub: "Scale-out网络架构",
+      },
+      {
+        icon: "🖥️",
+        label: "AI服务器集群",
+        color: "#f43f5e",
+        sub: "万卡集群高速互联",
+      },
+    ],
+    tags: [
+      { term: "800G光模块", plain: "每秒传输800Gb数据的光器件" },
+      { term: "CPO共封装", plain: "光模块直接集成在芯片旁" },
+      { term: "InfiniBand", plain: "AI训练专用高速互联网络" },
+    ],
+  },
+  "liquidcool->aiserver": {
+    title: "液冷散热 → AI服务器热管理",
+    desc: "GB200单颗GPU功耗超过1000W，风冷已无法满足散热需求，液冷（冷板式/浸没式）成为AI服务器标配，高澜/英维克等直接配套整机厂。",
+    analogy:
+      "就像赛车发动机的水冷系统——AI服务器产热量是普通服务器的5倍以上，必须用液体带走热量才能稳定运行。",
+    whyMatters:
+      "GB200强制采用液冷 → 整机厂必须配套液冷方案 → 工业富联与高澜/申菱环境深度绑定。",
+    steps: [
+      {
+        icon: "❄️",
+        label: "冷板/CDU液冷",
+        color: "#818cf8",
+        sub: "高澜股份/申菱环境",
+      },
+      {
+        icon: "⬇",
+        label: "紧贴GPU散热",
+        color: "#94a3b8",
+        sub: "冷板直接压在GPU上",
+      },
+      { icon: "⬇", label: "冷却液循环", color: "#818cf8", sub: "带走1kW+热量" },
+      {
+        icon: "⬇",
+        label: "CDU热交换",
+        color: "#6366f1",
+        sub: "集中冷量分配单元",
+      },
+      {
+        icon: "🖥️",
+        label: "AI服务器整机",
+        color: "#f43f5e",
+        sub: "稳定运行不降频",
+      },
+    ],
+    tags: [
+      { term: "冷板式液冷", plain: "冷液在金属板内循环带走热量" },
+      { term: "PUE", plain: "数据中心能耗效率指标" },
+      { term: "TDP热功耗", plain: "芯片满负载的最大发热量" },
+    ],
+  },
+  "aiserver->idc": {
+    title: "AI服务器整机 → 智算中心部署",
+    desc: "AI服务器是智算中心/IDC的核心设备，整机交付后安装在IDC机柜中，接入供电、液冷、网络，形成完整的AI算力基础设施。",
+    analogy:
+      "就像把发动机装入工厂的生产线——AI服务器是算力'发动机'，IDC是运转它的'工厂'，两者缺一不可。",
+    whyMatters:
+      "算力需求爆发 → IDC扩容建设 → AI服务器需求增长 → 整机厂+IDC运营商同步受益。",
+    steps: [
+      {
+        icon: "🖥️",
+        label: "AI服务器整机",
+        color: "#f43f5e",
+        sub: "工业富联/浪潮组装完成",
+      },
+      {
+        icon: "⬇",
+        label: "运输到IDC机房",
+        color: "#94a3b8",
+        sub: "整柜交付或分批安装",
+      },
+      {
+        icon: "⬇",
+        label: "接入供配电",
+        color: "#f59e0b",
+        sub: "HVDC/BBU/UPS供电系统",
+      },
+      {
+        icon: "⬇",
+        label: "接入液冷管路",
+        color: "#818cf8",
+        sub: "连接CDU冷量分配单元",
+      },
+      {
+        icon: "🏢",
+        label: "智算中心上线",
+        color: "#e879f9",
+        sub: "算力向云厂商/政企交付",
+      },
+    ],
+    tags: [
+      { term: "智算中心", plain: "专门运行AI大模型的数据中心" },
+      { term: "整柜交付", plain: "GB200 NVL72整机柜交付方式" },
+      { term: "算力租赁", plain: "按算力小时收费的商业模式" },
+    ],
+  },
+};
+
+function getNodeEdges(
+  nodeId: string,
+): { edge: (typeof OVERVIEW_EDGES_DEF)[0]; anim: EdgeAnim }[] {
+  return OVERVIEW_EDGES_DEF.filter((e) => e.src === nodeId || e.tgt === nodeId)
+    .map((e) => {
+      const key = `${e.src}->${e.tgt}`;
+      const anim = EDGE_ANIMATIONS[key];
+      return anim ? { edge: e, anim } : null;
+    })
+    .filter(Boolean) as {
+    edge: (typeof OVERVIEW_EDGES_DEF)[0];
+    anim: EdgeAnim;
+  }[];
+}
+
+function RelationTooltip({
+  nodeId,
+  pinned,
+  onClose,
+}: {
+  nodeId: string;
+  pinned?: boolean;
+  onClose?: () => void;
+}) {
+  const [activeIdx, setActiveIdx] = React.useState(0);
+  const edges = React.useMemo(() => getNodeEdges(nodeId), [nodeId]);
+  const [tick, setTick] = React.useState(0);
+
+  React.useEffect(() => {
+    setActiveIdx(0);
+    setTick(0);
+  }, [nodeId]);
+
+  React.useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 50);
+    return () => clearInterval(id);
+  }, []);
+
+  const current = edges[activeIdx];
+  if (!current) return null;
+
+  const { anim } = current;
+  const progress = ((tick * 50) % 2200) / 2200;
+  const ind = OVERVIEW_INDUSTRIES.find((i) => i.id === nodeId);
+
+  return (
+    <div
+      style={{
+        position: "absolute",
+        top: 16,
+        right: 16,
+        width: 280,
+        background: "var(--bg-secondary)",
+        border: `1px solid ${pinned ? "#f5a62366" : "#a78bfa33"}`,
+        borderRadius: 14,
+        padding: "12px 14px 12px",
+        boxShadow: pinned ? "0 8px 40px #00000066" : "0 4px 20px #00000033",
+        animation: "assemble-fade-in 0.2s ease",
+        zIndex: 30,
+        pointerEvents: pinned ? "auto" : "none",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          marginBottom: 8,
+        }}
+      >
+        <span style={{ fontSize: 14 }}>{ind?.icon}</span>
+        <span
+          style={{
+            fontSize: 11,
+            fontWeight: 700,
+            color: ind?.color ?? "#f5a623",
+            flex: 1,
+          }}
+        >
+          {ind?.label.replace("\n", " ")}
+        </span>
+        {pinned ? (
+          <button
+            onClick={onClose}
+            style={{
+              width: 20,
+              height: 20,
+              borderRadius: "50%",
+              border: "1px solid var(--border-color)",
+              background: "var(--bg-tertiary)",
+              color: "var(--text-tertiary)",
+              fontSize: 12,
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexShrink: 0,
+            }}
+          >
+            ×
+          </button>
+        ) : (
+          <span
+            style={{
+              fontSize: 8.5,
+              color: "var(--text-tertiary)",
+              border: "1px solid var(--border-color)",
+              borderRadius: 4,
+              padding: "1px 5px",
+            }}
+          >
+            点击节点固定
+          </span>
+        )}
+      </div>
+
+      {edges.length > 1 && (
+        <div
+          style={{
+            display: "flex",
+            gap: 4,
+            marginBottom: 10,
+            flexWrap: "wrap",
+          }}
+        >
+          {edges.map((e, i) => {
+            const srcInd = OVERVIEW_INDUSTRIES.find((x) => x.id === e.edge.src);
+            const tgtInd = OVERVIEW_INDUSTRIES.find((x) => x.id === e.edge.tgt);
+            const otherInd = e.edge.src === nodeId ? tgtInd : srcInd;
+            return (
+              <button
+                key={i}
+                onClick={() => {
+                  setActiveIdx(i);
+                  setTick(0);
+                }}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 3,
+                  padding: "3px 7px",
+                  borderRadius: 5,
+                  border: `1px solid ${i === activeIdx ? (otherInd?.color ?? "#f5a623") + "88" : "var(--border-color)"}`,
+                  background:
+                    i === activeIdx
+                      ? (otherInd?.color ?? "#f5a623") + "18"
+                      : "var(--bg-tertiary)",
+                  color:
+                    i === activeIdx
+                      ? (otherInd?.color ?? "#f5a623")
+                      : "var(--text-tertiary)",
+                  fontSize: 9,
+                  fontWeight: i === activeIdx ? 700 : 400,
+                  cursor: "pointer",
+                  transition: "all 0.15s",
+                  pointerEvents: "auto",
+                }}
+              >
+                <span>{otherInd?.icon}</span>
+                <span>{otherInd?.label.split("\n")[0]}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      <div
+        style={{
+          borderBottom: "1px solid var(--border-color)",
+          marginBottom: 8,
+          paddingBottom: 6,
+        }}
+      >
+        <div
+          style={{
+            fontSize: 10.5,
+            fontWeight: 700,
+            color: "#f5a623",
+            marginBottom: 4,
+          }}
+        >
+          {anim.title}
+        </div>
+        <div
+          style={{
+            fontSize: 9,
+            color: "var(--text-secondary)",
+            lineHeight: 1.6,
+            marginBottom: 6,
+          }}
+        >
+          {anim.desc}
+        </div>
+        <div
+          style={{
+            background: "#a78bfa14",
+            border: "1px solid #a78bfa33",
+            borderRadius: 6,
+            padding: "5px 7px",
+            marginBottom: 5,
+          }}
+        >
+          <span style={{ fontSize: 9, color: "#a78bfa", fontWeight: 700 }}>
+            💡 生活类比
+          </span>
+          <div
+            style={{
+              fontSize: 8.5,
+              color: "var(--text-secondary)",
+              lineHeight: 1.5,
+              marginTop: 2,
+            }}
+          >
+            {anim.analogy}
+          </div>
+        </div>
+        <div
+          style={{
+            background: "#f5a62314",
+            border: "1px solid #f5a62333",
+            borderRadius: 6,
+            padding: "5px 7px",
+          }}
+        >
+          <span style={{ fontSize: 9, color: "#f5a623", fontWeight: 700 }}>
+            📈 投资意义
+          </span>
+          <div
+            style={{
+              fontSize: 8.5,
+              color: "var(--text-secondary)",
+              lineHeight: 1.5,
+              marginTop: 2,
+            }}
+          >
+            {anim.whyMatters}
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+        {anim.steps.map((step, si) => {
+          const stepProgress = Math.min(
+            1,
+            Math.max(0, progress * anim.steps.length - si),
+          );
+          const isActive =
+            progress * anim.steps.length >= si &&
+            progress * anim.steps.length < si + 1;
+          const isPast = progress * anim.steps.length >= si + 1;
+          return (
+            <React.Fragment key={si}>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "4px 7px",
+                  borderRadius: 6,
+                  background: isActive
+                    ? `${step.color}18`
+                    : isPast
+                      ? `${step.color}0a`
+                      : "transparent",
+                  border: `1px solid ${isActive ? step.color + "55" : isPast ? step.color + "22" : "transparent"}`,
+                  transition: "all 0.3s ease",
+                  opacity: isPast || isActive ? 1 : 0.3,
+                }}
+              >
+                <span style={{ fontSize: 14, flexShrink: 0 }}>{step.icon}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div
+                    style={{
+                      fontSize: 9.5,
+                      fontWeight: 700,
+                      color: step.color,
+                      lineHeight: 1.2,
+                    }}
+                  >
+                    {step.label}
+                  </div>
+                  {step.sub && (
+                    <div
+                      style={{
+                        fontSize: 8,
+                        color: "var(--text-tertiary)",
+                        lineHeight: 1.2,
+                      }}
+                    >
+                      {step.sub}
+                    </div>
+                  )}
+                </div>
+                {isActive && (
+                  <div
+                    style={{
+                      width: 24,
+                      height: 3,
+                      borderRadius: 2,
+                      background: "var(--bg-tertiary)",
+                      flexShrink: 0,
+                      overflow: "hidden",
+                    }}
+                  >
+                    <div
+                      style={{
+                        height: "100%",
+                        width: `${stepProgress * 100}%`,
+                        background: step.color,
+                        borderRadius: 2,
+                        transition: "width 0.05s linear",
+                      }}
+                    />
+                  </div>
+                )}
+              </div>
+              {si < anim.steps.length - 1 && (
+                <div
+                  style={{
+                    width: 1,
+                    height: 6,
+                    background: isPast
+                      ? step.color + "55"
+                      : "var(--border-color)",
+                    marginLeft: 18,
+                    transition: "background 0.3s",
+                  }}
+                />
+              )}
+            </React.Fragment>
+          );
+        })}
+      </div>
+
+      <div style={{ marginTop: 8, display: "flex", gap: 4, flexWrap: "wrap" }}>
+        {anim.tags.map((tag) => (
+          <div
+            key={tag.term}
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              padding: "2px 7px",
+              borderRadius: 5,
+              background: "var(--bg-tertiary)",
+              border: "1px solid var(--border-color)",
+            }}
+          >
+            <span
+              style={{
+                fontSize: 7.5,
+                color: "var(--text-tertiary)",
+                lineHeight: 1.2,
+              }}
+            >
+              {tag.term}
+            </span>
+            <span
+              style={{
+                fontSize: 8.5,
+                fontWeight: 600,
+                color: "var(--text-secondary)",
+                lineHeight: 1.3,
+              }}
+            >
+              {tag.plain}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 type OverviewNodeData = {
   ind: (typeof OVERVIEW_INDUSTRIES)[0];
   onNavigate: (id: string) => void;
+  onSelect?: (id: string) => void;
+  isSelected?: boolean;
+  isDimmed?: boolean;
 } & Record<string, unknown>;
 
 type OverviewNode = Node<OverviewNodeData>;
@@ -1119,21 +2670,39 @@ type OverviewNode = Node<OverviewNodeData>;
 function OverviewClusterNode({ data }: NodeProps<OverviewNode>) {
   const ind = data.ind as (typeof OVERVIEW_INDUSTRIES)[0];
   const onNavigate = data.onNavigate as (id: string) => void;
+  const onSelect = data.onSelect as ((id: string) => void) | undefined;
+  const isSelected = !!data.isSelected;
+  const isDimmed = !!data.isDimmed;
+
+  const handleClick = () => {
+    if (onSelect) {
+      onSelect(ind.id);
+    } else {
+      onNavigate(ind.id);
+    }
+  };
+
   return (
     <div
-      onClick={() => onNavigate(ind.id)}
+      onClick={handleClick}
       style={{
-        background: `${ind.color}12`,
-        border: `2px solid ${ind.color}66`,
+        background: isSelected ? `${ind.color}22` : `${ind.color}12`,
+        border: isSelected
+          ? `2px solid ${ind.color}`
+          : `2px solid ${ind.color}66`,
         borderRadius: 14,
         padding: "12px 16px",
         minWidth: 160,
         cursor: "pointer",
         transition: "all 0.18s ease",
-        boxShadow: `0 0 20px ${ind.color}22`,
+        boxShadow: isSelected
+          ? `0 0 32px ${ind.color}66`
+          : `0 0 20px ${ind.color}22`,
         userSelect: "none",
+        opacity: isDimmed ? 0.25 : 1,
       }}
       onMouseEnter={(e) => {
+        if (isDimmed) return;
         (e.currentTarget as HTMLDivElement).style.border =
           `2px solid ${ind.color}`;
         (e.currentTarget as HTMLDivElement).style.boxShadow =
@@ -1142,10 +2711,12 @@ function OverviewClusterNode({ data }: NodeProps<OverviewNode>) {
           "translateY(-2px)";
       }}
       onMouseLeave={(e) => {
-        (e.currentTarget as HTMLDivElement).style.border =
-          `2px solid ${ind.color}66`;
-        (e.currentTarget as HTMLDivElement).style.boxShadow =
-          `0 0 20px ${ind.color}22`;
+        (e.currentTarget as HTMLDivElement).style.border = isSelected
+          ? `2px solid ${ind.color}`
+          : `2px solid ${ind.color}66`;
+        (e.currentTarget as HTMLDivElement).style.boxShadow = isSelected
+          ? `0 0 32px ${ind.color}66`
+          : `0 0 20px ${ind.color}22`;
         (e.currentTarget as HTMLDivElement).style.transform = "none";
       }}
     >
@@ -1208,13 +2779,1056 @@ function OverviewClusterNode({ data }: NodeProps<OverviewNode>) {
             background: ind.color,
           }}
         />
-        点击查看详细供应链
+        {isSelected ? (
+          <span
+            onClick={(e) => {
+              e.stopPropagation();
+              onNavigate(ind.id);
+            }}
+            style={{
+              color: ind.color,
+              fontWeight: 700,
+              cursor: "pointer",
+              textDecoration: "underline",
+            }}
+          >
+            进入供应链详情 →
+          </span>
+        ) : (
+          <span>点击查看详细供应链</span>
+        )}
       </div>
     </div>
   );
 }
 
+const SWIM_LANES = [
+  {
+    id: "semieq_lane",
+    label: "半导体制造",
+    color: "#6366f1",
+    bg: "#6366f112",
+    industries: ["semieq"],
+  },
+  {
+    id: "chip",
+    label: "芯片 / 计算",
+    color: "#a78bfa",
+    bg: "#a78bfa12",
+    industries: ["aigpu", "memory", "glasssub"],
+  },
+  {
+    id: "board",
+    label: "板卡 / 互联",
+    color: "#34d399",
+    bg: "#34d39912",
+    industries: ["pcb", "mlcc", "coppercable"],
+  },
+  {
+    id: "optical",
+    label: "光通信",
+    color: "#06b6d4",
+    bg: "#06b6d412",
+    industries: ["optics", "fiber"],
+  },
+  {
+    id: "dc",
+    label: "数据中心",
+    color: "#818cf8",
+    bg: "#818cf812",
+    industries: ["liquidcool", "aipower", "idc"],
+  },
+  {
+    id: "server",
+    label: "服务器整机",
+    color: "#f43f5e",
+    bg: "#f43f5e12",
+    industries: ["aiserver"],
+  },
+];
+
+// ─── Shared zoom hook ────────────────────────────────────────────────────────
+
+function useZoomable() {
+  const containerRef = React.useRef<HTMLDivElement>(null);
+  const [zoom, setZoom] = React.useState(1);
+  React.useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const handler = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      setZoom((z) => {
+        const delta = e.deltaY > 0 ? -0.08 : 0.08;
+        return Math.min(2, Math.max(0.3, +(z + delta).toFixed(2)));
+      });
+    };
+    el.addEventListener("wheel", handler, { passive: false });
+    return () => el.removeEventListener("wheel", handler);
+  }, []);
+  return { containerRef, zoom, setZoom };
+}
+
+function useWheelZoom(setZoom: React.Dispatch<React.SetStateAction<number>>) {
+  const containerRef = React.useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const handler = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      setZoom((z) => {
+        const delta = e.deltaY > 0 ? -0.08 : 0.08;
+        return Math.min(2, Math.max(0.3, +(z + delta).toFixed(2)));
+      });
+    };
+    el.addEventListener("wheel", handler, { passive: false });
+    return () => el.removeEventListener("wheel", handler);
+  }, [setZoom]);
+  return containerRef;
+}
+
+// ─── Shared zoom button ───────────────────────────────────────────────────────
+
+function ZoomBtn({
+  onClick,
+  title,
+  children,
+}: {
+  onClick: () => void;
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      style={{
+        width: 26,
+        height: 26,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        background: "transparent",
+        border: "none",
+        borderBottom: "1px solid var(--border-color)",
+        color: "var(--text-secondary)",
+        fontSize: 14,
+        cursor: "pointer",
+        transition: "background 0.1s",
+      }}
+      onMouseEnter={(e) =>
+        ((e.currentTarget as HTMLButtonElement).style.background =
+          "var(--bg-tertiary)")
+      }
+      onMouseLeave={(e) =>
+        ((e.currentTarget as HTMLButtonElement).style.background =
+          "transparent")
+      }
+    >
+      {children}
+    </button>
+  );
+}
+
+// ─── Zoom controls widget ─────────────────────────────────────────────────────
+
+function ZoomControls({
+  zoom,
+  setZoom,
+}: {
+  zoom: number;
+  setZoom: React.Dispatch<React.SetStateAction<number>>;
+}) {
+  return (
+    <div
+      style={{
+        position: "absolute",
+        bottom: 16,
+        left: 16,
+        background: "var(--bg-secondary)",
+        border: "1px solid var(--border-color)",
+        borderRadius: 10,
+        overflow: "hidden",
+        display: "flex",
+        flexDirection: "column",
+        boxShadow: "0 4px 16px #00000066",
+        zIndex: 10,
+      }}
+    >
+      <ZoomBtn
+        onClick={() => setZoom((z) => Math.min(2, +(z + 0.1).toFixed(1)))}
+        title="放大"
+      >
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+          <circle cx="7" cy="7" r="6" stroke="currentColor" strokeWidth="1.5" />
+          <line
+            x1="4"
+            y1="7"
+            x2="10"
+            y2="7"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+          />
+          <line
+            x1="7"
+            y1="4"
+            x2="7"
+            y2="10"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+          />
+        </svg>
+      </ZoomBtn>
+      <ZoomBtn
+        onClick={() => setZoom((z) => Math.max(0.3, +(z - 0.1).toFixed(1)))}
+        title="缩小"
+      >
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+          <circle cx="7" cy="7" r="6" stroke="currentColor" strokeWidth="1.5" />
+          <line
+            x1="4"
+            y1="7"
+            x2="10"
+            y2="7"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+          />
+        </svg>
+      </ZoomBtn>
+      <ZoomBtn onClick={() => setZoom(1)} title="重置缩放">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+          <path
+            d="M2 7C2 4.24 4.24 2 7 2c1.66 0 3.13.8 4.07 2.04M12 7c0 2.76-2.24 5-5 5-1.66 0-3.13-.8-4.07-2.04"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+          />
+          <path d="M10.5 2.5L11.5 4.5H9.5L10.5 2.5Z" fill="currentColor" />
+        </svg>
+      </ZoomBtn>
+    </div>
+  );
+}
+
+function SwimLaneView({
+  onNavigate,
+  zoom,
+  setZoom,
+}: {
+  onNavigate: (id: string) => void;
+  zoom: number;
+  setZoom: React.Dispatch<React.SetStateAction<number>>;
+}) {
+  const byId = Object.fromEntries(OVERVIEW_INDUSTRIES.map((i) => [i.id, i]));
+  const edgeMap: Record<string, string[]> = {};
+  for (const e of OVERVIEW_EDGES_DEF) {
+    if (!edgeMap[e.src]) edgeMap[e.src] = [];
+    edgeMap[e.src].push(e.tgt);
+  }
+  const [hovered, setHovered] = React.useState<string | null>(null);
+  const [pinnedId, setPinnedId] = React.useState<string | null>(null);
+  const activeTooltipId = pinnedId ?? hovered;
+
+  const connectedTo = React.useMemo(() => {
+    const base = pinnedId ?? hovered;
+    if (!base) return new Set<string>();
+    const s = new Set<string>();
+    for (const e of OVERVIEW_EDGES_DEF) {
+      if (e.src === base) s.add(e.tgt);
+      if (e.tgt === base) s.add(e.src);
+    }
+    return s;
+  }, [hovered, pinnedId]);
+
+  const containerRef = useWheelZoom(setZoom);
+
+  return (
+    <div ref={containerRef} className="flex-1 relative overflow-hidden">
+      <div className="overflow-auto" style={{ width: "100%", height: "100%" }}>
+        <div
+          style={{
+            transform: `scale(${zoom})`,
+            transformOrigin: "50% 0%",
+            padding: "24px",
+            display: "flex",
+            flexDirection: "column",
+            gap: "12px",
+          }}
+        >
+          {SWIM_LANES.map((lane) => (
+            <div
+              key={lane.id}
+              style={{
+                background: lane.bg,
+                border: `1px solid ${lane.color}33`,
+                borderRadius: 14,
+                padding: "14px 18px",
+              }}
+            >
+              <div
+                className="text-xs font-bold mb-3 flex items-center gap-2"
+                style={{ color: lane.color }}
+              >
+                <div
+                  style={{
+                    width: 3,
+                    height: 14,
+                    background: lane.color,
+                    borderRadius: 2,
+                  }}
+                />
+                {lane.label}
+              </div>
+              <div className="flex gap-3 flex-wrap">
+                {lane.industries.map((id) => {
+                  const ind = byId[id];
+                  if (!ind) return null;
+                  const isHovered = (pinnedId ?? hovered) === id;
+                  const isConnected = connectedTo.has(id);
+                  const dimmed =
+                    (pinnedId ?? hovered) && !isHovered && !isConnected;
+                  return (
+                    <div
+                      key={id}
+                      onClick={() => setPinnedId((p) => (p === id ? null : id))}
+                      onDoubleClick={() => onNavigate(id)}
+                      onMouseEnter={() => {
+                        if (!pinnedId) setHovered(id);
+                      }}
+                      onMouseLeave={() => {
+                        if (!pinnedId) setHovered(null);
+                      }}
+                      style={{
+                        background: isHovered
+                          ? `${ind.color}22`
+                          : `${ind.color}0e`,
+                        border: `2px solid ${isHovered || isConnected ? ind.color : `${ind.color}55`}`,
+                        borderRadius: 10,
+                        padding: "10px 14px",
+                        cursor: "pointer",
+                        minWidth: 160,
+                        flex: "1 1 160px",
+                        maxWidth: 260,
+                        transition: "all 0.15s ease",
+                        opacity: dimmed ? 0.3 : 1,
+                        boxShadow: isHovered
+                          ? `0 4px 18px ${ind.color}33`
+                          : "none",
+                        transform: isHovered ? "translateY(-2px)" : "none",
+                      }}
+                    >
+                      <div className="flex items-center gap-2 mb-2">
+                        <span style={{ fontSize: 18 }}>{ind.icon}</span>
+                        <span
+                          style={{
+                            fontSize: 12,
+                            fontWeight: 700,
+                            color: ind.color,
+                            whiteSpace: "pre-line",
+                            lineHeight: 1.3,
+                          }}
+                        >
+                          {ind.label}
+                        </span>
+                        {isConnected && !isHovered && (
+                          <span
+                            style={{
+                              marginLeft: "auto",
+                              fontSize: 9,
+                              color: ind.color,
+                              border: `1px solid ${ind.color}66`,
+                              borderRadius: 4,
+                              padding: "1px 5px",
+                              fontWeight: 600,
+                            }}
+                          >
+                            关联
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex flex-wrap gap-1 mb-2">
+                        {ind.reps.map((r) => (
+                          <span
+                            key={r}
+                            style={{
+                              fontSize: 10,
+                              background: `${ind.color}20`,
+                              color: ind.color,
+                              padding: "1px 5px",
+                              borderRadius: 3,
+                              fontWeight: 600,
+                            }}
+                          >
+                            {r}
+                          </span>
+                        ))}
+                      </div>
+                      {(pinnedId ?? hovered) === id && (
+                        <div
+                          style={{
+                            fontSize: 9,
+                            color: "var(--text-tertiary)",
+                            marginTop: 4,
+                          }}
+                        >
+                          →{" "}
+                          {(edgeMap[id] ?? [])
+                            .map((t) => byId[t]?.label.replace("\n", " "))
+                            .filter(Boolean)
+                            .join(" · ") || "无下游"}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+          <p
+            style={{
+              fontSize: 10,
+              color: "var(--text-tertiary)",
+              textAlign: "center",
+              marginTop: 4,
+            }}
+          >
+            悬停预览关联 · 点击节点固定面板 · 双击进入供应链详情 · Ctrl+滚轮缩放
+          </p>
+        </div>
+      </div>
+      <ZoomControls zoom={zoom} setZoom={setZoom} />
+      {activeTooltipId && getNodeEdges(activeTooltipId).length > 0 && (
+        <RelationTooltip
+          nodeId={activeTooltipId}
+          pinned={!!pinnedId}
+          onClose={() => setPinnedId(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+const CONCENTRIC_RINGS = [
+  {
+    label: "核心算力",
+    color: "#a78bfa",
+    industries: ["aigpu", "memory"],
+    r: 0,
+  },
+  {
+    label: "半导体制造",
+    color: "#6366f1",
+    industries: ["semieq", "glasssub"],
+    r: 220,
+  },
+  {
+    label: "板卡 / 互联",
+    color: "#34d399",
+    industries: ["pcb", "mlcc", "coppercable"],
+    r: 390,
+  },
+  {
+    label: "光通信",
+    color: "#06b6d4",
+    industries: ["optics", "fiber"],
+    r: 530,
+  },
+  {
+    label: "数据中心 / 整机",
+    color: "#818cf8",
+    industries: ["liquidcool", "aipower", "idc", "aiserver"],
+    r: 670,
+  },
+];
+
+function ConcentricView({
+  onNavigate,
+  zoom,
+  setZoom,
+}: {
+  onNavigate: (id: string) => void;
+  zoom: number;
+  setZoom: React.Dispatch<React.SetStateAction<number>>;
+}) {
+  const byId = Object.fromEntries(OVERVIEW_INDUSTRIES.map((i) => [i.id, i]));
+  const [hovered, setHovered] = React.useState<string | null>(null);
+  const [pinnedId, setPinnedId] = React.useState<string | null>(null);
+  const activeTooltipId = pinnedId ?? hovered;
+  const containerRef = useWheelZoom(setZoom);
+  const W = 1200;
+  const H = 1160;
+  const cx = W / 2;
+  const cy = H / 2;
+
+  const nodePositions: Record<string, { x: number; y: number }> = {};
+
+  CONCENTRIC_RINGS.forEach((ring, ri) => {
+    if (ring.r === 0) {
+      const count = ring.industries.length;
+      ring.industries.forEach((id, idx) => {
+        nodePositions[id] = {
+          x: cx + (idx - (count - 1) / 2) * 180,
+          y: cy,
+        };
+      });
+    } else {
+      const count = ring.industries.length;
+      ring.industries.forEach((id, idx) => {
+        const startAngle = ri === 1 ? -Math.PI / 2 : -Math.PI / 2;
+        const angle = startAngle + (idx / count) * 2 * Math.PI;
+        nodePositions[id] = {
+          x: cx + ring.r * Math.cos(angle),
+          y: cy + ring.r * Math.sin(angle),
+        };
+      });
+    }
+  });
+
+  const connectedTo = React.useMemo(() => {
+    const base = pinnedId ?? hovered;
+    if (!base) return new Set<string>();
+    const s = new Set<string>();
+    for (const e of OVERVIEW_EDGES_DEF) {
+      if (e.src === base) s.add(e.tgt);
+      if (e.tgt === base) s.add(e.src);
+    }
+    return s;
+  }, [hovered, pinnedId]);
+
+  return (
+    <div ref={containerRef} className="flex-1 relative overflow-hidden">
+      <div className="overflow-auto" style={{ width: "100%", height: "100%" }}>
+        <div
+          style={{
+            transform: `scale(${zoom})`,
+            transformOrigin: "50% 0%",
+            display: "flex",
+            justifyContent: "center",
+            padding: "16px",
+          }}
+        >
+          <svg
+            width={W}
+            height={H}
+            viewBox={`0 0 ${W} ${H}`}
+            style={{ maxWidth: "100%", maxHeight: "100%" }}
+          >
+            {CONCENTRIC_RINGS.filter((r) => r.r > 0).map((ring) => (
+              <circle
+                key={ring.r}
+                cx={cx}
+                cy={cy}
+                r={ring.r}
+                fill="none"
+                stroke={`${ring.color}22`}
+                strokeWidth={ring.r > 400 ? 64 : ring.r > 300 ? 56 : 50}
+              />
+            ))}
+            {CONCENTRIC_RINGS.filter((r) => r.r > 0).map((ring) => (
+              <text
+                key={`lbl-${ring.r}`}
+                x={cx + ring.r * Math.cos(Math.PI / 8)}
+                y={cy + ring.r * Math.sin(Math.PI / 8) + 4}
+                textAnchor="middle"
+                fontSize={10}
+                fill={`${ring.color}88`}
+                fontWeight={700}
+              >
+                {ring.label}
+              </text>
+            ))}
+            {OVERVIEW_EDGES_DEF.map((e, i) => {
+              const src = nodePositions[e.src];
+              const tgt = nodePositions[e.tgt];
+              if (!src || !tgt) return null;
+              const isActive =
+                hovered === e.src || hovered === e.tgt || (!hovered && true);
+              const dimmed =
+                hovered &&
+                hovered !== e.src &&
+                hovered !== e.tgt &&
+                !connectedTo.has(e.src) &&
+                !connectedTo.has(e.tgt);
+              const mx = (src.x + tgt.x) / 2;
+              const my = (src.y + tgt.y) / 2 - 30;
+              const srcInd = byId[e.src];
+              return (
+                <g
+                  key={i}
+                  style={{ opacity: dimmed ? 0.06 : isActive ? 1 : 0.35 }}
+                >
+                  <path
+                    d={`M ${src.x} ${src.y} Q ${mx} ${my} ${tgt.x} ${tgt.y}`}
+                    fill="none"
+                    stroke={
+                      hovered === e.src || hovered === e.tgt
+                        ? (srcInd?.color ?? "#888")
+                        : "var(--border-color)"
+                    }
+                    strokeWidth={hovered === e.src || hovered === e.tgt ? 2 : 1}
+                    strokeDasharray={
+                      hovered === e.src || hovered === e.tgt ? "none" : "4 3"
+                    }
+                    markerEnd="url(#arr)"
+                  />
+                  {(hovered === e.src || hovered === e.tgt) && (
+                    <text
+                      x={mx}
+                      y={my - 4}
+                      textAnchor="middle"
+                      fontSize={9}
+                      fill={srcInd?.color ?? "#888"}
+                      fontWeight={600}
+                    >
+                      {e.label}
+                    </text>
+                  )}
+                </g>
+              );
+            })}
+            <defs>
+              <marker
+                id="arr"
+                markerWidth="8"
+                markerHeight="8"
+                refX="4"
+                refY="3"
+                orient="auto"
+              >
+                <path
+                  d="M0,0 L0,6 L7,3 z"
+                  fill="var(--text-tertiary)"
+                  opacity={0.6}
+                />
+              </marker>
+            </defs>
+            {OVERVIEW_INDUSTRIES.map((ind) => {
+              const pos = nodePositions[ind.id];
+              if (!pos) return null;
+              const isHovered = (pinnedId ?? hovered) === ind.id;
+              const isConnected = connectedTo.has(ind.id);
+              const dimmed =
+                (pinnedId ?? hovered) && !isHovered && !isConnected;
+              const W_NODE = 148;
+              const H_NODE = 72;
+              return (
+                <g
+                  key={ind.id}
+                  transform={`translate(${pos.x - W_NODE / 2}, ${pos.y - H_NODE / 2})`}
+                  style={{
+                    cursor: "pointer",
+                    opacity: dimmed ? 0.2 : 1,
+                    transition: "opacity 0.15s",
+                  }}
+                  onMouseEnter={() => {
+                    if (!pinnedId) setHovered(ind.id);
+                  }}
+                  onMouseLeave={() => {
+                    if (!pinnedId) setHovered(null);
+                  }}
+                  onClick={() =>
+                    setPinnedId((p) => (p === ind.id ? null : ind.id))
+                  }
+                >
+                  <rect
+                    width={W_NODE}
+                    height={H_NODE}
+                    rx={10}
+                    fill={isHovered ? `${ind.color}22` : `${ind.color}0d`}
+                    stroke={
+                      isHovered || isConnected ? ind.color : `${ind.color}55`
+                    }
+                    strokeWidth={isHovered ? 2 : 1.5}
+                    filter={
+                      isHovered
+                        ? `drop-shadow(0 4px 12px ${ind.color}44)`
+                        : undefined
+                    }
+                  />
+                  <text x={10} y={22} fontSize={16} dominantBaseline="middle">
+                    {ind.icon}
+                  </text>
+                  <text
+                    x={32}
+                    y={18}
+                    fontSize={11}
+                    fontWeight={700}
+                    fill={ind.color}
+                  >
+                    {ind.label.split("\n")[0]}
+                  </text>
+                  {ind.label.includes("\n") && (
+                    <text x={32} y={31} fontSize={9} fill={`${ind.color}bb`}>
+                      {ind.label.split("\n")[1]}
+                    </text>
+                  )}
+                  {ind.reps.slice(0, 2).map((r, ri) => (
+                    <text
+                      key={r}
+                      x={10 + ri * 72}
+                      y={H_NODE - 12}
+                      fontSize={9}
+                      fill={`${ind.color}aa`}
+                      fontWeight={600}
+                    >
+                      {r}
+                    </text>
+                  ))}
+                </g>
+              );
+            })}
+          </svg>
+        </div>
+      </div>
+      <ZoomControls zoom={zoom} setZoom={setZoom} />
+    </div>
+  );
+}
+
+const SANDBOX_ZONES = [
+  {
+    id: "semieq_zone",
+    label: "半导体制造层",
+    color: "#6366f1",
+    x: 40,
+    y: 40,
+    w: 680,
+    h: 180,
+    industries: ["semieq"],
+  },
+  {
+    id: "chip",
+    label: "芯片 · 计算层",
+    color: "#a78bfa",
+    x: 40,
+    y: 260,
+    w: 680,
+    h: 180,
+    industries: ["aigpu", "memory", "glasssub"],
+  },
+  {
+    id: "board",
+    label: "板卡 · 互联层",
+    color: "#34d399",
+    x: 40,
+    y: 480,
+    w: 680,
+    h: 180,
+    industries: ["pcb", "mlcc", "coppercable"],
+  },
+  {
+    id: "optical",
+    label: "光通信层",
+    color: "#06b6d4",
+    x: 40,
+    y: 700,
+    w: 680,
+    h: 180,
+    industries: ["optics", "fiber"],
+  },
+  {
+    id: "dc",
+    label: "数据中心层",
+    color: "#818cf8",
+    x: 40,
+    y: 920,
+    w: 680,
+    h: 180,
+    industries: ["liquidcool", "aipower", "idc"],
+  },
+  {
+    id: "server",
+    label: "服务器整机层",
+    color: "#f43f5e",
+    x: 40,
+    y: 1140,
+    w: 680,
+    h: 180,
+    industries: ["aiserver"],
+  },
+];
+
+const SANDBOX_IND_POSITIONS: Record<string, { x: number; y: number }> = {
+  semieq: { x: 340, y: 130 },
+  aigpu: { x: 100, y: 350 },
+  memory: { x: 310, y: 350 },
+  glasssub: { x: 520, y: 350 },
+  pcb: { x: 100, y: 570 },
+  mlcc: { x: 310, y: 570 },
+  coppercable: { x: 520, y: 570 },
+  optics: { x: 160, y: 790 },
+  fiber: { x: 480, y: 790 },
+  liquidcool: { x: 100, y: 1010 },
+  aipower: { x: 310, y: 1010 },
+  idc: { x: 520, y: 1010 },
+  aiserver: { x: 340, y: 1230 },
+};
+
+function SandboxView({
+  onNavigate,
+  zoom,
+  setZoom,
+}: {
+  onNavigate: (id: string) => void;
+  zoom: number;
+  setZoom: React.Dispatch<React.SetStateAction<number>>;
+}) {
+  const byId = Object.fromEntries(OVERVIEW_INDUSTRIES.map((i) => [i.id, i]));
+  const [hovered, setHovered] = React.useState<string | null>(null);
+  const [pinnedId, setPinnedId] = React.useState<string | null>(null);
+  const activeTooltipId = pinnedId ?? hovered;
+  const containerRef = useWheelZoom(setZoom);
+  const SVG_W = 760;
+  const SVG_H = 1380;
+
+  const connectedTo = React.useMemo(() => {
+    const base = pinnedId ?? hovered;
+    if (!base) return new Set<string>();
+    const s = new Set<string>();
+    for (const e of OVERVIEW_EDGES_DEF) {
+      if (e.src === base) s.add(e.tgt);
+      if (e.tgt === base) s.add(e.src);
+    }
+    return s;
+  }, [hovered, pinnedId]);
+
+  return (
+    <div ref={containerRef} className="flex-1 relative overflow-hidden">
+      <div className="overflow-auto" style={{ width: "100%", height: "100%" }}>
+        <div
+          style={{
+            transform: `scale(${zoom})`,
+            transformOrigin: "50% 0%",
+            display: "flex",
+            justifyContent: "center",
+            padding: "16px",
+          }}
+        >
+          <svg
+            width={SVG_W}
+            height={SVG_H}
+            viewBox={`0 0 ${SVG_W} ${SVG_H}`}
+            style={{ maxWidth: "100%" }}
+          >
+            {SANDBOX_ZONES.map((zone) => (
+              <g key={zone.id}>
+                <rect
+                  x={zone.x}
+                  y={zone.y}
+                  width={zone.w}
+                  height={zone.h}
+                  rx={14}
+                  fill={`${zone.color}0c`}
+                  stroke={`${zone.color}33`}
+                  strokeWidth={1.5}
+                />
+                <text
+                  x={zone.x + 14}
+                  y={zone.y + 20}
+                  fontSize={11}
+                  fontWeight={800}
+                  fill={zone.color}
+                  opacity={0.8}
+                >
+                  {zone.label}
+                </text>
+              </g>
+            ))}
+            <defs>
+              <marker
+                id="sb-arr"
+                markerWidth="7"
+                markerHeight="7"
+                refX="4"
+                refY="3"
+                orient="auto"
+              >
+                <path d="M0,0 L0,6 L7,3 z" fill="#888" opacity={0.7} />
+              </marker>
+            </defs>
+            {OVERVIEW_EDGES_DEF.map((e, i) => {
+              const src = SANDBOX_IND_POSITIONS[e.src];
+              const tgt = SANDBOX_IND_POSITIONS[e.tgt];
+              if (!src || !tgt) return null;
+              const srcInd = byId[e.src];
+              const isActive = hovered === e.src || hovered === e.tgt;
+              const dimmed =
+                hovered &&
+                !isActive &&
+                !connectedTo.has(e.src) &&
+                !connectedTo.has(e.tgt);
+              const mx = (src.x + tgt.x) / 2;
+              const my = (src.y + tgt.y) / 2 - (src.y === tgt.y ? 0 : 20);
+              return (
+                <g
+                  key={i}
+                  style={{ opacity: dimmed ? 0.05 : isActive ? 1 : 0.4 }}
+                >
+                  <path
+                    d={`M ${src.x} ${src.y} Q ${mx} ${my} ${tgt.x} ${tgt.y}`}
+                    fill="none"
+                    stroke={isActive ? (srcInd?.color ?? "#888") : "#888"}
+                    strokeWidth={isActive ? 2 : 1}
+                    strokeDasharray={isActive ? "none" : "5 3"}
+                    markerEnd="url(#sb-arr)"
+                  />
+                  {isActive && (
+                    <text
+                      x={mx}
+                      y={my - 5}
+                      textAnchor="middle"
+                      fontSize={9}
+                      fill={srcInd?.color ?? "#888"}
+                      fontWeight={700}
+                    >
+                      {e.label}
+                    </text>
+                  )}
+                </g>
+              );
+            })}
+            {OVERVIEW_INDUSTRIES.map((ind) => {
+              const pos = SANDBOX_IND_POSITIONS[ind.id];
+              if (!pos) return null;
+              const isHovered = (pinnedId ?? hovered) === ind.id;
+              const isConnected = connectedTo.has(ind.id);
+              const dimmed =
+                (pinnedId ?? hovered) && !isHovered && !isConnected;
+              const NW = 158;
+              const NH = 82;
+              return (
+                <g
+                  key={ind.id}
+                  transform={`translate(${pos.x - NW / 2}, ${pos.y - NH / 2})`}
+                  style={{ cursor: "pointer", opacity: dimmed ? 0.18 : 1 }}
+                  onMouseEnter={() => {
+                    if (!pinnedId) setHovered(ind.id);
+                  }}
+                  onMouseLeave={() => {
+                    if (!pinnedId) setHovered(null);
+                  }}
+                  onClick={() =>
+                    setPinnedId((p) => (p === ind.id ? null : ind.id))
+                  }
+                >
+                  <rect
+                    width={NW}
+                    height={NH}
+                    rx={9}
+                    fill={isHovered ? `${ind.color}22` : `${ind.color}11`}
+                    stroke={
+                      isHovered || isConnected ? ind.color : `${ind.color}55`
+                    }
+                    strokeWidth={isHovered ? 2 : 1.5}
+                    filter={
+                      isHovered
+                        ? `drop-shadow(0 3px 10px ${ind.color}44)`
+                        : undefined
+                    }
+                  />
+                  <text x={8} y={22} fontSize={17} dominantBaseline="middle">
+                    {ind.icon}
+                  </text>
+                  <text
+                    x={30}
+                    y={17}
+                    fontSize={11}
+                    fontWeight={800}
+                    fill={ind.color}
+                  >
+                    {ind.label.split("\n")[0]}
+                  </text>
+                  {ind.label.includes("\n") && (
+                    <text x={30} y={29} fontSize={9} fill={`${ind.color}cc`}>
+                      {ind.label.split("\n")[1]}
+                    </text>
+                  )}
+                  <line
+                    x1={8}
+                    y1={38}
+                    x2={NW - 8}
+                    y2={38}
+                    stroke={`${ind.color}33`}
+                    strokeWidth={1}
+                  />
+                  {ind.reps.slice(0, 3).map((r, ri) => (
+                    <text
+                      key={r}
+                      x={8 + ri * 52}
+                      y={NH - 14}
+                      fontSize={8.5}
+                      fill={`${ind.color}aa`}
+                      fontWeight={600}
+                    >
+                      {r.length > 5 ? r.slice(0, 5) : r}
+                    </text>
+                  ))}
+                  {isConnected && !isHovered && (
+                    <rect
+                      x={NW - 28}
+                      y={4}
+                      width={24}
+                      height={13}
+                      rx={3}
+                      fill={`${ind.color}33`}
+                    />
+                  )}
+                  {isConnected && !isHovered && (
+                    <text
+                      x={NW - 16}
+                      y={14}
+                      fontSize={8}
+                      textAnchor="middle"
+                      fill={ind.color}
+                      fontWeight={700}
+                    >
+                      关联
+                    </text>
+                  )}
+                </g>
+              );
+            })}
+            <text
+              x={SVG_W / 2}
+              y={SVG_H - 10}
+              textAnchor="middle"
+              fontSize={9.5}
+              fill="var(--text-tertiary)"
+            >
+              悬停节点高亮关联 · 点击进入供应链详情 · Ctrl+滚轮缩放
+            </text>
+          </svg>
+        </div>
+      </div>
+      <ZoomControls zoom={zoom} setZoom={setZoom} />
+      {activeTooltipId && getNodeEdges(activeTooltipId).length > 0 && (
+        <RelationTooltip
+          nodeId={activeTooltipId}
+          pinned={!!pinnedId}
+          onClose={() => setPinnedId(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+type OverviewViewMode = "flow" | "swim" | "concentric" | "sandbox";
+
 function OverviewView({ onNavigate }: { onNavigate: (id: string) => void }) {
+  const [viewMode, setViewMode] = React.useState<OverviewViewMode>("swim");
+  const [zoom, setZoom] = React.useState(1);
+  const [selectedOvId, setSelectedOvId] = React.useState<string | null>(null);
+  const [hoveredOvId, setHoveredOvId] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    setZoom(1);
+    setSelectedOvId(null);
+  }, [viewMode]);
+
   const overviewNodeType = React.useMemo(
     () => ({
       overviewCluster: (props: NodeProps) => (
@@ -1224,34 +3838,73 @@ function OverviewView({ onNavigate }: { onNavigate: (id: string) => void }) {
     [],
   );
 
-  const ovNodes: Node[] = OVERVIEW_INDUSTRIES.map((ind) => ({
-    id: ind.id,
-    type: "overviewCluster",
-    position: { x: ind.x, y: ind.y },
-    data: { ind, onNavigate },
-  }));
+  const ovNodes: Node[] = OVERVIEW_INDUSTRIES.map((ind) => {
+    const connectedIds = selectedOvId
+      ? new Set(
+          OVERVIEW_EDGES_DEF.filter(
+            (e) => e.src === selectedOvId || e.tgt === selectedOvId,
+          ).flatMap((e) => [e.src, e.tgt]),
+        )
+      : null;
+    const isSelected = ind.id === selectedOvId;
+    const isDimmed =
+      !!selectedOvId && !isSelected && !connectedIds?.has(ind.id);
+    return {
+      id: ind.id,
+      type: "overviewCluster",
+      position: { x: ind.x, y: ind.y },
+      data: {
+        ind,
+        onNavigate,
+        onSelect: (id: string) =>
+          setSelectedOvId((prev) => (prev === id ? null : id)),
+        isSelected,
+        isDimmed,
+      },
+    };
+  });
 
-  const ovEdges: Edge[] = OVERVIEW_EDGES_DEF.map((ed, i) => ({
-    id: `ov-${i}`,
-    source: ed.src,
-    target: ed.tgt,
-    label: ed.label,
-    type: "smoothstep",
-    style: { stroke: "var(--border-color)", strokeWidth: 1.5 },
-    labelStyle: {
-      fontSize: 9,
-      fill: "var(--text-tertiary)",
-      fontFamily: "monospace",
-    },
-    labelBgStyle: { fill: "var(--bg-primary)", fillOpacity: 0.85 },
-    labelBgPadding: [3, 4] as [number, number],
-    markerEnd: {
-      type: MarkerType.ArrowClosed,
-      color: "var(--border-color)",
-      width: 12,
-      height: 12,
-    },
-  }));
+  const ovEdges: Edge[] = OVERVIEW_EDGES_DEF.map((ed, i) => {
+    const isConnected =
+      !selectedOvId || ed.src === selectedOvId || ed.tgt === selectedOvId;
+    return {
+      id: `ov-${i}`,
+      source: ed.src,
+      target: ed.tgt,
+      label: isConnected ? ed.label : undefined,
+      type: "smoothstep",
+      style: {
+        stroke: isConnected
+          ? selectedOvId
+            ? "#f5a623"
+            : "var(--border-color)"
+          : "var(--border-color)",
+        strokeWidth: isConnected && selectedOvId ? 2.5 : 1.5,
+        opacity: isConnected ? 1 : 0.08,
+      },
+      labelStyle: {
+        fontSize: 9,
+        fill: isConnected && selectedOvId ? "#f5a623" : "var(--text-tertiary)",
+        fontFamily: "monospace",
+      },
+      labelBgStyle: { fill: "var(--bg-primary)", fillOpacity: 0.85 },
+      labelBgPadding: [3, 4] as [number, number],
+      markerEnd: {
+        type: MarkerType.ArrowClosed,
+        color: isConnected && selectedOvId ? "#f5a623" : "var(--border-color)",
+        width: 12,
+        height: 12,
+      },
+      animated: !!(isConnected && selectedOvId),
+    };
+  });
+
+  const VIEW_TABS: { id: OverviewViewMode; label: string }[] = [
+    { id: "swim", label: "泳道图" },
+    { id: "concentric", label: "同心圆" },
+    { id: "sandbox", label: "沙盘图" },
+    { id: "flow", label: "流向图" },
+  ];
 
   return (
     <div className="flex-1 flex flex-col bg-[var(--bg-primary)]">
@@ -1262,55 +3915,88 @@ function OverviewView({ onNavigate }: { onNavigate: (id: string) => void }) {
         <span className="text-xs text-[var(--text-tertiary)]">
           · 点击任意产业节点 → 深入查看供应链详情
         </span>
-        <div className="ml-auto flex items-center gap-4">
-          {[
-            { color: "#a78bfa", label: "芯片/存储" },
-            { color: "#34d399", label: "板卡/互联" },
-            { color: "#06b6d4", label: "光通信" },
-            { color: "#818cf8", label: "数据中心配套" },
-          ].map(({ color, label }) => (
-            <div key={label} className="flex items-center gap-1.5">
-              <div
-                className="w-2 h-2 rounded-full"
-                style={{ background: color }}
-              />
-              <span className="text-xs text-[var(--text-tertiary)]">
-                {label}
-              </span>
-            </div>
+        <div className="ml-auto flex items-center gap-1">
+          {VIEW_TABS.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setViewMode(tab.id)}
+              style={{
+                fontSize: 12,
+                fontWeight: 600,
+                padding: "4px 12px",
+                borderRadius: 7,
+                border: "1px solid",
+                borderColor:
+                  viewMode === tab.id ? "#f5a623" : "var(--border-color)",
+                background:
+                  viewMode === tab.id ? "#f5a62318" : "var(--bg-secondary)",
+                color:
+                  viewMode === tab.id ? "#f5a623" : "var(--text-secondary)",
+                cursor: "pointer",
+                transition: "all 0.15s ease",
+              }}
+            >
+              {tab.label}
+            </button>
           ))}
         </div>
       </div>
-      <div className="flex-1">
-        <ReactFlow
-          nodes={ovNodes}
-          edges={ovEdges}
-          nodeTypes={overviewNodeType}
-          fitView
-          fitViewOptions={{ padding: 0.12 }}
-          proOptions={{ hideAttribution: true }}
-          minZoom={0.3}
-          maxZoom={2}
-          nodesDraggable={false}
-          nodesConnectable={false}
-          elementsSelectable={false}
-        >
-          <Background
-            variant={BackgroundVariant.Dots}
-            color="var(--bg-hover)"
-            gap={28}
-            size={1}
-          />
-          <Controls
-            style={{
-              background: "var(--bg-secondary)",
-              border: "1px solid var(--border-color)",
-              borderRadius: 10,
-              overflow: "hidden",
-            }}
-          />
-        </ReactFlow>
-      </div>
+      {viewMode === "swim" && (
+        <SwimLaneView onNavigate={onNavigate} zoom={zoom} setZoom={setZoom} />
+      )}
+      {viewMode === "concentric" && (
+        <ConcentricView onNavigate={onNavigate} zoom={zoom} setZoom={setZoom} />
+      )}
+      {viewMode === "sandbox" && (
+        <SandboxView onNavigate={onNavigate} zoom={zoom} setZoom={setZoom} />
+      )}
+      {viewMode === "flow" && (
+        <div className="flex-1 relative ov-flow-view">
+          <ReactFlow
+            nodes={ovNodes}
+            edges={ovEdges}
+            nodeTypes={overviewNodeType}
+            fitView
+            fitViewOptions={{ padding: 0.12 }}
+            proOptions={{ hideAttribution: true }}
+            minZoom={0.3}
+            maxZoom={2}
+            nodesDraggable={false}
+            nodesConnectable={false}
+            selectNodesOnDrag={false}
+            onPaneClick={() => setSelectedOvId(null)}
+            onNodeMouseEnter={(_, node) => setHoveredOvId(node.id)}
+            onNodeMouseLeave={() => setHoveredOvId(null)}
+          >
+            <Background
+              variant={BackgroundVariant.Dots}
+              color="var(--bg-hover)"
+              gap={28}
+              size={1}
+            />
+            <Controls
+              style={{
+                background: "var(--bg-secondary)",
+                border: "1px solid var(--border-color)",
+                borderRadius: 10,
+                overflow: "hidden",
+              }}
+            />
+          </ReactFlow>
+          {selectedOvId && (
+            <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-[var(--bg-hover)]/90 border border-[#f5a623]/40 text-[#f5a623] text-xs px-4 py-2 rounded-full pointer-events-none flex items-center gap-2">
+              <span>已高亮</span>
+              <span className="font-semibold">
+                {OVERVIEW_INDUSTRIES.find((i) => i.id === selectedOvId)?.label}
+              </span>
+              <span>的关联产业 · 点击节点内链接进入详情 · 点击空白取消</span>
+            </div>
+          )}
+          {hoveredOvId && getNodeEdges(hoveredOvId).length > 0 && (
+            <RelationTooltip nodeId={hoveredOvId} />
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -1346,6 +4032,8 @@ function RightPanel({
 }) {
   const [addForm, setAddForm] = useState({ code: "" });
   const [showAdd, setShowAdd] = useState(false);
+  const { theme } = useTheme();
+  const isLight = theme === "light";
 
   const baseCodes = item?.stocks ?? [];
   const currentCodes = (item && overrideStocks[item.id]) ?? baseCodes;
@@ -1429,6 +4117,7 @@ function RightPanel({
   }
 
   const s = LAYER_STYLES[item.layer];
+  const text = isLight ? s.lightText : s.darkText;
   return (
     <>
       <div
@@ -1442,12 +4131,21 @@ function RightPanel({
           <div className="flex items-center gap-2">
             {item.icon && <span className="text-2xl">{item.icon}</span>}
             <div>
-              <div className="font-semibold text-sm" style={{ color: s.text }}>
+              <div className="font-semibold text-sm" style={{ color: text }}>
                 {item.ticker ? (
                   <button
                     onClick={() => onNavigate(item.ticker!)}
                     className="hover:underline underline-offset-2 cursor-pointer text-left"
-                    style={{ color: s.text }}
+                    style={{ color: text }}
+                  >
+                    {item.label}
+                    <span className="ml-1 text-[10px] opacity-60">↗</span>
+                  </button>
+                ) : currentCodes[0] ? (
+                  <button
+                    onClick={() => onNavigate(currentCodes[0])}
+                    className="hover:underline underline-offset-2 cursor-pointer text-left"
+                    style={{ color: text }}
                   >
                     {item.label}
                     <span className="ml-1 text-[10px] opacity-60">↗</span>
@@ -1456,7 +4154,7 @@ function RightPanel({
                   item.label
                 )}
               </div>
-              <div className="text-[var(--text-tertiary)] text-xs mt-0.5">
+              <div className="text-[var(--text-secondary)] text-xs mt-0.5">
                 {item.desc}
               </div>
             </div>
@@ -1470,7 +4168,7 @@ function RightPanel({
         </div>
         <div
           className="mt-2 text-xs px-2 py-0.5 rounded inline-block"
-          style={{ background: `${s.border}18`, color: s.text }}
+          style={{ background: `${s.border}28`, color: text }}
         >
           {LAYER_LABEL[item.layer]}
         </div>
@@ -1691,31 +4389,43 @@ function buildNode(raw: {
   };
 }
 
-function buildEdge(raw: {
-  id: string;
-  source: string;
-  target: string;
-  layer: ComponentData["layer"];
-  label?: string | null;
-}): Edge {
+function buildEdge(
+  raw: {
+    id: string;
+    source: string;
+    target: string;
+    layer: ComponentData["layer"];
+    label?: string | null;
+  },
+  isLight = false,
+): Edge {
   const colors: Record<string, string> = {
     upstream: "#3b5bdb",
     core: "#f5a623",
     downstream: "#10b981",
     application: "#8b5cf6",
   };
-  const c = colors[raw.layer] ?? "var(--text-tertiary)";
+  const c = colors[raw.layer] ?? "#888888";
+  const strokeOpacity = isLight ? "cc" : "77";
+  const strokeWidth = isLight ? 2 : 1.5;
   return {
     id: raw.id,
     source: raw.source,
     target: raw.target,
     label: raw.label ?? undefined,
-    labelStyle: { fill: "var(--text-secondary)", fontSize: 9, fontWeight: 500 },
-    labelBgStyle: { fill: "var(--bg-primary)", fillOpacity: 0.85 },
+    labelStyle: {
+      fill: isLight ? "#374151" : "var(--text-secondary)",
+      fontSize: 10,
+      fontWeight: 600,
+    },
+    labelBgStyle: {
+      fill: isLight ? "#ffffff" : "var(--bg-primary)",
+      fillOpacity: 0.9,
+    },
     labelBgPadding: [3, 5] as [number, number],
     labelBgBorderRadius: 3,
-    style: { stroke: `${c}55`, strokeWidth: 1.5 },
-    markerEnd: { type: MarkerType.ArrowClosed, color: c },
+    style: { stroke: `${c}${strokeOpacity}`, strokeWidth },
+    markerEnd: { type: MarkerType.ArrowClosed, color: `${c}${strokeOpacity}` },
   };
 }
 
@@ -1724,6 +4434,8 @@ export default function IndustryCanvasPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const industryId = params.name as string;
+  const { theme } = useTheme();
+  const isLight = theme === "light";
 
   const [graph, setGraph] = useState<IndustryGraph | null>(null);
   const [nodes, setNodes, onNodesChange] = useNodesState<ComponentNode>([]);
@@ -1731,10 +4443,13 @@ export default function IndustryCanvasPage() {
 
   const [activeTab, setActiveTab] = useState<ViewTab>("chain");
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [panelVisible, setPanelVisible] = useState(true);
+  const [panelVisible, setPanelVisible] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rfInstance = useRef<ReactFlowInstance<any, any> | null>(null);
   const [stockOverrides, setStockOverrides] = useState<
     Record<string, string[]>
   >({});
+  const rawEdgesRef = useRef<Parameters<typeof buildEdge>[0][]>([]);
 
   const [liveQuotes, setLiveQuotes] = useState<Record<string, LiveQuote>>({});
   const [perfData, setPerfData] = useState<
@@ -1768,6 +4483,13 @@ export default function IndustryCanvasPage() {
   }, []);
 
   useEffect(() => {
+    const t = setTimeout(() => {
+      rfInstance.current?.fitView({ padding: 0.15, duration: 300 });
+    }, 320);
+    return () => clearTimeout(t);
+  }, [panelVisible]);
+
+  useEffect(() => {
     fetch(`http://localhost:8000/api/industry/graph/${industryId}`)
       .then((r) => r.json())
       .then(
@@ -1797,7 +4519,8 @@ export default function IndustryCanvasPage() {
           }[];
         }) => {
           const builtNodes = data.nodes.map(buildNode);
-          const builtEdges = data.edges.map(buildEdge);
+          rawEdgesRef.current = data.edges;
+          const builtEdges = data.edges.map((e) => buildEdge(e, isLight));
           setGraph({
             title: data.title,
             subtitle: data.subtitle,
@@ -1811,6 +4534,12 @@ export default function IndustryCanvasPage() {
       )
       .catch(() => {});
   }, [industryId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (rawEdgesRef.current.length > 0) {
+      setEdges(rawEdgesRef.current.map((e) => buildEdge(e, isLight)));
+    }
+  }, [isLight]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (searchQuery.trim().length === 0) {
@@ -1848,6 +4577,7 @@ export default function IndustryCanvasPage() {
     (result: { code: string; name: string; nodeId: string }) => {
       setActiveTab("chain");
       setSelectedId(result.nodeId);
+      setPanelVisible(true);
       setSearchQuery("");
       setShowSearchDropdown(false);
     },
@@ -1880,6 +4610,7 @@ export default function IndustryCanvasPage() {
     if (targetNode) {
       setActiveTab("chain");
       setSelectedId(targetNode.id);
+      setPanelVisible(true);
 
       setTimeout(() => {
         const element = document.querySelector(`[data-id="${targetNode.id}"]`);
@@ -1900,6 +4631,7 @@ export default function IndustryCanvasPage() {
   const handleNodeClick: NodeMouseHandler<ComponentNode> = useCallback(
     (_evt, node) => {
       setSelectedId(node.id);
+      setPanelVisible(true);
     },
     [],
   );
@@ -2003,27 +4735,54 @@ export default function IndustryCanvasPage() {
       >
         <button
           onClick={() => router.push("/industry")}
-          className="flex items-center gap-1.5 text-sm transition-colors"
+          className="flex items-center gap-1.5 text-sm transition-colors hover:text-[var(--text-primary)]"
           style={{ color: "var(--text-secondary)" }}
         >
           <ArrowLeft size={16} />
           产业列表
         </button>
-        <span style={{ color: "var(--text-tertiary)" }}>/</span>
-        <div>
-          <span
-            className="font-semibold text-sm"
-            style={{ color: "var(--text-primary)" }}
-          >
-            {graph?.title}
-          </span>
-          <span
-            className="text-xs ml-2"
-            style={{ color: "var(--text-tertiary)" }}
-          >
-            {graph?.subtitle}
-          </span>
-        </div>
+
+        {industryId === "overview" ? (
+          <>
+            <span style={{ color: "var(--text-tertiary)" }}>/</span>
+            <span
+              className="font-semibold text-sm"
+              style={{ color: "var(--text-primary)" }}
+            >
+              全景图
+            </span>
+          </>
+        ) : (
+          <>
+            {searchParams.get("from") === "overview" && (
+              <>
+                <span style={{ color: "var(--text-tertiary)" }}>/</span>
+                <button
+                  onClick={() => router.push("/industry/overview")}
+                  className="text-sm transition-colors hover:text-[var(--text-primary)]"
+                  style={{ color: "var(--text-secondary)" }}
+                >
+                  全景图
+                </button>
+              </>
+            )}
+            <span style={{ color: "var(--text-tertiary)" }}>/</span>
+            <div>
+              <span
+                className="font-semibold text-sm"
+                style={{ color: "var(--text-primary)" }}
+              >
+                {graph?.title}
+              </span>
+              <span
+                className="text-xs ml-2"
+                style={{ color: "var(--text-tertiary)" }}
+              >
+                {graph?.subtitle}
+              </span>
+            </div>
+          </>
+        )}
 
         <div className="ml-auto flex items-center gap-2">
           <div className="relative">
@@ -2119,6 +4878,15 @@ export default function IndustryCanvasPage() {
                 onClick={() => {
                   setActiveTab("chain");
                   setSelectedId(null);
+                  setPanelVisible(false);
+                  setTimeout(
+                    () =>
+                      rfInstance.current?.fitView({
+                        padding: 0.15,
+                        duration: 300,
+                      }),
+                    50,
+                  );
                 }}
                 className={cn(
                   "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors",
@@ -2139,6 +4907,15 @@ export default function IndustryCanvasPage() {
                 onClick={() => {
                   setActiveTab("anatomy");
                   setSelectedId(null);
+                  setPanelVisible(false);
+                  setTimeout(
+                    () =>
+                      rfInstance.current?.fitView({
+                        padding: 0.15,
+                        duration: 300,
+                      }),
+                    50,
+                  );
                 }}
                 className={cn(
                   "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors",
@@ -2164,12 +4941,12 @@ export default function IndustryCanvasPage() {
                 (layer) => (
                   <div key={layer} className="flex items-center gap-1.5">
                     <div
-                      className="w-2 h-2 rounded-full"
+                      className="w-2.5 h-2.5 rounded-full"
                       style={{ background: LAYER_STYLES[layer].border }}
                     />
                     <span
-                      className="text-xs"
-                      style={{ color: "var(--text-secondary)" }}
+                      className="text-xs font-medium"
+                      style={{ color: LAYER_STYLES[layer].border }}
                     >
                       {LAYER_LABEL[layer]}
                     </span>
@@ -2188,7 +4965,9 @@ export default function IndustryCanvasPage() {
 
       <div className="flex flex-1 overflow-hidden relative">
         {industryId === "overview" ? (
-          <OverviewView onNavigate={(id) => router.push(`/industry/${id}`)} />
+          <OverviewView
+            onNavigate={(id) => router.push(`/industry/${id}?from=overview`)}
+          />
         ) : activeTab === "chain" ? (
           <div className="flex-1 bg-[var(--bg-primary)] relative">
             <ReactFlow
@@ -2227,6 +5006,9 @@ export default function IndustryCanvasPage() {
               onNodeClick={handleNodeClick}
               onPaneClick={() => setSelectedId(null)}
               nodeTypes={nodeTypes}
+              onInit={(instance) => {
+                rfInstance.current = instance;
+              }}
               fitView
               fitViewOptions={{ padding: 0.15 }}
               proOptions={{ hideAttribution: true }}
@@ -2247,6 +5029,91 @@ export default function IndustryCanvasPage() {
                   overflow: "hidden",
                 }}
               />
+              {flowLayerLabels.length > 0 &&
+                (() => {
+                  const yGroups = Array.from(
+                    new Set(nodes.map((n) => n.position.y)),
+                  ).sort((a, b) => a - b);
+                  const layerColorMap: Record<string, string> = {
+                    upstream: "#3b5bdb",
+                    core: "#f5a623",
+                    downstream: "#10b981",
+                    application: "#8b5cf6",
+                  };
+                  const yToNodes = new Map<number, ComponentNode[]>();
+                  nodes.forEach((n) => {
+                    const arr = yToNodes.get(n.position.y) ?? [];
+                    arr.push(n as ComponentNode);
+                    yToNodes.set(n.position.y, arr);
+                  });
+                  return (
+                    <Panel position="top-left">
+                      <div
+                        style={{
+                          display: "flex",
+                          flexDirection: "row",
+                          gap: 6,
+                          paddingTop: 4,
+                        }}
+                      >
+                        {yGroups.map((y, i) => {
+                          const label = flowLayerLabels[i] ?? `L${i}`;
+                          const layerNodes = yToNodes.get(y) ?? [];
+                          const dominantLayer =
+                            (layerNodes[0] as ComponentNode | undefined)?.data
+                              .layer ?? "upstream";
+                          const color = layerColorMap[dominantLayer] ?? "#888";
+                          return (
+                            <div
+                              key={y}
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 7,
+                                padding: "5px 10px 5px 8px",
+                                borderRadius: 7,
+                                background: `${color}12`,
+                                border: `1px solid ${color}33`,
+                                borderLeft: `3px solid ${color}`,
+                                backdropFilter: "blur(8px)",
+                                WebkitBackdropFilter: "blur(8px)",
+                              }}
+                            >
+                              <div
+                                style={{
+                                  display: "flex",
+                                  flexDirection: "column",
+                                  gap: 1,
+                                }}
+                              >
+                                <span
+                                  style={{
+                                    fontSize: 9,
+                                    fontWeight: 800,
+                                    color,
+                                    letterSpacing: "0.05em",
+                                    lineHeight: 1.2,
+                                  }}
+                                >
+                                  {label}
+                                </span>
+                                <span
+                                  style={{
+                                    fontSize: 9,
+                                    color: "var(--text-tertiary)",
+                                    lineHeight: 1.2,
+                                  }}
+                                >
+                                  {layerNodes.length} 家企业
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </Panel>
+                  );
+                })()}
             </ReactFlow>
             {!selectedId ? (
               <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-[var(--bg-hover)]/90 border border-[var(--border-secondary)] text-[var(--text-secondary)] text-xs px-4 py-2 rounded-full pointer-events-none">
@@ -2269,7 +5136,10 @@ export default function IndustryCanvasPage() {
           <ProcessFlowView
             nodes={nodes}
             selectedId={selectedId}
-            onSelect={setSelectedId}
+            onSelect={(id) => {
+              setSelectedId(id);
+              setPanelVisible(true);
+            }}
             layerLabels={flowLayerLabels}
             perfData={perfData}
             liveQuotes={liveQuotes}

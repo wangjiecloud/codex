@@ -1,0 +1,1405 @@
+- generic [ref=e1]:
+  - generic [ref=e3]:
+    - generic [ref=e6]:
+      - generic [ref=e7]:
+        - generic "返回首页" [ref=e9] [cursor=pointer]:
+          - img "同花顺 Logo" [ref=e10]
+        - generic [ref=e12]:
+          - link "A股" [ref=e13] [cursor=pointer]:
+            - /url: https://www.10jqka.com.cn/
+          - link "港股" [ref=e14] [cursor=pointer]:
+            - /url: https://stock.10jqka.com.cn/hks/
+          - link "美股" [ref=e15] [cursor=pointer]:
+            - /url: https://stock.10jqka.com.cn/usstock/mgyw_list/
+          - link "期货" [ref=e16] [cursor=pointer]:
+            - /url: https://goodsfu.10jqka.com.cn/
+          - link "基金" [ref=e17] [cursor=pointer]:
+            - /url: https://fund.10jqka.com.cn/
+        - generic [ref=e19]:
+          - img [ref=e20] [cursor=pointer]
+          - textbox [ref=e23]
+        - img "AIME助手" [ref=e26] [cursor=pointer]
+      - generic [ref=e28]:
+        - button "返回旧版" [ref=e29] [cursor=pointer]
+        - button "下载客户端" [ref=e30] [cursor=pointer]
+        - button "登录" [ref=e31] [cursor=pointer]
+    - generic [ref=e33]:
+      - navigation "主导航 Tab" [ref=e36]:
+        - list [ref=e38]:
+          - listitem [ref=e39]:
+            - generic [ref=e40] [cursor=pointer]: 首页
+          - listitem [ref=e42]:
+            - generic [ref=e43] [cursor=pointer]: 行情
+          - listitem [ref=e44]:
+            - generic [ref=e45] [cursor=pointer]: 商城
+      - generic [ref=e46]:
+        - generic [ref=e47]:
+          - generic [ref=e49]:
+            - generic [ref=e50]:
+              - generic [ref=e51]:
+                - generic [ref=e52]:
+                  - button "向右滚动" [ref=e54] [cursor=pointer]:
+                    - img [ref=e56]
+                  - generic:
+                    - button "向左滚动":
+                      - generic:
+                        - img
+                  - generic [ref=e58]:
+                    - generic [ref=e59] [cursor=pointer]:
+                      - generic [ref=e60]: 上证指数
+                      - generic [ref=e61]: "-2.26%"
+                    - generic [ref=e62] [cursor=pointer]:
+                      - generic [ref=e63]: 深证成指
+                      - generic [ref=e64]: "-3.44%"
+                    - generic [ref=e65] [cursor=pointer]:
+                      - generic [ref=e66]: 创业板指
+                      - generic [ref=e67]: "-4.07%"
+                    - generic [ref=e68] [cursor=pointer]:
+                      - generic [ref=e69]: 科创50
+                      - generic [ref=e70]: "-1.65%"
+                    - generic [ref=e71] [cursor=pointer]:
+                      - generic [ref=e72]: 北证50
+                      - generic [ref=e73]: "-0.84%"
+                    - generic [ref=e74] [cursor=pointer]:
+                      - generic [ref=e75]: 科创综指
+                      - generic [ref=e76]: "-2.02%"
+                    - generic [ref=e77] [cursor=pointer]:
+                      - generic [ref=e78]: 同花顺全A(沪深京)
+                      - generic [ref=e79]: "-2.55%"
+                    - generic [ref=e80] [cursor=pointer]:
+                      - generic [ref=e81]: 中证A500
+                      - generic [ref=e82]: "-3.09%"
+                    - generic [ref=e83] [cursor=pointer]:
+                      - generic [ref=e84]: 沪深300
+                      - generic [ref=e85]: "-3.03%"
+                    - generic [ref=e86] [cursor=pointer]:
+                      - generic [ref=e87]: 中证1000
+                      - generic [ref=e88]: "-2.54%"
+                    - generic [ref=e89] [cursor=pointer]:
+                      - generic [ref=e90]: 上证50
+                      - generic [ref=e91]: "-2.37%"
+                    - generic [ref=e92] [cursor=pointer]:
+                      - generic [ref=e93]: 深证100
+                      - generic [ref=e94]: "-3.95%"
+                    - generic [ref=e95] [cursor=pointer]:
+                      - generic [ref=e96]: 中证500
+                      - generic [ref=e97]: "-2.62%"
+                    - generic [ref=e98] [cursor=pointer]:
+                      - generic [ref=e99]: 创业板50
+                      - generic [ref=e100]: "-4.59%"
+                    - generic [ref=e101] [cursor=pointer]:
+                      - generic [ref=e102]: 科创100
+                      - generic [ref=e103]: "-1.97%"
+                - generic [ref=e105]:
+                  - generic [ref=e106]:
+                    - generic [ref=e107]:
+                      - generic [ref=e108]: 最新
+                      - generic [ref=e109]: "4027.26"
+                    - generic [ref=e110]:
+                      - generic [ref=e111]: 最高
+                      - generic [ref=e112]: "4098.69"
+                    - generic [ref=e113]:
+                      - generic [ref=e114]: 最低
+                      - generic [ref=e115]: "4009.23"
+                    - generic [ref=e116]:
+                      - generic [ref=e117]: 成交额
+                      - generic [ref=e118]: 16212亿
+                  - generic [ref=e119]:
+                    - generic: "4027.26"
+              - generic [ref=e133]:
+                - generic [ref=e134]:
+                  - generic [ref=e135]:
+                    - generic [ref=e136]: 今日实时成交额
+                    - generic [ref=e137]:
+                      - generic [ref=e138]: 3.58万亿
+                      - generic [ref=e139]:
+                        - generic [ref=e140]: 较上一日
+                        - generic [ref=e141]: "-436亿"
+                  - generic [ref=e142]:
+                    - generic [ref=e144]: 预测全天成交额
+                    - generic [ref=e145]: 3.58万亿
+                - generic [ref=e147]:
+                  - generic [ref=e148]: 5日均额
+                  - generic [ref=e149]: 3.55万亿
+                - generic [ref=e151]:
+                  - generic [ref=e152]: 60日均额
+                  - generic [ref=e153]: 2.84万亿
+                - 'button "问财: 成交额历史对比？" [ref=e1933] [cursor=pointer]':
+                  - img "AIME 问财助手" [ref=e155]
+                  - generic [ref=e157]:
+                    - generic [ref=e158]: 今日量能如何评？
+                    - generic [ref=e159]: 成交额历史对比？
+                    - generic [ref=e160]: 今日成交放量股
+                    - generic [ref=e161]: 今日量能如何评？
+            - generic [ref=e166]:
+              - generic [ref=e169] [cursor=pointer]: 今天炒什么
+              - generic [ref=e172] [cursor=pointer]: 融资融券
+              - generic [ref=e175] [cursor=pointer]: 同花顺热榜
+              - generic [ref=e178] [cursor=pointer]: 龙虎榜
+              - generic [ref=e181] [cursor=pointer]: 科创板
+              - generic [ref=e184] [cursor=pointer]: 投资日历
+              - generic [ref=e187] [cursor=pointer]: 公告速递
+              - generic [ref=e190] [cursor=pointer]: 业绩预告
+              - generic [ref=e193] [cursor=pointer]: 新股申购
+              - generic [ref=e196] [cursor=pointer]: 盘面分析
+              - generic [ref=e199] [cursor=pointer]: 涨停聚焦
+            - generic [ref=e200]:
+              - tablist [ref=e206]:
+                - tab "头条" [ref=e207] [cursor=pointer]:
+                  - generic [ref=e208]: 头条
+                - tab "CPO概念" [active] [selected] [ref=e210] [cursor=pointer]:
+                  - generic [ref=e211]: CPO概念
+                - tab "PCB概念" [ref=e212] [cursor=pointer]:
+                  - generic [ref=e213]: PCB概念
+                - tab "算力租赁" [ref=e214] [cursor=pointer]:
+                  - generic [ref=e215]: 算力租赁
+                - tab "商业航天" [ref=e216] [cursor=pointer]:
+                  - generic [ref=e217]: 商业航天
+                - tab "小金属" [ref=e218] [cursor=pointer]:
+                  - generic [ref=e219]: 小金属
+                - tab "有色金属" [ref=e220] [cursor=pointer]:
+                  - generic [ref=e221]: 有色金属
+                - tab "化工" [ref=e222] [cursor=pointer]:
+                  - generic [ref=e223]: 化工
+                - tab "油气开采" [ref=e224] [cursor=pointer]:
+                  - generic [ref=e225]: 油气开采
+                - tab "创新药" [ref=e226] [cursor=pointer]:
+                  - generic [ref=e227]: 创新药
+                - tab "电力" [ref=e228] [cursor=pointer]:
+                  - generic [ref=e229]: 电力
+                - tab "锂电池" [ref=e230] [cursor=pointer]:
+                  - generic [ref=e231]: 锂电池
+                - tab "黄金" [ref=e232] [cursor=pointer]:
+                  - generic [ref=e233]: 黄金
+                - tab "存储芯片" [ref=e234] [cursor=pointer]:
+                  - generic [ref=e235]: 存储芯片
+                - tab "智能电网" [ref=e236] [cursor=pointer]:
+                  - generic [ref=e237]: 智能电网
+                - tab "煤炭开采加工" [ref=e238] [cursor=pointer]:
+                  - generic [ref=e239]: 煤炭开采加工
+                - tab "天然气" [ref=e240] [cursor=pointer]:
+                  - generic [ref=e241]: 天然气
+                - tab "碳纤维" [ref=e242] [cursor=pointer]:
+                  - generic [ref=e243]: 碳纤维
+                - tab "脑机接口" [ref=e244] [cursor=pointer]:
+                  - generic [ref=e245]: 脑机接口
+                - tab "氢能源" [ref=e246] [cursor=pointer]:
+                  - generic [ref=e247]: 氢能源
+                - tab "可控核聚变" [ref=e248] [cursor=pointer]:
+                  - generic [ref=e249]: 可控核聚变
+                - tab "MicroLED概念" [ref=e250] [cursor=pointer]:
+                  - generic [ref=e251]: MicroLED概念
+                - tab "液冷服务器" [ref=e252] [cursor=pointer]:
+                  - generic [ref=e253]: 液冷服务器
+                - tab "人形机器人" [ref=e254] [cursor=pointer]:
+                  - generic [ref=e255]: 人形机器人
+              - generic [ref=e832]:
+                - generic [ref=e833]:
+                  - generic [ref=e836]:
+                    - generic [ref=e837]:
+                      - generic [ref=e838]: 共封装光学(CPO)
+                      - img [ref=e841] [cursor=pointer]
+                    - generic [ref=e843]:
+                      - generic [ref=e845]: "7187.80"
+                      - generic [ref=e847]:
+                        - generic [ref=e848]: "-273.68"
+                        - generic [ref=e849]: "-3.67%"
+                    - generic [ref=e850]:
+                      - generic [ref=e853] [cursor=pointer]: 分时
+                      - generic [ref=e858] [cursor=pointer]: 日k
+                      - generic [ref=e862] [cursor=pointer]: 周K
+                      - generic [ref=e866] [cursor=pointer]: 月K
+                      - generic [ref=e869] [cursor=pointer]:
+                        - generic [ref=e870]: 更多
+                        - img [ref=e872]
+                  - generic [ref=e888]:
+                    - tablist [ref=e893]:
+                      - tab "全部" [selected] [ref=e894] [cursor=pointer]:
+                        - generic [ref=e895]: 全部
+                      - tab "光模块设备" [ref=e896] [cursor=pointer]:
+                        - generic [ref=e897]: 光模块设备
+                      - tab "光模块" [ref=e898] [cursor=pointer]:
+                        - generic [ref=e899]: 光模块
+                      - tab "光芯片" [ref=e900] [cursor=pointer]:
+                        - generic [ref=e901]: 光芯片
+                      - tab "CPO封装" [ref=e902] [cursor=pointer]:
+                        - generic [ref=e903]: CPO封装
+                      - tab "MPO连接器" [ref=e904] [cursor=pointer]:
+                        - generic [ref=e905]: MPO连接器
+                      - tab "光器件" [ref=e906] [cursor=pointer]:
+                        - generic [ref=e907]: 光器件
+                    - table [ref=e909]:
+                      - rowgroup [ref=e910]:
+                        - row "股票名称 最新 涨幅 涨跌" [ref=e911]:
+                          - columnheader "股票名称" [ref=e912]
+                          - columnheader "最新" [ref=e913] [cursor=pointer]:
+                            - generic [ref=e914]:
+                              - generic [ref=e915]: 最新
+                              - img [ref=e916]
+                          - columnheader "涨幅" [ref=e919] [cursor=pointer]:
+                            - generic [ref=e920]:
+                              - generic [ref=e921]: 涨幅
+                              - img [ref=e922]
+                          - columnheader "涨跌" [ref=e925] [cursor=pointer]:
+                            - generic [ref=e926]:
+                              - generic [ref=e927]: 涨跌
+                              - img [ref=e928]
+                      - rowgroup [ref=e931]:
+                        - row "深科达 88.10 +11.69% 9.22" [ref=e932] [cursor=pointer]:
+                          - cell "深科达" [ref=e933]
+                          - cell "88.10" [ref=e934]
+                          - cell "+11.69%" [ref=e935]
+                          - cell "9.22" [ref=e936]
+                        - row "超声电子 28.46 +10.01% 2.59" [ref=e937] [cursor=pointer]:
+                          - cell "超声电子" [ref=e938]
+                          - cell "28.46" [ref=e939]
+                          - cell "+10.01%" [ref=e940]
+                          - cell "2.59" [ref=e941]
+                        - row "广合科技 220.88 +10.00% 20.08" [ref=e942] [cursor=pointer]:
+                          - cell "广合科技" [ref=e943]
+                          - cell "220.88" [ref=e944]
+                          - cell "+10.00%" [ref=e945]
+                          - cell "20.08" [ref=e946]
+                        - row "乾照光电 24.34 +9.84% 2.18" [ref=e947] [cursor=pointer]:
+                          - cell "乾照光电" [ref=e948]
+                          - cell "24.34" [ref=e949]
+                          - cell "+9.84%" [ref=e950]
+                          - cell "2.18" [ref=e951]
+                        - row "斯瑞新材 44.04 +9.23% 3.72" [ref=e952] [cursor=pointer]:
+                          - cell "斯瑞新材" [ref=e953]
+                          - cell "44.04" [ref=e954]
+                          - cell "+9.23%" [ref=e955]
+                          - cell "3.72" [ref=e956]
+                        - row "天准科技 127.92 +9.03% 10.59" [ref=e957] [cursor=pointer]:
+                          - cell "天准科技" [ref=e958]
+                          - cell "127.92" [ref=e959]
+                          - cell "+9.03%" [ref=e960]
+                          - cell "10.59" [ref=e961]
+                        - row "南亚新材 410.10 +7.93% 30.12" [ref=e962] [cursor=pointer]:
+                          - cell "南亚新材" [ref=e963]
+                          - cell "410.10" [ref=e964]
+                          - cell "+7.93%" [ref=e965]
+                          - cell "30.12" [ref=e966]
+                        - row "中京电子 22.78 +6.95% 1.48" [ref=e967] [cursor=pointer]:
+                          - cell "中京电子" [ref=e968]
+                          - cell "22.78" [ref=e969]
+                          - cell "+6.95%" [ref=e970]
+                          - cell "1.48" [ref=e971]
+                        - row "立昂微 75.37 +6.91% 4.87" [ref=e972] [cursor=pointer]:
+                          - cell "立昂微" [ref=e973]
+                          - cell "75.37" [ref=e974]
+                          - cell "+6.91%" [ref=e975]
+                          - cell "4.87" [ref=e976]
+                        - row "德明利 951.00 +6.73% 60.00" [ref=e977] [cursor=pointer]:
+                          - cell "德明利" [ref=e978]
+                          - cell "951.00" [ref=e979]
+                          - cell "+6.73%" [ref=e980]
+                          - cell "60.00" [ref=e981]
+                        - row "奥特维 57.20 +6.30% 3.39" [ref=e982] [cursor=pointer]:
+                          - cell "奥特维" [ref=e983]
+                          - cell "57.20" [ref=e984]
+                          - cell "+6.30%" [ref=e985]
+                          - cell "3.39" [ref=e986]
+                        - row "光华科技 39.11 +6.13% 2.26" [ref=e987] [cursor=pointer]:
+                          - cell "光华科技" [ref=e988]
+                          - cell "39.11" [ref=e989]
+                          - cell "+6.13%" [ref=e990]
+                          - cell "2.26" [ref=e991]
+                        - row "广立微 106.79 +6.03% 6.07" [ref=e992] [cursor=pointer]:
+                          - cell "广立微" [ref=e993]
+                          - cell "106.79" [ref=e994]
+                          - cell "+6.03%" [ref=e995]
+                          - cell "6.07" [ref=e996]
+                        - row "华灿光电 19.36 +5.68% 1.04" [ref=e997] [cursor=pointer]:
+                          - cell "华灿光电" [ref=e998]
+                          - cell "19.36" [ref=e999]
+                          - cell "+5.68%" [ref=e1000]
+                          - cell "1.04" [ref=e1001]
+                        - row "德龙激光 88.01 +5.20% 4.35" [ref=e1002] [cursor=pointer]:
+                          - cell "德龙激光" [ref=e1003]
+                          - cell "88.01" [ref=e1004]
+                          - cell "+5.20%" [ref=e1005]
+                          - cell "4.35" [ref=e1006]
+                        - row "国瓷材料 102.81 +4.48% 4.41" [ref=e1007] [cursor=pointer]:
+                          - cell "国瓷材料" [ref=e1008]
+                          - cell "102.81" [ref=e1009]
+                          - cell "+4.48%" [ref=e1010]
+                          - cell "4.41" [ref=e1011]
+                        - row "光力科技 39.73 +4.06% 1.55" [ref=e1012] [cursor=pointer]:
+                          - cell "光力科技" [ref=e1013]
+                          - cell "39.73" [ref=e1014]
+                          - cell "+4.06%" [ref=e1015]
+                          - cell "1.55" [ref=e1016]
+                        - row "快克智能 76.00 +3.83% 2.80" [ref=e1017] [cursor=pointer]:
+                          - cell "快克智能" [ref=e1018]
+                          - cell "76.00" [ref=e1019]
+                          - cell "+3.83%" [ref=e1020]
+                          - cell "2.80" [ref=e1021]
+                        - row "京东方Ａ 7.79 +3.59% 0.27" [ref=e1022] [cursor=pointer]:
+                          - cell "京东方Ａ" [ref=e1023]
+                          - cell "7.79" [ref=e1024]
+                          - cell "+3.59%" [ref=e1025]
+                          - cell "0.27" [ref=e1026]
+                        - row "光电股份 30.21 +3.57% 1.04" [ref=e1027] [cursor=pointer]:
+                          - cell "光电股份" [ref=e1028]
+                          - cell "30.21" [ref=e1029]
+                          - cell "+3.57%" [ref=e1030]
+                          - cell "1.04" [ref=e1031]
+                        - row "沃格光电 178.00 +3.49% 6.01" [ref=e1032] [cursor=pointer]:
+                          - cell "沃格光电" [ref=e1033]
+                          - cell "178.00" [ref=e1034]
+                          - cell "+3.49%" [ref=e1035]
+                          - cell "6.01" [ref=e1036]
+                        - row "易天股份 27.08 +3.40% 0.89" [ref=e1037] [cursor=pointer]:
+                          - cell "易天股份" [ref=e1038]
+                          - cell "27.08" [ref=e1039]
+                          - cell "+3.40%" [ref=e1040]
+                          - cell "0.89" [ref=e1041]
+                        - row "骏亚科技 20.78 +3.38% 0.68" [ref=e1042] [cursor=pointer]:
+                          - cell "骏亚科技" [ref=e1043]
+                          - cell "20.78" [ref=e1044]
+                          - cell "+3.38%" [ref=e1045]
+                          - cell "0.68" [ref=e1046]
+                        - row "ST惠伦 9.64 +3.32% 0.31" [ref=e1047] [cursor=pointer]:
+                          - cell "ST惠伦" [ref=e1048]
+                          - cell "9.64" [ref=e1049]
+                          - cell "+3.32%" [ref=e1050]
+                          - cell "0.31" [ref=e1051]
+                        - row "麦捷科技 31.00 +3.06% 0.92" [ref=e1052] [cursor=pointer]:
+                          - cell "麦捷科技" [ref=e1053]
+                          - cell "31.00" [ref=e1054]
+                          - cell "+3.06%" [ref=e1055]
+                          - cell "0.92" [ref=e1056]
+                        - row "强瑞技术 155.50 +2.84% 4.29" [ref=e1057] [cursor=pointer]:
+                          - cell "强瑞技术" [ref=e1058]
+                          - cell "155.50" [ref=e1059]
+                          - cell "+2.84%" [ref=e1060]
+                          - cell "4.29" [ref=e1061]
+                        - row "ST臻镭 70.00 +2.47% 1.69" [ref=e1062] [cursor=pointer]:
+                          - cell "ST臻镭" [ref=e1063]
+                          - cell "70.00" [ref=e1064]
+                          - cell "+2.47%" [ref=e1065]
+                          - cell "1.69" [ref=e1066]
+                        - row "日联科技 170.70 +2.39% 3.99" [ref=e1067] [cursor=pointer]:
+                          - cell "日联科技" [ref=e1068]
+                          - cell "170.70" [ref=e1069]
+                          - cell "+2.39%" [ref=e1070]
+                          - cell "3.99" [ref=e1071]
+                        - row "晶赛科技 46.30 +1.94% 0.88" [ref=e1072] [cursor=pointer]:
+                          - cell "晶赛科技" [ref=e1073]
+                          - cell "46.30" [ref=e1074]
+                          - cell "+1.94%" [ref=e1075]
+                          - cell "0.88" [ref=e1076]
+                        - row "金戈新材 58.45 +1.83% 1.05" [ref=e1077] [cursor=pointer]:
+                          - cell "金戈新材" [ref=e1078]
+                          - cell "58.45" [ref=e1079]
+                          - cell "+1.83%" [ref=e1080]
+                          - cell "1.05" [ref=e1081]
+                        - row "德福科技 155.30 +1.80% 2.75" [ref=e1082] [cursor=pointer]:
+                          - cell "德福科技" [ref=e1083]
+                          - cell "155.30" [ref=e1084]
+                          - cell "+1.80%" [ref=e1085]
+                          - cell "2.75" [ref=e1086]
+                        - row "一博科技 62.44 +1.69% 1.04" [ref=e1087] [cursor=pointer]:
+                          - cell "一博科技" [ref=e1088]
+                          - cell "62.44" [ref=e1089]
+                          - cell "+1.69%" [ref=e1090]
+                          - cell "1.04" [ref=e1091]
+                        - row "凌云光 65.88 +1.35% 0.88" [ref=e1092] [cursor=pointer]:
+                          - cell "凌云光" [ref=e1093]
+                          - cell "65.88" [ref=e1094]
+                          - cell "+1.35%" [ref=e1095]
+                          - cell "0.88" [ref=e1096]
+                        - row "蓝特光学 97.01 +1.09% 1.05" [ref=e1097] [cursor=pointer]:
+                          - cell "蓝特光学" [ref=e1098]
+                          - cell "97.01" [ref=e1099]
+                          - cell "+1.09%" [ref=e1100]
+                          - cell "1.05" [ref=e1101]
+                        - row "通宇通讯 34.60 +0.93% 0.32" [ref=e1102] [cursor=pointer]:
+                          - cell "通宇通讯" [ref=e1103]
+                          - cell "34.60" [ref=e1104]
+                          - cell "+0.93%" [ref=e1105]
+                          - cell "0.32" [ref=e1106]
+                        - row "聚辰股份 189.44 +0.87% 1.64" [ref=e1107] [cursor=pointer]:
+                          - cell "聚辰股份" [ref=e1108]
+                          - cell "189.44" [ref=e1109]
+                          - cell "+0.87%" [ref=e1110]
+                          - cell "1.64" [ref=e1111]
+                        - row "中航光电 42.69 +0.83% 0.35" [ref=e1112] [cursor=pointer]:
+                          - cell "中航光电" [ref=e1113]
+                          - cell "42.69" [ref=e1114]
+                          - cell "+0.83%" [ref=e1115]
+                          - cell "0.35" [ref=e1116]
+                        - row "飞荣达 49.97 +0.79% 0.39" [ref=e1117] [cursor=pointer]:
+                          - cell "飞荣达" [ref=e1118]
+                          - cell "49.97" [ref=e1119]
+                          - cell "+0.79%" [ref=e1120]
+                          - cell "0.39" [ref=e1121]
+                        - row "华天科技 22.56 +0.71% 0.16" [ref=e1122] [cursor=pointer]:
+                          - cell "华天科技" [ref=e1123]
+                          - cell "22.56" [ref=e1124]
+                          - cell "+0.71%" [ref=e1125]
+                          - cell "0.16" [ref=e1126]
+                        - row "深科技 53.51 +0.58% 0.31" [ref=e1127] [cursor=pointer]:
+                          - cell "深科技" [ref=e1128]
+                          - cell "53.51" [ref=e1129]
+                          - cell "+0.58%" [ref=e1130]
+                          - cell "0.31" [ref=e1131]
+                        - row "迈信林 53.96 +0.54% 0.29" [ref=e1132] [cursor=pointer]:
+                          - cell "迈信林" [ref=e1133]
+                          - cell "53.96" [ref=e1134]
+                          - cell "+0.54%" [ref=e1135]
+                          - cell "0.29" [ref=e1136]
+                        - row "三安光电 21.73 +0.28% 0.06" [ref=e1137] [cursor=pointer]:
+                          - cell "三安光电" [ref=e1138]
+                          - cell "21.73" [ref=e1139]
+                          - cell "+0.28%" [ref=e1140]
+                          - cell "0.06" [ref=e1141]
+                        - row "明阳电路 33.77 +0.09% 0.03" [ref=e1142] [cursor=pointer]:
+                          - cell "明阳电路" [ref=e1143]
+                          - cell "33.77" [ref=e1144]
+                          - cell "+0.09%" [ref=e1145]
+                          - cell "0.03" [ref=e1146]
+                        - row "华润微 84.72 0% 0" [ref=e1147] [cursor=pointer]:
+                          - cell "华润微" [ref=e1148]
+                          - cell "84.72" [ref=e1149]
+                          - cell "0%" [ref=e1150]
+                          - cell "0" [ref=e1151]
+                        - row "陕西华达 48.60 -0.23% -0.11" [ref=e1152] [cursor=pointer]:
+                          - cell "陕西华达" [ref=e1153]
+                          - cell "48.60" [ref=e1154]
+                          - cell "-0.23%" [ref=e1155]
+                          - cell "-0.11" [ref=e1156]
+                        - row "天洋新材 7.59 -0.52% -0.04" [ref=e1157] [cursor=pointer]:
+                          - cell "天洋新材" [ref=e1158]
+                          - cell "7.59" [ref=e1159]
+                          - cell "-0.52%" [ref=e1160]
+                          - cell "-0.04" [ref=e1161]
+                        - row "泰晶科技 64.30 -0.71% -0.46" [ref=e1162] [cursor=pointer]:
+                          - cell "泰晶科技" [ref=e1163]
+                          - cell "64.30" [ref=e1164]
+                          - cell "-0.71%" [ref=e1165]
+                          - cell "-0.46" [ref=e1166]
+                        - row "帝奥微 51.51 -0.75% -0.39" [ref=e1167] [cursor=pointer]:
+                          - cell "帝奥微" [ref=e1168]
+                          - cell "51.51" [ref=e1169]
+                          - cell "-0.75%" [ref=e1170]
+                          - cell "-0.39" [ref=e1171]
+                        - row "菲沃泰 34.46 -0.83% -0.29" [ref=e1172] [cursor=pointer]:
+                          - cell "菲沃泰" [ref=e1173]
+                          - cell "34.46" [ref=e1174]
+                          - cell "-0.83%" [ref=e1175]
+                          - cell "-0.29" [ref=e1176]
+                        - row "航天电器 72.46 -1.11% -0.81" [ref=e1177] [cursor=pointer]:
+                          - cell "航天电器" [ref=e1178]
+                          - cell "72.46" [ref=e1179]
+                          - cell "-1.11%" [ref=e1180]
+                          - cell "-0.81" [ref=e1181]
+                        - row "铭普光磁 29.95 -1.19% -0.36" [ref=e1182] [cursor=pointer]:
+                          - cell "铭普光磁" [ref=e1183]
+                          - cell "29.95" [ref=e1184]
+                          - cell "-1.19%" [ref=e1185]
+                          - cell "-0.36" [ref=e1186]
+                        - row "全信股份 14.66 -1.21% -0.18" [ref=e1187] [cursor=pointer]:
+                          - cell "全信股份" [ref=e1188]
+                          - cell "14.66" [ref=e1189]
+                          - cell "-1.21%" [ref=e1190]
+                          - cell "-0.18" [ref=e1191]
+                        - row "澳弘电子 38.29 -1.34% -0.52" [ref=e1192] [cursor=pointer]:
+                          - cell "澳弘电子" [ref=e1193]
+                          - cell "38.29" [ref=e1194]
+                          - cell "-1.34%" [ref=e1195]
+                          - cell "-0.52" [ref=e1196]
+                        - row "风华高科 78.50 -1.41% -1.12" [ref=e1197] [cursor=pointer]:
+                          - cell "风华高科" [ref=e1198]
+                          - cell "78.50" [ref=e1199]
+                          - cell "-1.41%" [ref=e1200]
+                          - cell "-1.12" [ref=e1201]
+                        - row "联赢激光 28.62 -1.58% -0.46" [ref=e1202] [cursor=pointer]:
+                          - cell "联赢激光" [ref=e1203]
+                          - cell "28.62" [ref=e1204]
+                          - cell "-1.58%" [ref=e1205]
+                          - cell "-0.46" [ref=e1206]
+                        - row "水晶光电 35.83 -1.59% -0.58" [ref=e1207] [cursor=pointer]:
+                          - cell "水晶光电" [ref=e1208]
+                          - cell "35.83" [ref=e1209]
+                          - cell "-1.59%" [ref=e1210]
+                          - cell "-0.58" [ref=e1211]
+                        - row "聚飞光电 10.22 -1.64% -0.17" [ref=e1212] [cursor=pointer]:
+                          - cell "聚飞光电" [ref=e1213]
+                          - cell "10.22" [ref=e1214]
+                          - cell "-1.64%" [ref=e1215]
+                          - cell "-0.17" [ref=e1216]
+                        - row "宏达电子 89.70 -1.75% -1.60" [ref=e1217] [cursor=pointer]:
+                          - cell "宏达电子" [ref=e1218]
+                          - cell "89.70" [ref=e1219]
+                          - cell "-1.75%" [ref=e1220]
+                          - cell "-1.60" [ref=e1221]
+                        - row "联创电子 7.25 -1.76% -0.13" [ref=e1222] [cursor=pointer]:
+                          - cell "联创电子" [ref=e1223]
+                          - cell "7.25" [ref=e1224]
+                          - cell "-1.76%" [ref=e1225]
+                          - cell "-0.13" [ref=e1226]
+                        - row "广电计量 18.05 -2.01% -0.37" [ref=e1227] [cursor=pointer]:
+                          - cell "广电计量" [ref=e1228]
+                          - cell "18.05" [ref=e1229]
+                          - cell "-2.01%" [ref=e1230]
+                          - cell "-0.37" [ref=e1231]
+                        - row "胜科纳米 71.50 -2.05% -1.50" [ref=e1232] [cursor=pointer]:
+                          - cell "胜科纳米" [ref=e1233]
+                          - cell "71.50" [ref=e1234]
+                          - cell "-2.05%" [ref=e1235]
+                          - cell "-1.50" [ref=e1236]
+                        - row "阿莱德 46.05 -2.06% -0.97" [ref=e1237] [cursor=pointer]:
+                          - cell "阿莱德" [ref=e1238]
+                          - cell "46.05" [ref=e1239]
+                          - cell "-2.06%" [ref=e1240]
+                          - cell "-0.97" [ref=e1241]
+                        - row "三环集团 160.05 -2.18% -3.57" [ref=e1242] [cursor=pointer]:
+                          - cell "三环集团" [ref=e1243]
+                          - cell "160.05" [ref=e1244]
+                          - cell "-2.18%" [ref=e1245]
+                          - cell "-3.57" [ref=e1246]
+                        - row "思瑞浦 345.01 -2.23% -7.88" [ref=e1247] [cursor=pointer]:
+                          - cell "思瑞浦" [ref=e1248]
+                          - cell "345.01" [ref=e1249]
+                          - cell "-2.23%" [ref=e1250]
+                          - cell "-7.88" [ref=e1251]
+                        - row "红板科技 92.74 -2.34% -2.22" [ref=e1252] [cursor=pointer]:
+                          - cell "红板科技" [ref=e1253]
+                          - cell "92.74" [ref=e1254]
+                          - cell "-2.34%" [ref=e1255]
+                          - cell "-2.22" [ref=e1256]
+                        - row "满坤科技 55.20 -2.35% -1.33" [ref=e1257] [cursor=pointer]:
+                          - cell "满坤科技" [ref=e1258]
+                          - cell "55.20" [ref=e1259]
+                          - cell "-2.35%" [ref=e1260]
+                          - cell "-1.33" [ref=e1261]
+                        - row "中科蓝讯 153.14 -2.46% -3.86" [ref=e1262] [cursor=pointer]:
+                          - cell "中科蓝讯" [ref=e1263]
+                          - cell "153.14" [ref=e1264]
+                          - cell "-2.46%" [ref=e1265]
+                          - cell "-3.86" [ref=e1266]
+                        - row "海特高新 13.13 -2.60% -0.35" [ref=e1267] [cursor=pointer]:
+                          - cell "海特高新" [ref=e1268]
+                          - cell "13.13" [ref=e1269]
+                          - cell "-2.60%" [ref=e1270]
+                          - cell "-0.35" [ref=e1271]
+                        - row "鹏鼎控股 110.98 -2.77% -3.16" [ref=e1272] [cursor=pointer]:
+                          - cell "鹏鼎控股" [ref=e1273]
+                          - cell "110.98" [ref=e1274]
+                          - cell "-2.77%" [ref=e1275]
+                          - cell "-3.16" [ref=e1276]
+                        - row "协创数据 332.47 -2.78% -9.51" [ref=e1277] [cursor=pointer]:
+                          - cell "协创数据" [ref=e1278]
+                          - cell "332.47" [ref=e1279]
+                          - cell "-2.78%" [ref=e1280]
+                          - cell "-9.51" [ref=e1281]
+                        - row "长电科技 100.89 -3.15% -3.28" [ref=e1282] [cursor=pointer]:
+                          - cell "长电科技" [ref=e1283]
+                          - cell "100.89" [ref=e1284]
+                          - cell "-3.15%" [ref=e1285]
+                          - cell "-3.28" [ref=e1286]
+                        - row "国民技术 28.11 -3.17% -0.92" [ref=e1287] [cursor=pointer]:
+                          - cell "国民技术" [ref=e1288]
+                          - cell "28.11" [ref=e1289]
+                          - cell "-3.17%" [ref=e1290]
+                          - cell "-0.92" [ref=e1291]
+                        - row "振邦智能 21.79 -3.20% -0.72" [ref=e1292] [cursor=pointer]:
+                          - cell "振邦智能" [ref=e1293]
+                          - cell "21.79" [ref=e1294]
+                          - cell "-3.20%" [ref=e1295]
+                          - cell "-0.72" [ref=e1296]
+                        - row "兴森科技 51.81 -3.21% -1.72" [ref=e1297] [cursor=pointer]:
+                          - cell "兴森科技" [ref=e1298]
+                          - cell "51.81" [ref=e1299]
+                          - cell "-3.21%" [ref=e1300]
+                          - cell "-1.72" [ref=e1301]
+                        - row "海得控制 9.15 -3.28% -0.31" [ref=e1302] [cursor=pointer]:
+                          - cell "海得控制" [ref=e1303]
+                          - cell "9.15" [ref=e1304]
+                          - cell "-3.28%" [ref=e1305]
+                          - cell "-0.31" [ref=e1306]
+                        - row "顺络电子 68.82 -3.33% -2.37" [ref=e1307] [cursor=pointer]:
+                          - cell "顺络电子" [ref=e1308]
+                          - cell "68.82" [ref=e1309]
+                          - cell "-3.33%" [ref=e1310]
+                          - cell "-2.37" [ref=e1311]
+                        - row "中石科技 57.41 -3.35% -1.99" [ref=e1312] [cursor=pointer]:
+                          - cell "中石科技" [ref=e1313]
+                          - cell "57.41" [ref=e1314]
+                          - cell "-3.35%" [ref=e1315]
+                          - cell "-1.99" [ref=e1316]
+                        - row "振芯科技 14.97 -3.36% -0.52" [ref=e1317] [cursor=pointer]:
+                          - cell "振芯科技" [ref=e1318]
+                          - cell "14.97" [ref=e1319]
+                          - cell "-3.36%" [ref=e1320]
+                          - cell "-0.52" [ref=e1321]
+                        - row "爱柯迪 14.12 -3.62% -0.53" [ref=e1322] [cursor=pointer]:
+                          - cell "爱柯迪" [ref=e1323]
+                          - cell "14.12" [ref=e1324]
+                          - cell "-3.62%" [ref=e1325]
+                          - cell "-0.53" [ref=e1326]
+                        - row "永贵电器 16.48 -3.63% -0.62" [ref=e1327] [cursor=pointer]:
+                          - cell "永贵电器" [ref=e1328]
+                          - cell "16.48" [ref=e1329]
+                          - cell "-3.63%" [ref=e1330]
+                          - cell "-0.62" [ref=e1331]
+                        - row "博威合金 23.03 -3.64% -0.87" [ref=e1332] [cursor=pointer]:
+                          - cell "博威合金" [ref=e1333]
+                          - cell "23.03" [ref=e1334]
+                          - cell "-3.64%" [ref=e1335]
+                          - cell "-0.87" [ref=e1336]
+                        - row "晶晨股份 97.11 -3.65% -3.68" [ref=e1337] [cursor=pointer]:
+                          - cell "晶晨股份" [ref=e1338]
+                          - cell "97.11" [ref=e1339]
+                          - cell "-3.65%" [ref=e1340]
+                          - cell "-3.68" [ref=e1341]
+                        - row "华光新材 82.10 -3.71% -3.16" [ref=e1342] [cursor=pointer]:
+                          - cell "华光新材" [ref=e1343]
+                          - cell "82.10" [ref=e1344]
+                          - cell "-3.71%" [ref=e1345]
+                          - cell "-3.16" [ref=e1346]
+                        - row "东睦股份 40.02 -3.73% -1.55" [ref=e1347] [cursor=pointer]:
+                          - cell "东睦股份" [ref=e1348]
+                          - cell "40.02" [ref=e1349]
+                          - cell "-3.73%" [ref=e1350]
+                          - cell "-1.55" [ref=e1351]
+                        - row "雷迪克 33.00 -3.79% -1.30" [ref=e1352] [cursor=pointer]:
+                          - cell "雷迪克" [ref=e1353]
+                          - cell "33.00" [ref=e1354]
+                          - cell "-3.79%" [ref=e1355]
+                          - cell "-1.30" [ref=e1356]
+                        - row "赛微电子 39.10 -3.84% -1.56" [ref=e1357] [cursor=pointer]:
+                          - cell "赛微电子" [ref=e1358]
+                          - cell "39.10" [ref=e1359]
+                          - cell "-3.84%" [ref=e1360]
+                          - cell "-1.56" [ref=e1361]
+                        - row "世嘉科技 38.60 -3.86% -1.55" [ref=e1362] [cursor=pointer]:
+                          - cell "世嘉科技" [ref=e1363]
+                          - cell "38.60" [ref=e1364]
+                          - cell "-3.86%" [ref=e1365]
+                          - cell "-1.55" [ref=e1366]
+                        - row "中富电路 198.40 -4.00% -8.26" [ref=e1367] [cursor=pointer]:
+                          - cell "中富电路" [ref=e1368]
+                          - cell "198.40" [ref=e1369]
+                          - cell "-4.00%" [ref=e1370]
+                          - cell "-8.26" [ref=e1371]
+                        - row "紫光国微 83.98 -4.02% -3.52" [ref=e1372] [cursor=pointer]:
+                          - cell "紫光国微" [ref=e1373]
+                          - cell "83.98" [ref=e1374]
+                          - cell "-4.02%" [ref=e1375]
+                          - cell "-3.52" [ref=e1376]
+                        - row "德科立 210.52 -4.12% -9.05" [ref=e1377] [cursor=pointer]:
+                          - cell "德科立" [ref=e1378]
+                          - cell "210.52" [ref=e1379]
+                          - cell "-4.12%" [ref=e1380]
+                          - cell "-9.05" [ref=e1381]
+                        - row "振华科技 58.33 -4.22% -2.57" [ref=e1382] [cursor=pointer]:
+                          - cell "振华科技" [ref=e1383]
+                          - cell "58.33" [ref=e1384]
+                          - cell "-4.22%" [ref=e1385]
+                          - cell "-2.57" [ref=e1386]
+                        - row "威尔高 52.90 -4.27% -2.36" [ref=e1387] [cursor=pointer]:
+                          - cell "威尔高" [ref=e1388]
+                          - cell "52.90" [ref=e1389]
+                          - cell "-4.27%" [ref=e1390]
+                          - cell "-2.36" [ref=e1391]
+                        - row "宜通世纪 4.19 -4.34% -0.19" [ref=e1392] [cursor=pointer]:
+                          - cell "宜通世纪" [ref=e1393]
+                          - cell "4.19" [ref=e1394]
+                          - cell "-4.34%" [ref=e1395]
+                          - cell "-0.19" [ref=e1396]
+                        - row "博敏电子 25.26 -4.39% -1.16" [ref=e1397] [cursor=pointer]:
+                          - cell "博敏电子" [ref=e1398]
+                          - cell "25.26" [ref=e1399]
+                          - cell "-4.39%" [ref=e1400]
+                          - cell "-1.16" [ref=e1401]
+                        - row "九联科技 10.58 -4.43% -0.49" [ref=e1402] [cursor=pointer]:
+                          - cell "九联科技" [ref=e1403]
+                          - cell "10.58" [ref=e1404]
+                          - cell "-4.43%" [ref=e1405]
+                          - cell "-0.49" [ref=e1406]
+                        - row "铂科新材 94.93 -4.54% -4.52" [ref=e1407] [cursor=pointer]:
+                          - cell "铂科新材" [ref=e1408]
+                          - cell "94.93" [ref=e1409]
+                          - cell "-4.54%" [ref=e1410]
+                          - cell "-4.52" [ref=e1411]
+                        - row "生益电子 131.90 -4.56% -6.30" [ref=e1412] [cursor=pointer]:
+                          - cell "生益电子" [ref=e1413]
+                          - cell "131.90" [ref=e1414]
+                          - cell "-4.56%" [ref=e1415]
+                          - cell "-6.30" [ref=e1416]
+                        - row "生益科技 178.50 -4.65% -8.70" [ref=e1417] [cursor=pointer]:
+                          - cell "生益科技" [ref=e1418]
+                          - cell "178.50" [ref=e1419]
+                          - cell "-4.65%" [ref=e1420]
+                          - cell "-8.70" [ref=e1421]
+                        - row "金禄电子 28.85 -4.82% -1.46" [ref=e1422] [cursor=pointer]:
+                          - cell "金禄电子" [ref=e1423]
+                          - cell "28.85" [ref=e1424]
+                          - cell "-4.82%" [ref=e1425]
+                          - cell "-1.46" [ref=e1426]
+                        - row "圣邦股份 131.55 -4.87% -6.73" [ref=e1427] [cursor=pointer]:
+                          - cell "圣邦股份" [ref=e1428]
+                          - cell "131.55" [ref=e1429]
+                          - cell "-4.87%" [ref=e1430]
+                          - cell "-6.73" [ref=e1431]
+                        - row "强达电路 108.12 -5.03% -5.73" [ref=e1432] [cursor=pointer]:
+                          - cell "强达电路" [ref=e1433]
+                          - cell "108.12" [ref=e1434]
+                          - cell "-5.03%" [ref=e1435]
+                          - cell "-5.73" [ref=e1436]
+                        - row "华阳集团 24.12 -5.08% -1.29" [ref=e1437] [cursor=pointer]:
+                          - cell "华阳集团" [ref=e1438]
+                          - cell "24.12" [ref=e1439]
+                          - cell "-5.08%" [ref=e1440]
+                          - cell "-1.29" [ref=e1441]
+                        - row "本川智能 78.00 -5.11% -4.20" [ref=e1442] [cursor=pointer]:
+                          - cell "本川智能" [ref=e1443]
+                          - cell "78.00" [ref=e1444]
+                          - cell "-5.11%" [ref=e1445]
+                          - cell "-4.20" [ref=e1446]
+                        - row "杰普特 472.81 -5.11% -25.48" [ref=e1447] [cursor=pointer]:
+                          - cell "杰普特" [ref=e1448]
+                          - cell "472.81" [ref=e1449]
+                          - cell "-5.11%" [ref=e1450]
+                          - cell "-25.48" [ref=e1451]
+                        - row "英唐智控 20.00 -5.12% -1.08" [ref=e1452] [cursor=pointer]:
+                          - cell "英唐智控" [ref=e1453]
+                          - cell "20.00" [ref=e1454]
+                          - cell "-5.12%" [ref=e1455]
+                          - cell "-1.08" [ref=e1456]
+                        - row "飞利信 3.15 -5.12% -0.17" [ref=e1457] [cursor=pointer]:
+                          - cell "飞利信" [ref=e1458]
+                          - cell "3.15" [ref=e1459]
+                          - cell "-5.12%" [ref=e1460]
+                          - cell "-0.17" [ref=e1461]
+                        - row "克来机电 17.50 -5.20% -0.96" [ref=e1462] [cursor=pointer]:
+                          - cell "克来机电" [ref=e1463]
+                          - cell "17.50" [ref=e1464]
+                          - cell "-5.20%" [ref=e1465]
+                          - cell "-0.96" [ref=e1466]
+                        - row "则成电子 20.02 -5.21% -1.10" [ref=e1467] [cursor=pointer]:
+                          - cell "则成电子" [ref=e1468]
+                          - cell "20.02" [ref=e1469]
+                          - cell "-5.21%" [ref=e1470]
+                          - cell "-1.10" [ref=e1471]
+                        - row "源杰科技 1776.91 -5.23% -98.09" [ref=e1472] [cursor=pointer]:
+                          - cell "源杰科技" [ref=e1473]
+                          - cell "1776.91" [ref=e1474]
+                          - cell "-5.23%" [ref=e1475]
+                          - cell "-98.09" [ref=e1476]
+                        - row "中际旭创 1253.89 -5.25% -69.51" [ref=e1477] [cursor=pointer]:
+                          - cell "中际旭创" [ref=e1478]
+                          - cell "1253.89" [ref=e1479]
+                          - cell "-5.25%" [ref=e1480]
+                          - cell "-69.51" [ref=e1481]
+                        - row "华盛昌 117.30 -5.27% -6.53" [ref=e1482] [cursor=pointer]:
+                          - cell "华盛昌" [ref=e1483]
+                          - cell "117.30" [ref=e1484]
+                          - cell "-5.27%" [ref=e1485]
+                          - cell "-6.53" [ref=e1486]
+                        - row "泰金新能 230.90 -5.29% -12.90" [ref=e1487] [cursor=pointer]:
+                          - cell "泰金新能" [ref=e1488]
+                          - cell "230.90" [ref=e1489]
+                          - cell "-5.29%" [ref=e1490]
+                          - cell "-12.90" [ref=e1491]
+                        - row "金字火腿 10.98 -5.34% -0.62" [ref=e1492] [cursor=pointer]:
+                          - cell "金字火腿" [ref=e1493]
+                          - cell "10.98" [ref=e1494]
+                          - cell "-5.34%" [ref=e1495]
+                          - cell "-0.62" [ref=e1496]
+                        - row "星网锐捷 17.70 -5.35% -1.00" [ref=e1497] [cursor=pointer]:
+                          - cell "星网锐捷" [ref=e1498]
+                          - cell "17.70" [ref=e1499]
+                          - cell "-5.35%" [ref=e1500]
+                          - cell "-1.00" [ref=e1501]
+                        - row "精研科技 61.51 -5.37% -3.49" [ref=e1502] [cursor=pointer]:
+                          - cell "精研科技" [ref=e1503]
+                          - cell "61.51" [ref=e1504]
+                          - cell "-5.37%" [ref=e1505]
+                          - cell "-3.49" [ref=e1506]
+                        - row "四会富仕 56.35 -5.37% -3.20" [ref=e1507] [cursor=pointer]:
+                          - cell "四会富仕" [ref=e1508]
+                          - cell "56.35" [ref=e1509]
+                          - cell "-5.37%" [ref=e1510]
+                          - cell "-3.20" [ref=e1511]
+                        - row "兆驰股份 10.74 -5.37% -0.61" [ref=e1512] [cursor=pointer]:
+                          - cell "兆驰股份" [ref=e1513]
+                          - cell "10.74" [ref=e1514]
+                          - cell "-5.37%" [ref=e1515]
+                          - cell "-0.61" [ref=e1516]
+                        - row "科瑞技术 57.17 -5.44% -3.29" [ref=e1517] [cursor=pointer]:
+                          - cell "科瑞技术" [ref=e1518]
+                          - cell "57.17" [ref=e1519]
+                          - cell "-5.44%" [ref=e1520]
+                          - cell "-3.29" [ref=e1521]
+                        - row "青山纸业 3.08 -5.52% -0.18" [ref=e1522] [cursor=pointer]:
+                          - cell "青山纸业" [ref=e1523]
+                          - cell "3.08" [ref=e1524]
+                          - cell "-5.52%" [ref=e1525]
+                          - cell "-0.18" [ref=e1526]
+                        - row "锐捷网络 63.50 -5.53% -3.72" [ref=e1527] [cursor=pointer]:
+                          - cell "锐捷网络" [ref=e1528]
+                          - cell "63.50" [ref=e1529]
+                          - cell "-5.53%" [ref=e1530]
+                          - cell "-3.72" [ref=e1531]
+                        - row "剑桥科技 245.92 -5.56% -14.48" [ref=e1532] [cursor=pointer]:
+                          - cell "剑桥科技" [ref=e1533]
+                          - cell "245.92" [ref=e1534]
+                          - cell "-5.56%" [ref=e1535]
+                          - cell "-14.48" [ref=e1536]
+                        - row "长飞光纤 543.00 -5.57% -32.00" [ref=e1537] [cursor=pointer]:
+                          - cell "长飞光纤" [ref=e1538]
+                          - cell "543.00" [ref=e1539]
+                          - cell "-5.57%" [ref=e1540]
+                          - cell "-32.00" [ref=e1541]
+                        - row "东山精密 260.32 -5.61% -15.48" [ref=e1542] [cursor=pointer]:
+                          - cell "东山精密" [ref=e1543]
+                          - cell "260.32" [ref=e1544]
+                          - cell "-5.61%" [ref=e1545]
+                          - cell "-15.48" [ref=e1546]
+                        - row "崇达技术 17.68 -5.61% -1.05" [ref=e1547] [cursor=pointer]:
+                          - cell "崇达技术" [ref=e1548]
+                          - cell "17.68" [ref=e1549]
+                          - cell "-5.61%" [ref=e1550]
+                          - cell "-1.05" [ref=e1551]
+                        - row "航锦科技 13.97 -5.67% -0.84" [ref=e1552] [cursor=pointer]:
+                          - cell "航锦科技" [ref=e1553]
+                          - cell "13.97" [ref=e1554]
+                          - cell "-5.67%" [ref=e1555]
+                          - cell "-0.84" [ref=e1556]
+                        - row "金信诺 17.56 -5.69% -1.06" [ref=e1557] [cursor=pointer]:
+                          - cell "金信诺" [ref=e1558]
+                          - cell "17.56" [ref=e1559]
+                          - cell "-5.69%" [ref=e1560]
+                          - cell "-1.06" [ref=e1561]
+                        - row "智立方 104.58 -5.70% -6.32" [ref=e1562] [cursor=pointer]:
+                          - cell "智立方" [ref=e1563]
+                          - cell "104.58" [ref=e1564]
+                          - cell "-5.70%" [ref=e1565]
+                          - cell "-6.32" [ref=e1566]
+                        - row "共进股份 11.64 -5.83% -0.72" [ref=e1567] [cursor=pointer]:
+                          - cell "共进股份" [ref=e1568]
+                          - cell "11.64" [ref=e1569]
+                          - cell "-5.83%" [ref=e1570]
+                          - cell "-0.72" [ref=e1571]
+                        - row "世运电路 48.20 -5.84% -2.99" [ref=e1572] [cursor=pointer]:
+                          - cell "世运电路" [ref=e1573]
+                          - cell "48.20" [ref=e1574]
+                          - cell "-5.84%" [ref=e1575]
+                          - cell "-2.99" [ref=e1576]
+                        - row "华丰科技 144.82 -5.89% -9.06" [ref=e1577] [cursor=pointer]:
+                          - cell "华丰科技" [ref=e1578]
+                          - cell "144.82" [ref=e1579]
+                          - cell "-5.89%" [ref=e1580]
+                          - cell "-9.06" [ref=e1581]
+                        - row "亚康股份 59.14 -5.99% -3.77" [ref=e1582] [cursor=pointer]:
+                          - cell "亚康股份" [ref=e1583]
+                          - cell "59.14" [ref=e1584]
+                          - cell "-5.99%" [ref=e1585]
+                          - cell "-3.77" [ref=e1586]
+                        - row "嘉元科技 42.45 -6.06% -2.74" [ref=e1587] [cursor=pointer]:
+                          - cell "嘉元科技" [ref=e1588]
+                          - cell "42.45" [ref=e1589]
+                          - cell "-6.06%" [ref=e1590]
+                          - cell "-2.74" [ref=e1591]
+                        - row "瑞斯康达 11.46 -6.07% -0.74" [ref=e1592] [cursor=pointer]:
+                          - cell "瑞斯康达" [ref=e1593]
+                          - cell "11.46" [ref=e1594]
+                          - cell "-6.07%" [ref=e1595]
+                          - cell "-0.74" [ref=e1596]
+                        - row "富信科技 172.80 -6.09% -11.20" [ref=e1597] [cursor=pointer]:
+                          - cell "富信科技" [ref=e1598]
+                          - cell "172.80" [ref=e1599]
+                          - cell "-6.09%" [ref=e1600]
+                          - cell "-11.20" [ref=e1601]
+                        - row "怡合达 26.33 -6.20% -1.74" [ref=e1602] [cursor=pointer]:
+                          - cell "怡合达" [ref=e1603]
+                          - cell "26.33" [ref=e1604]
+                          - cell "-6.20%" [ref=e1605]
+                          - cell "-1.74" [ref=e1606]
+                        - row "东田微 243.70 -6.29% -16.35" [ref=e1607] [cursor=pointer]:
+                          - cell "东田微" [ref=e1608]
+                          - cell "243.70" [ref=e1609]
+                          - cell "-6.29%" [ref=e1610]
+                          - cell "-16.35" [ref=e1611]
+                        - row "中瓷电子 183.10 -6.38% -12.47" [ref=e1612] [cursor=pointer]:
+                          - cell "中瓷电子" [ref=e1613]
+                          - cell "183.10" [ref=e1614]
+                          - cell "-6.38%" [ref=e1615]
+                          - cell "-12.47" [ref=e1616]
+                        - row "上海贝岭 29.90 -6.42% -2.05" [ref=e1617] [cursor=pointer]:
+                          - cell "上海贝岭" [ref=e1618]
+                          - cell "29.90" [ref=e1619]
+                          - cell "-6.42%" [ref=e1620]
+                          - cell "-2.05" [ref=e1621]
+                        - row "景旺电子 72.63 -6.44% -5.00" [ref=e1622] [cursor=pointer]:
+                          - cell "景旺电子" [ref=e1623]
+                          - cell "72.63" [ref=e1624]
+                          - cell "-6.44%" [ref=e1625]
+                          - cell "-5.00" [ref=e1626]
+                        - row "鼎通科技 376.01 -6.44% -25.90" [ref=e1627] [cursor=pointer]:
+                          - cell "鼎通科技" [ref=e1628]
+                          - cell "376.01" [ref=e1629]
+                          - cell "-6.44%" [ref=e1630]
+                          - cell "-25.90" [ref=e1631]
+                        - row "万源通 26.57 -6.51% -1.85" [ref=e1632] [cursor=pointer]:
+                          - cell "万源通" [ref=e1633]
+                          - cell "26.57" [ref=e1634]
+                          - cell "-6.51%" [ref=e1635]
+                          - cell "-1.85" [ref=e1636]
+                        - row "华懋科技 106.80 -6.59% -7.53" [ref=e1637] [cursor=pointer]:
+                          - cell "华懋科技" [ref=e1638]
+                          - cell "106.80" [ref=e1639]
+                          - cell "-6.59%" [ref=e1640]
+                          - cell "-7.53" [ref=e1641]
+                        - row "科翔股份 105.26 -6.61% -7.45" [ref=e1642] [cursor=pointer]:
+                          - cell "科翔股份" [ref=e1643]
+                          - cell "105.26" [ref=e1644]
+                          - cell "-6.61%" [ref=e1645]
+                          - cell "-7.45" [ref=e1646]
+                        - row "鸿远电子 78.03 -6.66% -5.57" [ref=e1647] [cursor=pointer]:
+                          - cell "鸿远电子" [ref=e1648]
+                          - cell "78.03" [ref=e1649]
+                          - cell "-6.66%" [ref=e1650]
+                          - cell "-5.57" [ref=e1651]
+                        - row "平治信息 45.97 -6.77% -3.34" [ref=e1652] [cursor=pointer]:
+                          - cell "平治信息" [ref=e1653]
+                          - cell "45.97" [ref=e1654]
+                          - cell "-6.77%" [ref=e1655]
+                          - cell "-3.34" [ref=e1656]
+                        - row "长芯博创 262.65 -6.83% -19.25" [ref=e1657] [cursor=pointer]:
+                          - cell "长芯博创" [ref=e1658]
+                          - cell "262.65" [ref=e1659]
+                          - cell "-6.83%" [ref=e1660]
+                          - cell "-19.25" [ref=e1661]
+                        - row "炬光科技 351.32 -6.98% -26.36" [ref=e1662] [cursor=pointer]:
+                          - cell "炬光科技" [ref=e1663]
+                          - cell "351.32" [ref=e1664]
+                          - cell "-6.98%" [ref=e1665]
+                          - cell "-26.36" [ref=e1666]
+                        - row "弘信电子 43.06 -7.00% -3.24" [ref=e1667] [cursor=pointer]:
+                          - cell "弘信电子" [ref=e1668]
+                          - cell "43.06" [ref=e1669]
+                          - cell "-7.00%" [ref=e1670]
+                          - cell "-3.24" [ref=e1671]
+                        - row "中贝通信 21.65 -7.00% -1.63" [ref=e1672] [cursor=pointer]:
+                          - cell "中贝通信" [ref=e1673]
+                          - cell "21.65" [ref=e1674]
+                          - cell "-7.00%" [ref=e1675]
+                          - cell "-1.63" [ref=e1676]
+                        - row "天孚通信 318.00 -7.01% -23.97" [ref=e1677] [cursor=pointer]:
+                          - cell "天孚通信" [ref=e1678]
+                          - cell "318.00" [ref=e1679]
+                          - cell "-7.01%" [ref=e1680]
+                          - cell "-23.97" [ref=e1681]
+                        - row "博众精工 59.05 -7.02% -4.46" [ref=e1682] [cursor=pointer]:
+                          - cell "博众精工" [ref=e1683]
+                          - cell "59.05" [ref=e1684]
+                          - cell "-7.02%" [ref=e1685]
+                          - cell "-4.46" [ref=e1686]
+                        - row "金百泽 34.05 -7.09% -2.60" [ref=e1687] [cursor=pointer]:
+                          - cell "金百泽" [ref=e1688]
+                          - cell "34.05" [ref=e1689]
+                          - cell "-7.09%" [ref=e1690]
+                          - cell "-2.60" [ref=e1691]
+                        - row "XD依顿电 12.88 -7.27% -1.01" [ref=e1692] [cursor=pointer]:
+                          - cell "XD依顿电" [ref=e1693]
+                          - cell "12.88" [ref=e1694]
+                          - cell "-7.27%" [ref=e1695]
+                          - cell "-1.01" [ref=e1696]
+                        - row "华工科技 160.94 -7.28% -12.64" [ref=e1697] [cursor=pointer]:
+                          - cell "华工科技" [ref=e1698]
+                          - cell "160.94" [ref=e1699]
+                          - cell "-7.28%" [ref=e1700]
+                          - cell "-12.64" [ref=e1701]
+                        - row "新易盛 566.00 -7.29% -44.49" [ref=e1702] [cursor=pointer]:
+                          - cell "新易盛" [ref=e1703]
+                          - cell "566.00" [ref=e1704]
+                          - cell "-7.29%" [ref=e1705]
+                          - cell "-44.49" [ref=e1706]
+                        - row "均胜电子 21.10 -7.33% -1.67" [ref=e1707] [cursor=pointer]:
+                          - cell "均胜电子" [ref=e1708]
+                          - cell "21.10" [ref=e1709]
+                          - cell "-7.33%" [ref=e1710]
+                          - cell "-1.67" [ref=e1711]
+                        - row "意华股份 84.50 -7.80% -7.15" [ref=e1712] [cursor=pointer]:
+                          - cell "意华股份" [ref=e1713]
+                          - cell "84.50" [ref=e1714]
+                          - cell "-7.80%" [ref=e1715]
+                          - cell "-7.15" [ref=e1716]
+                        - row "君逸数码 26.34 -7.81% -2.23" [ref=e1717] [cursor=pointer]:
+                          - cell "君逸数码" [ref=e1718]
+                          - cell "26.34" [ref=e1719]
+                          - cell "-7.81%" [ref=e1720]
+                          - cell "-2.23" [ref=e1721]
+                        - row "可川科技 82.89 -7.90% -7.11" [ref=e1722] [cursor=pointer]:
+                          - cell "可川科技" [ref=e1723]
+                          - cell "82.89" [ref=e1724]
+                          - cell "-7.90%" [ref=e1725]
+                          - cell "-7.11" [ref=e1726]
+                        - row "通富微电 71.60 -7.98% -6.21" [ref=e1727] [cursor=pointer]:
+                          - cell "通富微电" [ref=e1728]
+                          - cell "71.60" [ref=e1729]
+                          - cell "-7.98%" [ref=e1730]
+                          - cell "-6.21" [ref=e1731]
+                        - row "奕东电子 118.61 -8.05% -10.38" [ref=e1732] [cursor=pointer]:
+                          - cell "奕东电子" [ref=e1733]
+                          - cell "118.61" [ref=e1734]
+                          - cell "-8.05%" [ref=e1735]
+                          - cell "-10.38" [ref=e1736]
+                        - row "光迅科技 240.34 -8.08% -21.12" [ref=e1737] [cursor=pointer]:
+                          - cell "光迅科技" [ref=e1738]
+                          - cell "240.34" [ref=e1739]
+                          - cell "-8.08%" [ref=e1740]
+                          - cell "-21.12" [ref=e1741]
+                        - row "腾景科技 187.60 -8.08% -16.50" [ref=e1742] [cursor=pointer]:
+                          - cell "腾景科技" [ref=e1743]
+                          - cell "187.60" [ref=e1744]
+                          - cell "-8.08%" [ref=e1745]
+                          - cell "-16.50" [ref=e1746]
+                        - row "方正科技 13.00 -8.19% -1.16" [ref=e1747] [cursor=pointer]:
+                          - cell "方正科技" [ref=e1748]
+                          - cell "13.00" [ref=e1749]
+                          - cell "-8.19%" [ref=e1750]
+                          - cell "-1.16" [ref=e1751]
+                        - row "领益智造 16.41 -8.22% -1.47" [ref=e1752] [cursor=pointer]:
+                          - cell "领益智造" [ref=e1753]
+                          - cell "16.41" [ref=e1754]
+                          - cell "-8.22%" [ref=e1755]
+                          - cell "-1.47" [ref=e1756]
+                        - row "福晶科技 90.18 -8.27% -8.13" [ref=e1757] [cursor=pointer]:
+                          - cell "福晶科技" [ref=e1758]
+                          - cell "90.18" [ref=e1759]
+                          - cell "-8.27%" [ref=e1760]
+                          - cell "-8.13" [ref=e1761]
+                        - row "光库科技 362.43 -8.35% -33.03" [ref=e1762] [cursor=pointer]:
+                          - cell "光库科技" [ref=e1763]
+                          - cell "362.43" [ref=e1764]
+                          - cell "-8.35%" [ref=e1765]
+                          - cell "-33.03" [ref=e1766]
+                        - row "联特科技 315.86 -8.58% -29.64" [ref=e1767] [cursor=pointer]:
+                          - cell "联特科技" [ref=e1768]
+                          - cell "315.86" [ref=e1769]
+                          - cell "-8.58%" [ref=e1770]
+                          - cell "-29.64" [ref=e1771]
+                        - row "立讯精密 68.00 -8.63% -6.42" [ref=e1772] [cursor=pointer]:
+                          - cell "立讯精密" [ref=e1773]
+                          - cell "68.00" [ref=e1774]
+                          - cell "-8.63%" [ref=e1775]
+                          - cell "-6.42" [ref=e1776]
+                        - row "威腾电气 40.76 -8.67% -3.87" [ref=e1777] [cursor=pointer]:
+                          - cell "威腾电气" [ref=e1778]
+                          - cell "40.76" [ref=e1779]
+                          - cell "-8.67%" [ref=e1780]
+                          - cell "-3.87" [ref=e1781]
+                        - row "胜宏科技 319.55 -8.74% -30.61" [ref=e1782] [cursor=pointer]:
+                          - cell "胜宏科技" [ref=e1783]
+                          - cell "319.55" [ref=e1784]
+                          - cell "-8.74%" [ref=e1785]
+                          - cell "-30.61" [ref=e1786]
+                        - row "工业富联 70.22 -8.79% -6.77" [ref=e1787] [cursor=pointer]:
+                          - cell "工业富联" [ref=e1788]
+                          - cell "70.22" [ref=e1789]
+                          - cell "-8.79%" [ref=e1790]
+                          - cell "-6.77" [ref=e1791]
+                        - row "兆龙互连 50.75 -8.82% -4.91" [ref=e1792] [cursor=pointer]:
+                          - cell "兆龙互连" [ref=e1793]
+                          - cell "50.75" [ref=e1794]
+                          - cell "-8.82%" [ref=e1795]
+                          - cell "-4.91" [ref=e1796]
+                        - row "迅捷兴 49.52 -8.90% -4.84" [ref=e1797] [cursor=pointer]:
+                          - cell "迅捷兴" [ref=e1798]
+                          - cell "49.52" [ref=e1799]
+                          - cell "-8.90%" [ref=e1800]
+                          - cell "-4.84" [ref=e1801]
+                        - row "环旭电子 32.94 -8.98% -3.25" [ref=e1802] [cursor=pointer]:
+                          - cell "环旭电子" [ref=e1803]
+                          - cell "32.94" [ref=e1804]
+                          - cell "-8.98%" [ref=e1805]
+                          - cell "-3.25" [ref=e1806]
+                        - row "罗博特科 587.90 -9.13% -59.10" [ref=e1807] [cursor=pointer]:
+                          - cell "罗博特科" [ref=e1808]
+                          - cell "587.90" [ref=e1809]
+                          - cell "-9.13%" [ref=e1810]
+                          - cell "-59.10" [ref=e1811]
+                        - row "凯格精机 156.66 -9.26% -15.99" [ref=e1812] [cursor=pointer]:
+                          - cell "凯格精机" [ref=e1813]
+                          - cell "156.66" [ref=e1814]
+                          - cell "-9.26%" [ref=e1815]
+                          - cell "-15.99" [ref=e1816]
+                        - row "太辰光 234.10 -9.37% -24.21" [ref=e1817] [cursor=pointer]:
+                          - cell "太辰光" [ref=e1818]
+                          - cell "234.10" [ref=e1819]
+                          - cell "-9.37%" [ref=e1820]
+                          - cell "-24.21" [ref=e1821]
+                        - row "光莆股份 28.50 -9.44% -2.97" [ref=e1822] [cursor=pointer]:
+                          - cell "光莆股份" [ref=e1823]
+                          - cell "28.50" [ref=e1824]
+                          - cell "-9.44%" [ref=e1825]
+                          - cell "-2.97" [ref=e1826]
+                        - row "合锻智能 32.06 -9.72% -3.45" [ref=e1827] [cursor=pointer]:
+                          - cell "合锻智能" [ref=e1828]
+                          - cell "32.06" [ref=e1829]
+                          - cell "-9.72%" [ref=e1830]
+                          - cell "-3.45" [ref=e1831]
+                        - row "紫光股份 25.62 -9.76% -2.77" [ref=e1832] [cursor=pointer]:
+                          - cell "紫光股份" [ref=e1833]
+                          - cell "25.62" [ref=e1834]
+                          - cell "-9.76%" [ref=e1835]
+                          - cell "-2.77" [ref=e1836]
+                        - row "深圳华强 30.77 -9.87% -3.37" [ref=e1837] [cursor=pointer]:
+                          - cell "深圳华强" [ref=e1838]
+                          - cell "30.77" [ref=e1839]
+                          - cell "-9.87%" [ref=e1840]
+                          - cell "-3.37" [ref=e1841]
+                        - row "亨通光电 110.81 -9.91% -12.19" [ref=e1842] [cursor=pointer]:
+                          - cell "亨通光电" [ref=e1843]
+                          - cell "110.81" [ref=e1844]
+                          - cell "-9.91%" [ref=e1845]
+                          - cell "-12.19" [ref=e1846]
+                        - row "永鼎股份 65.71 -9.94% -7.25" [ref=e1847] [cursor=pointer]:
+                          - cell "永鼎股份" [ref=e1848]
+                          - cell "65.71" [ref=e1849]
+                          - cell "-9.94%" [ref=e1850]
+                          - cell "-7.25" [ref=e1851]
+                        - row "汇绿生态 56.01 -10.00% -6.22" [ref=e1852] [cursor=pointer]:
+                          - cell "汇绿生态" [ref=e1853]
+                          - cell "56.01" [ref=e1854]
+                          - cell "-10.00%" [ref=e1855]
+                          - cell "-6.22" [ref=e1856]
+                        - row "烽火通信 76.22 -10.00% -8.47" [ref=e1857] [cursor=pointer]:
+                          - cell "烽火通信" [ref=e1858]
+                          - cell "76.22" [ref=e1859]
+                          - cell "-10.00%" [ref=e1860]
+                          - cell "-8.47" [ref=e1861]
+                        - row "中天科技 61.29 -10.00% -6.81" [ref=e1862] [cursor=pointer]:
+                          - cell "中天科技" [ref=e1863]
+                          - cell "61.29" [ref=e1864]
+                          - cell "-10.00%" [ref=e1865]
+                          - cell "-6.81" [ref=e1866]
+                        - row "安孚科技 52.04 -10.00% -5.78" [ref=e1867] [cursor=pointer]:
+                          - cell "安孚科技" [ref=e1868]
+                          - cell "52.04" [ref=e1869]
+                          - cell "-10.00%" [ref=e1870]
+                          - cell "-5.78" [ref=e1871]
+                        - row "同惠电子 30.33 -10.00% -3.37" [ref=e1872] [cursor=pointer]:
+                          - cell "同惠电子" [ref=e1873]
+                          - cell "30.33" [ref=e1874]
+                          - cell "-10.00%" [ref=e1875]
+                          - cell "-3.37" [ref=e1876]
+                        - row "特发信息 22.29 -10.01% -2.48" [ref=e1877] [cursor=pointer]:
+                          - cell "特发信息" [ref=e1878]
+                          - cell "22.29" [ref=e1879]
+                          - cell "-10.01%" [ref=e1880]
+                          - cell "-2.48" [ref=e1881]
+                        - row "武汉凡谷 10.49 -10.03% -1.17" [ref=e1882] [cursor=pointer]:
+                          - cell "武汉凡谷" [ref=e1883]
+                          - cell "10.49" [ref=e1884]
+                          - cell "-10.03%" [ref=e1885]
+                          - cell "-1.17" [ref=e1886]
+                        - row "仕佳光子 179.70 -10.12% -20.24" [ref=e1887] [cursor=pointer]:
+                          - cell "仕佳光子" [ref=e1888]
+                          - cell "179.70" [ref=e1889]
+                          - cell "-10.12%" [ref=e1890]
+                          - cell "-20.24" [ref=e1891]
+                        - row "优迅股份 397.67 -10.23% -45.33" [ref=e1892] [cursor=pointer]:
+                          - cell "优迅股份" [ref=e1893]
+                          - cell "397.67" [ref=e1894]
+                          - cell "-10.23%" [ref=e1895]
+                          - cell "-45.33" [ref=e1896]
+                        - row "长光华芯 396.00 -10.37% -45.80" [ref=e1897] [cursor=pointer]:
+                          - cell "长光华芯" [ref=e1898]
+                          - cell "396.00" [ref=e1899]
+                          - cell "-10.37%" [ref=e1900]
+                          - cell "-45.80" [ref=e1901]
+                        - row "长盈通 215.00 -10.68% -25.70" [ref=e1902] [cursor=pointer]:
+                          - cell "长盈通" [ref=e1903]
+                          - cell "215.00" [ref=e1904]
+                          - cell "-10.68%" [ref=e1905]
+                          - cell "-25.70" [ref=e1906]
+                        - row "蘅东光 572.55 -10.68% -68.43" [ref=e1907] [cursor=pointer]:
+                          - cell "蘅东光" [ref=e1908]
+                          - cell "572.55" [ref=e1909]
+                          - cell "-10.68%" [ref=e1910]
+                          - cell "-68.43" [ref=e1911]
+                        - row "利和兴 73.07 -13.94% -11.84" [ref=e1912] [cursor=pointer]:
+                          - cell "利和兴" [ref=e1913]
+                          - cell "73.07" [ref=e1914]
+                          - cell "-13.94%" [ref=e1915]
+                          - cell "-11.84" [ref=e1916]
+                        - row "光大同创 91.43 -14.55% -15.57" [ref=e1917] [cursor=pointer]:
+                          - cell "光大同创" [ref=e1918]
+                          - cell "91.43" [ref=e1919]
+                          - cell "-14.55%" [ref=e1920]
+                          - cell "-15.57" [ref=e1921]
+                        - row "联讯仪器 2300.00 -14.81% -400.00" [ref=e1922] [cursor=pointer]:
+                          - cell "联讯仪器" [ref=e1923]
+                          - cell "2300.00" [ref=e1924]
+                          - cell "-14.81%" [ref=e1925]
+                          - cell "-400.00" [ref=e1926]
+                - generic [ref=e1930]:
+                  - button "最新动态" [ref=e1931] [cursor=pointer]
+                  - button "产业图谱" [ref=e1932] [cursor=pointer]
+          - generic [ref=e520]:
+            - generic [ref=e521] [cursor=pointer]:
+              - img [ref=e522]
+              - img [ref=e530]
+            - generic [ref=e535]:
+              - button "A股" [ref=e536] [cursor=pointer]:
+                - generic [ref=e537]: A股
+              - button "重要" [ref=e539] [cursor=pointer]:
+                - generic [ref=e540]: 重要
+              - button "公告" [ref=e541] [cursor=pointer]:
+                - generic [ref=e542]: 公告
+              - button "期货" [ref=e543] [cursor=pointer]:
+                - generic [ref=e544]: 期货
+              - button "异动" [ref=e545] [cursor=pointer]:
+                - generic [ref=e546]: 异动
+              - button "港股" [ref=e547] [cursor=pointer]:
+                - generic [ref=e548]: 港股
+              - button "美股" [ref=e549] [cursor=pointer]:
+                - generic [ref=e550]: 美股
+            - generic [ref=e553]:
+              - generic [ref=e559]:
+                - generic [ref=e561]: 14:00
+                - heading "中国大唐与四川省政府签署全面深化战略合作协议" [level=3] [ref=e562] [cursor=pointer]
+                - paragraph [ref=e563] [cursor=pointer]: 6月26日，中国大唐与四川省人民政府签署全面深化战略合作协议。根据协议，双方将围绕清洁能源开发利用、能源基础设施建设、能源产业建圈强链、能源科技创新与成果转化等方面开展深入合作，共同培育发展能源新质生产力，更好服务国家发展大局和四川现代化建设。（人民财讯）
+              - generic [ref=e569]:
+                - generic [ref=e571]: 13:40
+                - heading "我国机电产品加速出海 有企业今年以来800G以上光模块出口同比增长超过100倍" [level=3] [ref=e572] [cursor=pointer]
+                - paragraph [ref=e573] [cursor=pointer]: 今年前5个月，我国机电产品出口额7.58万亿元，占我国出口总值的比重达到63.6%。自2025年3月起，连续15个月刷新同期月度最高值。记者在浙江嘉兴的一家工厂看到，这里有近1000台织布机正在织布，它是人工智能服务器中的电子布。电子布，是电子信息产业当中的关键材料。随着算力需求爆发，电子布需求也随之增加。企业车间里，产线24小时满产运行。今年以来，和算力有关的相关产品加速出海。在武汉，光模块的生产线同样24小时不停机。随着全球算力基础设施建设加速推进，今年以来，这家企业800G以上光模块出口同比增长超过100倍。数据显示，今年以来，人工智能产业链相关产品贡献了机电产品出口增量的五成以上，成为重要拉动力。（央视财经）
+              - generic [ref=e579]:
+                - generic [ref=e581]: 13:32
+                - heading "娃哈哈回应纯净水涨价" [level=3] [ref=e582] [cursor=pointer]
+                - paragraph [ref=e583] [cursor=pointer]: 6月27日，据娃哈哈微博，娃哈哈发布针对近日网传娃哈哈纯净水涨价相关消息的统一说明：受包材成本波动，公司调整不同包装规格水产品的渠道批发价，有升有降以保障经销商伙伴稳定经营。全线纯净水终端零售价不变，消费者购买价格无变化。（人民财讯）
+              - generic [ref=e589]:
+                - generic [ref=e591]: 13:21
+                - heading "海南调整住房公积金缴存基数 7月起执行" [level=3] [ref=e592] [cursor=pointer]
+                - paragraph [ref=e593] [cursor=pointer]: 海南省住房公积金管理局6月26日发布《关于2026年度住房公积金缴存基数范围的通告》。公告提出，职工住房公积金缴存基数，不低于职工工作所在市县上一年度最低工资标准，不高于职工工作所在市县上一年度职工月平均工资的3倍。通告的住房公积金缴存基数范围适用于城镇非私营单位，城镇私营单位参照标准执行。2026年度住房公积金缴存基数范围适用时间：2026年7月1日至2027年6月30日。（财联社）
+              - generic [ref=e599]:
+                - generic [ref=e601]: 13:07
+                - heading "沙特重启海湾原油出口终端" [level=3] [ref=e602] [cursor=pointer]
+                - paragraph [ref=e603] [cursor=pointer]: 专业机构提供的数据显示，沙特阿拉伯国家石油公司（沙特阿美）26日在时隔近4个月后重启其海湾一侧的石油出口终端，开始为超大型油轮装货。欧盟“哥白尼哨兵”卫星系统26日拍摄的图像显示，沙特东部塔努拉角油港当天已经恢复运转，有两艘可装200万桶原油的超大型油轮正在港口装货，另一艘油轮在附近等待，第四艘油轮正驶向港口。正在装货的油轮由沙特巴赫里航运公司运营。（央视新闻）
+              - generic [ref=e609]:
+                - generic [ref=e611]: 12:56
+                - heading "碳化硅器件价格止跌趋稳 高压MOS、IGBT等产品仍有涨价空间" [level=3] [ref=e612] [cursor=pointer]
+                - paragraph [ref=e613] [cursor=pointer]: 三安光电公司人士透露，目前国内的碳化硅功率半导体暂时还没有看到涨价，只能说价格“止跌趋稳”。中科英智基金合伙人王洲表示，碳化硅今年已有反转趋势，高压MOS、IGBT等产品均呈现了比较大的价格上涨的弹性，并且今年下半年可能仍有上涨空间。（科创板日报）
+                - generic [ref=e615] [cursor=pointer]:
+                  - generic [ref=e616]: 三安光电
+                  - generic [ref=e617]: "--"
+              - generic [ref=e623]:
+                - generic [ref=e625]: 12:45
+                - heading "以总理称以军将长期驻留黎巴嫩南部" [level=3] [ref=e626] [cursor=pointer]
+                - paragraph [ref=e627] [cursor=pointer]: 当地时间6月26日，以色列与黎巴嫩就以军从黎南部部分地区撤军达成框架协议。以色列总理内塔尼亚胡当天发表电视讲话称，根据协议，以军将继续驻留在其控制的“绝大部分”黎南部“安全区”内，他还称这是“以色列的重大成就”。内塔尼亚胡称，只要以色列仍面临威胁，以军将继续驻留在“安全区”，并拒绝黎巴嫩真主党和当地居民进入相关区域。内塔尼亚胡还说，这项协议也是对伊朗的“一次重大打击”。(CCTV国际时讯)
+              - generic [ref=e633]:
+                - generic [ref=e635]: 12:41
+                - heading "全国13条河流发生超警洪水" [level=3] [ref=e636] [cursor=pointer]
+                - paragraph [ref=e637] [cursor=pointer]: 记者从水利部了解到，受降雨影响，昨天到今天，广西西江桂平江段及支流白沙江、红水河支流盘阳河、郁江支流猪儿河、画眉河、武思江及桂南沿海南流江，广东西江支流蟠龙水、北江支流水边河，云南澜沧江支流凤庆河，福建闽江支流吉木溪、文江溪，内蒙古额尔古纳河支流海拉尔河等13条河流发生超警洪水，最大超警幅度0.86米，目前大部已退至警戒以下。（央视新闻）
+              - generic [ref=e643]:
+                - generic [ref=e645]: 12:41
+                - heading "伊朗称受袭锡里克港运营正常" [level=3] [ref=e646] [cursor=pointer]
+                - paragraph [ref=e647] [cursor=pointer]: 伊朗霍尔木兹甘省有关负责人表示，受到袭击的锡里克港目前运营正常，港口设备和设施并未受损。26日，锡里克一处码头当晚传出数次爆炸声。消息人士表示，爆炸起因是码头遭发射物击中。还有消息称两枚发射物击中了该地区的一座电信塔。27日凌晨，美国袭击了伊朗锡里克地区。当地消息人士称，当地时间26日23时30分左右，霍尔木兹甘省锡里克地区发生数次爆炸。（央视新闻）
+              - generic [ref=e653]:
+                - generic [ref=e655]: 12:41
+                - heading "委内瑞拉官员：石油生产未受地震影响" [level=3] [ref=e656] [cursor=pointer]
+                - paragraph [ref=e657] [cursor=pointer]: 委内瑞拉官员：石油生产未受地震影响 委内瑞拉接连发生两次强震后，当地时间6月26日，该国人民政权油气部长葆拉·埃瑙说，石油生产未受地震影响。埃瑙接受媒体采访时说，委内瑞拉目前日均原油产量为120万桶，政府已评估国内库存情况，国内天然气和燃料供应有保障。“我们处于正常运转状态，所有油井在运转和生产中。”据悉，委内瑞拉石油企业管理层和油田工人反馈，油气设施没有受到严重影响。稍早前有消息称，初步评估显示，由于远离受地震波及的城市，委内瑞拉大型油气设施在强震中受损有限，不过电力短缺情况可能影响石油产能。（央视新闻）
+              - generic [ref=e663]:
+                - generic [ref=e665]: 11:30
+                - heading "国家税务总局深圳市税务局党委委员、副局长吴德接受纪律审查和监察调查" [level=3] [ref=e666] [cursor=pointer]
+                - paragraph [ref=e667] [cursor=pointer]: 国家税务总局深圳市税务局党委委员、副局长吴德涉嫌严重违纪违法，目前正接受中央纪委国家监委驻国家税务总局纪检监察组纪律审查和广东省湛江市监察委员会监察调查。（人民财讯）
+              - generic [ref=e673]:
+                - generic [ref=e675]: 11:13
+                - heading "英国6月最高气温纪录连续3天被打破" [level=3] [ref=e676] [cursor=pointer]
+                - paragraph [ref=e677] [cursor=pointer]: 当地时间6月26日，英国气象局发布的最新数据显示，当天在该国萨福克郡录得37.3摄氏度的高温，连续3天刷新该国6月最高气温纪录。持续的热浪侵袭使英国6月的气温纪录近期多次被刷新。24日、25日两天都出现破纪录高温，26日再次刷新纪录。在这周之前，英国有记录的6月最高气温为35.6摄氏度，在1957年和1976年都录得该温度。（央视新闻）
+              - generic [ref=e683]:
+                - generic [ref=e685]: 11:04
+                - heading "开山集团土耳其伊兹密尔压缩机工厂建成投产" [level=3] [ref=e686] [cursor=pointer]
+                - paragraph [ref=e687] [cursor=pointer]: 当地时间2026年6月26日下午，开山集团土耳其伊兹密尔压缩机工厂(KCT)建成投产。工厂具备完整的空气压缩机制造能力，涵盖主机制造、整机装配生产及测试等全流程制造环节。这是开山集团在海外布局的第三座工厂，是面向北美、欧洲市场的重要制造基地。工厂达产后预计可实现年产值约5000万美元。（人民财讯）
+              - generic [ref=e693]:
+                - generic [ref=e695]: 11:03
+                - heading "纳米比亚旅游局首席执行官：将进一步加强对华旅游合作，大力吸引中国游客" [level=3] [ref=e696] [cursor=pointer]
+                - paragraph [ref=e697] [cursor=pointer]: 纳米比亚旅游局首席执行官塞布隆·奇卡卢26日在首都温得和克举行的业界会议上说，纳米比亚将进一步加强对华旅游合作，大力吸引中国游客。此次业界会议以“加强伙伴关系，促进中国旅游市场增长”为主题。奇卡卢说，中国是全球最具活力的出境旅游市场之一，纳米比亚高度重视中国市场的战略价值，拓展中国市场对于该国旅游业可持续增长至关重要。奇卡卢说，纳旅游局将继续提升该国旅游目的地认知度，开发创新旅游产品，将纳米比亚打造为中国游客难忘的非洲旅游目的地。根据最近发布的游客到访统计报告，2025年中国首次进入纳米比亚前十大海外旅游客源市场。（新华社）
+              - generic [ref=e703]:
+                - generic [ref=e705]: 10:55
+                - heading "115家中外企业签约参展第五届中国国际供应链促进博览会" [level=3] [ref=e706] [cursor=pointer]
+                - paragraph [ref=e707] [cursor=pointer]: 2026年6月26日，第五届链博会参展签约仪式暨2026年链博会参展商联盟大会在北京举行。会上，霍尼韦尔、GE医疗、西门子、康宁、住友电工等115家中外企业及机构，与链博会承办单位中展集团签署第五届展会参展意向协议。（人民财讯）
+              - generic [ref=e713]:
+                - generic [ref=e715]: 10:48
+                - heading "我国在聚变堆超导磁体研发领域取得新突破" [level=3] [ref=e716] [cursor=pointer]
+                - paragraph [ref=e717] [cursor=pointer]: 中国科学院合肥物质科学研究院等离子体物理研究所“人造太阳”项目取得最新进展，环向场超导磁体、高温超导中心螺管线圈等两套聚变堆关键超导磁体先后完成研制验收与满参数测试，核心技术实现100%国产化，综合性能跃升至国际前列。（新华社）
+              - generic [ref=e723]:
+                - generic [ref=e725]: 10:42
+                - heading "德媒：大众汽车计划扩大裁员规模至10万人" [level=3] [ref=e726] [cursor=pointer]
+                - paragraph [ref=e727] [cursor=pointer]: 德国《经理人杂志》26日报道，德国汽车制造商大众汽车集团计划扩大裁员规模至10万人，同时关停4家德国工厂。这或将成为该集团成立以来的最大规模重组。这家媒体援引消息人士的话报道，大众汽车计划在今年3月宣布削减约5万个岗位的基础上，进一步将削减岗位数增至10万个。2025财年，大众汽车在全球共有约66.7万名员工，近43%在德国工作。（新华社）
+              - generic [ref=e733]:
+                - generic [ref=e735]: 10:40
+                - heading "伊朗革命卫队：打击美军多个目标以回应美空袭伊朗" [level=3] [ref=e736] [cursor=pointer]
+                - paragraph [ref=e737] [cursor=pointer]: 伊朗伊斯兰革命卫队27日发表声明说，革命卫队海军已对中东地区美军多个目标实施打击，以回应美方对伊朗沿海地区的空袭。声明说，继以色列在黎巴嫩南部违反停火协议之后，美国再一次“违背承诺”，以“船只在霍尔木兹海峡违规航行”为由，对伊朗沿海地区发动空袭。声明说，根据伊美谅解备忘录，霍尔木兹海峡的交通管制安排由伊朗负责。然而，美国煽动有关方面试图加以破坏，伊方已对此作出必要回应。若再次发生侵犯行为，伊方回应将更加严厉。（新华社）
+              - generic [ref=e743]:
+                - generic [ref=e745]: 10:32
+                - heading "西康高铁全线进入联调联试阶段" [level=3] [ref=e746] [cursor=pointer]
+                - paragraph [ref=e747] [cursor=pointer]: 6月27日上午，西康高铁正式进入联调联试阶段。联调联试是高铁从建设阶段迈向运营阶段的关键环节，如同为线路开展“全身体检”。此次西康高铁联调联试，铁路部门通过模拟开通运营的行车状态，对轨道、路基、桥隧、供电、信号、通信、客服等各系统及接口匹配关系进行综合检测、验证与优化，及时发现并整改设备运行中的问题，为线路开通运营提供重要的技术保障。（央视新闻）
+              - generic [ref=e753]:
+                - generic [ref=e755]: 10:32
+                - heading "韩国政府组建跨部门机构应对涉AI犯罪" [level=3] [ref=e756] [cursor=pointer]
+                - paragraph [ref=e757] [cursor=pointer]: 韩国政府26日组建一个跨部门协商机构，以应对“数字性犯罪”、金融诈骗、虚假广告等利用人工智能(AI)技术实施的犯罪行为。这一新机构名为“应对涉AI犯罪跨部门协商机构”，成员分别来自广播媒体通信委员会、科学技术信息通信部、性别平等家族部、金融委员会、警察厅等10个政府部门。按韩国媒体说法，随着涉AI犯罪日益猖獗，单一机构通常难以应对，因此有必要设立跨部门机构协同配合。韩国广播媒体通信委员会26日牵头召开启动会议，讨论制定应对相关犯罪的方案。与会人员表示，各政府部门将在涉AI犯罪的各环节展开合作，包括预防、调查、执法和信息共享等，同时为受害者提供支持。（新华社）
+        - generic [ref=e761]:
+          - generic [ref=e762]:
+            - link "投资者关系" [ref=e764] [cursor=pointer]:
+              - /url: https://news.10jqka.com.cn/homepage/intro/investor-relations
+            - link "关于同花顺" [ref=e767] [cursor=pointer]:
+              - /url: https://news.10jqka.com.cn/homepage/intro/about-us
+            - link "软件下载" [ref=e770] [cursor=pointer]:
+              - /url: https://download.10jqka.com.cn/
+            - link "法律声明" [ref=e773] [cursor=pointer]:
+              - /url: https://www.10jqka.com.cn/ia/pass_buck.php
+            - link "运营许可" [ref=e776] [cursor=pointer]:
+              - /url: https://news.10jqka.com.cn/homepage/intro/about-us?subRoute=OperationalLicense
+            - link "联系我们" [ref=e779] [cursor=pointer]:
+              - /url: https://news.10jqka.com.cn/homepage/intro/contact-us
+            - link "友情链接" [ref=e782] [cursor=pointer]:
+              - /url: https://news.10jqka.com.cn/homepage/intro/links
+            - link "招聘英才" [ref=e785] [cursor=pointer]:
+              - /url: https://job.10jqka.com.cn/
+            - link "用户体验计划" [ref=e788] [cursor=pointer]:
+              - /url: https://vote.10jqka.com.cn/webvote/14a66a8943c72215b7639d36f6be26fe
+          - generic [ref=e789]:
+            - generic [ref=e790]:
+              - generic [ref=e791]: 不良信息举报与个人信息保护咨询专线：10100571
+              - generic [ref=e792] [cursor=pointer]: 违法和不良信息
+              - generic [ref=e793] [cursor=pointer]: 涉企侵权举报
+              - generic [ref=e794] [cursor=pointer]: 涉算法推荐举报专区
+              - generic [ref=e795] [cursor=pointer]: 涉青少年不良信息举报专区
+            - paragraph [ref=e797]: 浙江同花顺互联信息技术有限公司版权所有
+            - generic [ref=e798]:
+              - generic [ref=e799]:
+                - text: 网站备案号：
+                - link "浙ICP备18032105号" [ref=e800] [cursor=pointer]:
+                  - /url: https://beian.miit.gov.cn/#/Integrated/index
+              - generic [ref=e801]: 证券投资咨询服务提供：浙江同花顺云软件有限公司 （中国证监会核发证书编号：ZX0050）
+          - generic [ref=e802]:
+            - generic [ref=e803]:
+              - img "不良信息举报" [ref=e804]
+              - link "不良信息举报" [ref=e805] [cursor=pointer]:
+                - /url: https://www.12377.cn/
+            - generic [ref=e806]:
+              - img "浙江市场监管" [ref=e807]
+              - link "浙江市场监管" [ref=e808] [cursor=pointer]:
+                - /url: https://zjamr.zj.gov.cn/
+    - generic [ref=e812]:
+      - img "AIME" [ref=e813]
+      - textbox "有问题，尽管问..." [ref=e814]
+  - generic [ref=e816]:
+    - generic [ref=e818] [cursor=pointer]:
+      - img "举报" [ref=e819]
+      - generic [ref=e820]: 举报
+    - link "反馈 反馈" [ref=e821] [cursor=pointer]:
+      - /url: "#"
+      - generic [ref=e822]:
+        - img "反馈" [ref=e823]
+        - generic [ref=e824]: 反馈
+  - region "Notifications alt+T"
+  - alert [ref=e825]

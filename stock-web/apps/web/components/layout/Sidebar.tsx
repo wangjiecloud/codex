@@ -10,6 +10,7 @@ import {
   TrendingUp,
   Activity,
   Globe,
+  Star,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -32,6 +33,12 @@ const navItems = [
     icon: LineChart,
     match: (p: string) =>
       p.startsWith("/stock/") && !p.startsWith("/stock/search"),
+  },
+  {
+    href: "/watchlist",
+    label: "自选股",
+    icon: Star,
+    match: (p: string) => p.startsWith("/watchlist"),
   },
   {
     href: "/global",

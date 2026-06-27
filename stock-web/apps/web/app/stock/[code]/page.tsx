@@ -176,6 +176,28 @@ const PERIOD_MAP: Record<string, string> = {
   月K: "monthly",
 };
 
+function getMarketBadge(code: string): {
+  label: string;
+  bg: string;
+  text: string;
+} {
+  if (/^688/.test(code))
+    return { label: "科创", bg: "bg-blue-500/15", text: "text-blue-400" };
+  if (/^300|^301/.test(code))
+    return { label: "创业", bg: "bg-green-500/15", text: "text-green-400" };
+  if (/^60/.test(code))
+    return { label: "沪市", bg: "bg-red-500/15", text: "text-red-400" };
+  if (/^00/.test(code))
+    return { label: "深市", bg: "bg-orange-500/15", text: "text-orange-400" };
+  if (/^43|^83|^87/.test(code))
+    return { label: "北交", bg: "bg-cyan-500/15", text: "text-cyan-400" };
+  return {
+    label: "其他",
+    bg: "bg-[var(--bg-tertiary)]",
+    text: "text-[var(--text-tertiary)]",
+  };
+}
+
 function formatVolume(vol: number): string {
   if (vol >= 1e8) return (vol / 1e8).toFixed(2) + "亿手";
   if (vol >= 1e4) return (vol / 1e4).toFixed(2) + "万手";
@@ -531,6 +553,20 @@ export default function StockDetailPage() {
                     <span className="text-[var(--text-tertiary)]">
                       ({code})
                     </span>
+                    {(() => {
+                      const badge = getMarketBadge(code);
+                      return (
+                        <span
+                          className={cn(
+                            "text-[10px] font-semibold px-1.5 py-0.5 rounded",
+                            badge.bg,
+                            badge.text,
+                          )}
+                        >
+                          {badge.label}
+                        </span>
+                      );
+                    })()}
                   </>
                 )}
               </div>

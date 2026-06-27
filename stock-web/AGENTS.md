@@ -81,6 +81,20 @@ Orchestrator (主控 Advisor Agent)
 - `POST /api/agents/data` - 数据采集 Agent
 - `GET /api/agents/stream/[taskId]` - SSE 流式推送
 
+## 股票入库规则（向 stock_meta 写入新股票时必须遵守）
+
+向 `stock_meta` 表新增 A 股股票时，`market` 字段**必须写 `"A股"`**，不得写 `"SH"`、`"SZ"` 或其他值。
+
+原因：`_get_a_shares()` 函数（`routers/industry.py:39`）用 `WHERE market = 'A股'` 过滤，写错会导致该股票被所有同步任务（quotes/klines/fundamental）完全跳过，永远没有行情数据。
+
+判断规则：
+
+- 代码以 `0`、`3` 开头（深交所主板/创业板）→ market = `"A股"`
+- 代码以 `6` 开头（上交所，含 600/601/603/605/688 等所有前缀）→ market = `"A股"`
+- 海外股票（如 NVDA、AAPL）→ market = `"US"` 等，不受此约束
+
+验证：写入后执行 `SELECT code, name, market FROM stock_meta WHERE code = '<code>'` 确认 market 值正确。
+
 ## 迭代记录
 
 ### v0.1.0 - 2026-06-21

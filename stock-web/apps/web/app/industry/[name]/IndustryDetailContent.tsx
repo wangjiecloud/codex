@@ -789,9 +789,7 @@ function ProcessFlowView({
                                             minWidth: 52,
                                           }}
                                         >
-                                          {(perfData[code]
-                                            ? liveQuotes[code]?.name
-                                            : undefined) ?? code}
+                                          {liveQuotes[code]?.name ?? code}
                                         </span>
                                         {ytdStr && (
                                           <span

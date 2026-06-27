@@ -146,7 +146,10 @@ def _sync_all_quotes():
             r = row_data[-1]
             close = _safe_float(r[5])
             preclose = _safe_float(r[6])
+            high = _safe_float(r[3])
+            low = _safe_float(r[4])
             change_amt = round(close - preclose, 4)
+            amplitude = round((high - low) / preclose * 100, 2) if preclose > 0 else 0.0
 
             stmt = sqlite_insert(StockQuote).values(
                 code=raw_code,
@@ -156,15 +159,15 @@ def _sync_all_quotes():
                 change_amt=change_amt,
                 open=_safe_float(r[2]),
                 prev_close=preclose,
-                high=_safe_float(r[3]),
-                low=_safe_float(r[4]),
+                high=high,
+                low=low,
                 volume=_safe_float(r[7]),
                 turnover=_safe_float(r[8]),
                 market_cap=0.0,
                 pe=_safe_float(r[11]),
                 pb=_safe_float(r[12]),
                 turnover_rate=_safe_float(r[9]),
-                amplitude=0.0,
+                amplitude=amplitude,
                 updated_at=datetime.utcnow(),
             )
             stmt = stmt.on_conflict_do_update(
@@ -182,6 +185,7 @@ def _sync_all_quotes():
                     "pe": stmt.excluded.pe,
                     "pb": stmt.excluded.pb,
                     "turnover_rate": stmt.excluded.turnover_rate,
+                    "amplitude": stmt.excluded.amplitude,
                     "updated_at": stmt.excluded.updated_at,
                 },
             )

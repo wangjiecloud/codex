@@ -1,7 +1,8 @@
+import json
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from db import get_db, GubaPost, StockMeta, StockQuote, StockFundamental
+from db import get_db, GubaPost, StockMeta, StockQuote, StockFundamental, IndustryNode
 from datetime import datetime, timedelta
 
 router = APIRouter()
@@ -9,7 +10,18 @@ router = APIRouter()
 
 @router.get("/stats")
 async def get_system_stats(db: Session = Depends(get_db)):
-    total_stocks = db.query(func.count(StockMeta.code)).scalar() or 0
+    node_rows = (
+        db.query(IndustryNode.industry_id, IndustryNode.stocks)
+        .filter(IndustryNode.industry_id != "overview")
+        .all()
+    )
+    industry_stocks: set[str] = set()
+    for _, stocks_json in node_rows:
+        try:
+            industry_stocks.update(json.loads(stocks_json) if stocks_json else [])
+        except Exception:
+            pass
+    total_stocks = len(industry_stocks)
 
     total_guba_data = db.query(func.count(GubaPost.id)).scalar() or 0
     total_quote_data = db.query(func.count(StockQuote.code)).scalar() or 0

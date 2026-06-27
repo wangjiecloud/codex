@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, ExternalLink, Plus, Star, X } from "lucide-react";
 import { StockChart, generateMockData } from "@/components/stock/StockChart";
@@ -183,13 +183,15 @@ export default function StockDetailPage() {
     generateMockData(code),
   );
   const [news, setNews] = useState<NewsItem[]>([]);
-  const [gubaPage, setGubaPage] = useState<GubaPageData>({
-    items: [],
+  const [gubaItems, setGubaItems] = useState<GubaItem[]>([]);
+  const [gubaMeta, setGubaMeta] = useState({
     total: 0,
     total_pages: 1,
     syncing: false,
   });
   const [gubaCurrentPage, setGubaCurrentPage] = useState(1);
+  const [gubaLoadingMore, setGubaLoadingMore] = useState(false);
+  const gubaListRef = useRef<HTMLDivElement>(null);
   const [activeIndicators, setActiveIndicators] = useState([
     "VOL",
     "MACD",
@@ -265,27 +267,39 @@ export default function StockDetailPage() {
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null;
+    const isFirstPage = gubaCurrentPage === 1;
 
     const fetchGuba = (pg: number) => {
-      setGubaLoading(true);
+      if (isFirstPage) {
+        setGubaLoading(true);
+      } else {
+        setGubaLoadingMore(true);
+      }
       const category = TAB_CATEGORY_MAP[activeTab] ?? "all";
       fetch(
         `http://localhost:8000/api/guba/${code}?category=${category}&page=${pg}&page_size=20`,
       )
         .then((r) => r.json())
         .then((data) => {
-          setGubaPage({
-            items: data.items ?? [],
+          setGubaMeta({
             total: data.total ?? 0,
             total_pages: data.total_pages ?? 1,
             syncing: data.syncing ?? false,
           });
+          if (isFirstPage) {
+            setGubaItems(data.items ?? []);
+          } else {
+            setGubaItems((prev) => [...prev, ...(data.items ?? [])]);
+          }
           if (data.syncing) {
             timer = setTimeout(() => fetchGuba(pg), 3000);
           }
         })
         .catch(() => {})
-        .finally(() => setGubaLoading(false));
+        .finally(() => {
+          setGubaLoading(false);
+          setGubaLoadingMore(false);
+        });
     };
 
     fetchGuba(gubaCurrentPage);
@@ -293,6 +307,28 @@ export default function StockDetailPage() {
       if (timer) clearTimeout(timer);
     };
   }, [code, activeTab, gubaCurrentPage]);
+
+  const handleLoadMore = useCallback(() => {
+    if (
+      gubaLoadingMore ||
+      gubaLoading ||
+      gubaCurrentPage >= gubaMeta.total_pages
+    )
+      return;
+    setGubaCurrentPage((p) => p + 1);
+  }, [gubaLoadingMore, gubaLoading, gubaCurrentPage, gubaMeta.total_pages]);
+
+  useEffect(() => {
+    const el = gubaListRef.current;
+    if (!el) return;
+    const onScroll = () => {
+      if (el.scrollHeight - el.scrollTop - el.clientHeight < 80) {
+        handleLoadMore();
+      }
+    };
+    el.addEventListener("scroll", onScroll);
+    return () => el.removeEventListener("scroll", onScroll);
+  }, [handleLoadMore]);
 
   const toggleIndicator = (ind: string) => {
     setActiveIndicators((prev) =>
@@ -577,6 +613,7 @@ export default function StockDetailPage() {
                 onClick={() => {
                   setActiveTab(tab);
                   setGubaCurrentPage(1);
+                  setGubaItems([]);
                   if (tab !== "AI分析") {
                     fetch(`http://localhost:8000/api/guba/sync/${code}`, {
                       method: "POST",
@@ -593,7 +630,7 @@ export default function StockDetailPage() {
                 {tab}
               </button>
             ))}
-            {gubaPage.syncing && (
+            {gubaMeta.syncing && (
               <span className="ml-auto mr-3 text-[10px] text-[var(--text-tertiary)] animate-pulse">
                 加载中…
               </span>
@@ -606,7 +643,10 @@ export default function StockDetailPage() {
               className="flex flex-col"
               style={{ height: `${bottomHeight}px` }}
             >
-              <div className="flex-1 overflow-y-auto bg-[var(--bg-primary)] text-[11px]">
+              <div
+                ref={gubaListRef}
+                className="flex-1 overflow-y-auto bg-[var(--bg-primary)] text-[11px]"
+              >
                 {gubaLoading ? (
                   <div className="space-y-2 p-3">
                     {[1, 2, 3, 4, 5].map((i) => (
@@ -616,7 +656,7 @@ export default function StockDetailPage() {
                       />
                     ))}
                   </div>
-                ) : gubaPage.items.length > 0 ? (
+                ) : gubaItems.length > 0 ? (
                   <table className="w-full">
                     <thead className="sticky top-0 bg-[var(--bg-secondary)] border-b border-[var(--border-color)]">
                       <tr className="text-[var(--text-tertiary)] text-[10px]">
@@ -628,9 +668,9 @@ export default function StockDetailPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {gubaPage.items.map((item, i) => (
+                      {gubaItems.map((item, i) => (
                         <tr
-                          key={i}
+                          key={`${item.post_id}-${i}`}
                           className="border-b border-[var(--border-color)] hover:bg-[var(--bg-hover)] transition-colors"
                         >
                           <td className="px-2 py-1.5 text-center text-[var(--text-tertiary)]">
@@ -675,42 +715,28 @@ export default function StockDetailPage() {
                   </table>
                 ) : (
                   <div className="text-center text-[var(--text-tertiary)] py-6">
-                    {gubaPage.syncing ? "正在抓取数据…" : "暂无数据"}
+                    {gubaMeta.syncing ? "正在抓取数据…" : "暂无数据"}
+                  </div>
+                )}
+
+                {/* 底部加载更多状态 */}
+                {gubaItems.length > 0 && (
+                  <div className="py-2 text-center text-[10px] text-[var(--text-tertiary)]">
+                    {gubaLoadingMore ? (
+                      <span className="animate-pulse">加载中…</span>
+                    ) : gubaCurrentPage >= gubaMeta.total_pages ? (
+                      <span>共 {gubaMeta.total} 条，已全部加载</span>
+                    ) : null}
                   </div>
                 )}
               </div>
 
-              {/* Pagination */}
-              {gubaPage.total_pages > 1 && (
-                <div className="flex items-center justify-between px-3 py-1 border-t border-[var(--border-color)] bg-[var(--bg-secondary)] shrink-0">
+              {/* 总条数 */}
+              {gubaMeta.total > 0 && (
+                <div className="px-3 py-1 border-t border-[var(--border-color)] bg-[var(--bg-secondary)] shrink-0">
                   <span className="text-[10px] text-[var(--text-tertiary)]">
-                    共 {gubaPage.total} 条
+                    共 {gubaMeta.total} 条
                   </span>
-                  <div className="flex items-center gap-1">
-                    <button
-                      onClick={() =>
-                        setGubaCurrentPage((p) => Math.max(1, p - 1))
-                      }
-                      disabled={gubaCurrentPage === 1}
-                      className="px-2 py-0.5 text-[10px] rounded border border-[var(--border-color)] text-[var(--text-tertiary)] disabled:opacity-30 hover:text-[var(--text-primary)] transition-colors"
-                    >
-                      上一页
-                    </button>
-                    <span className="text-[10px] text-[var(--text-tertiary)] px-1">
-                      {gubaCurrentPage}/{gubaPage.total_pages}
-                    </span>
-                    <button
-                      onClick={() =>
-                        setGubaCurrentPage((p) =>
-                          Math.min(gubaPage.total_pages, p + 1),
-                        )
-                      }
-                      disabled={gubaCurrentPage === gubaPage.total_pages}
-                      className="px-2 py-0.5 text-[10px] rounded border border-[var(--border-color)] text-[var(--text-tertiary)] disabled:opacity-30 hover:text-[var(--text-primary)] transition-colors"
-                    >
-                      下一页
-                    </button>
-                  </div>
                 </div>
               )}
             </div>

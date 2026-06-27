@@ -576,8 +576,27 @@ async def get_node_stocks(db: Session = Depends(get_db)):
 
 @router.get("/list")
 async def get_industry_list(db: Session = Depends(get_db)):
-    """Return ordered industry list with card metadata for the list page."""
     rows = db.query(IndustryList).order_by(IndustryList.sort_order).all()
+
+    all_nodes = db.query(IndustryNode).all()
+    industry_stock_counts: dict[str, int] = {}
+    for n in all_nodes:
+        stocks = json.loads(n.stocks or "[]")
+        iid = n.industry_id
+        industry_stock_counts[iid] = industry_stock_counts.get(iid, 0) + len(stocks)
+
+    all_industry_stocks: set[str] = set()
+    for n in all_nodes:
+        if n.industry_id != "overview":
+            stocks = json.loads(n.stocks or "[]")
+            all_industry_stocks.update(stocks)
+    overview_count = len(all_industry_stocks)
+
+    def get_count(industry_id: str, fallback: int) -> int:
+        if industry_id == "overview":
+            return overview_count
+        return industry_stock_counts.get(industry_id, fallback)
+
     return {
         "industries": [
             {
@@ -585,7 +604,7 @@ async def get_industry_list(db: Session = Depends(get_db)):
                 "name": r.name,
                 "description": r.description,
                 "icon": r.icon,
-                "companyCount": r.company_count,
+                "companyCount": get_count(r.industry_id, r.company_count),
                 "lastAnalyzed": r.last_analyzed,
                 "representatives": json.loads(r.representatives or "[]"),
             }

@@ -1078,6 +1078,15 @@ const OVERVIEW_INDUSTRIES = [
     x: 1060,
     y: 660,
   },
+  {
+    id: "glasssub",
+    label: "玻璃基板\n半导体封装",
+    icon: "🔷",
+    color: "#64748b",
+    reps: ["洛阳玻璃", "彩虹股份", "深南电路"],
+    x: 1350,
+    y: 220,
+  },
 ];
 
 const OVERVIEW_EDGES_DEF = [
@@ -1096,6 +1105,8 @@ const OVERVIEW_EDGES_DEF = [
   { src: "liquidcool", tgt: "idc", label: "液冷部署IDC" },
   { src: "aipower", tgt: "idc", label: "供配电支撑IDC" },
   { src: "aigpu", tgt: "idc", label: "GPU装入算力中心" },
+  { src: "glasssub", tgt: "pcb", label: "IC载板→PCB基材" },
+  { src: "glasssub", tgt: "aigpu", label: "先进封装基板" },
 ];
 
 type OverviewNodeData = {

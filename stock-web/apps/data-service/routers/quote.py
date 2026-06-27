@@ -26,17 +26,13 @@ def _to_bs_code(code: str) -> str:
 
 
 def _is_a_share(code: str) -> bool:
-    """Check if stock code is A-share (supported by baostock)"""
-    return (
-        code.startswith("0")  # 深圳主板/中小板
-        or code.startswith("002")  # 深圳中小板
-        or code.startswith("003")  # 深圳主板
-        or code.startswith("300")  # 创业板
-        or code.startswith("600")  # 上海主板
-        or code.startswith("601")  # 上海主板
-        or code.startswith("603")  # 上海主板
-        or code.startswith("688")  # 科创板
-    )
+    if not code or len(code) != 6:
+        return False
+    if code.startswith("0") or code.startswith("3"):
+        return True
+    if code.startswith("6") or code.startswith("688"):
+        return True
+    return False
 
 
 def _safe_float(val, default=0.0) -> float:

@@ -136,14 +136,6 @@ function removeFromRecentlyViewed(code: string) {
   } catch {}
 }
 
-const WATCHLIST = [
-  { code: "600519", name: "贵州茅台" },
-  { code: "300750", name: "宁德时代" },
-  { code: "002594", name: "比亚迪" },
-  { code: "688981", name: "中芯国际" },
-  { code: "601208", name: "东材科技" },
-];
-
 const INDICATORS = ["VOL", "MACD", "KDJ", "BOLL", "RSI", "DMI", "CCI", "W&R"];
 const PERIODS = ["日K", "周K", "月K"];
 const BOTTOM_TABS = ["全部", "公告", "研报", "资讯", "AI分析"];
@@ -218,8 +210,6 @@ export default function StockDetailPage() {
       const recent = getRecentlyViewed();
       if (recent.length > 0) {
         router.replace(`/stock/${recent[0].code}`);
-      } else if (WATCHLIST.length > 0) {
-        router.replace(`/stock/${WATCHLIST[0].code}`);
       }
     }
   }, [code, router]);
@@ -434,7 +424,7 @@ export default function StockDetailPage() {
             </span>
           </div>
           <div className="flex-1 overflow-y-auto">
-            {(watchlist.length > 0 ? watchlist : WATCHLIST).map((s) => (
+            {watchlist.map((s) => (
               <div
                 key={s.code}
                 className={cn(

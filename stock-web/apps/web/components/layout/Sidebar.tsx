@@ -9,6 +9,7 @@ import {
   Bot,
   TrendingUp,
   Activity,
+  Globe,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -31,6 +32,12 @@ const navItems = [
     icon: LineChart,
     match: (p: string) =>
       p.startsWith("/stock/") && !p.startsWith("/stock/search"),
+  },
+  {
+    href: "/global",
+    label: "全球",
+    icon: Globe,
+    match: (p: string) => p.startsWith("/global"),
   },
   {
     href: "/agents",

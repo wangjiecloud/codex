@@ -1,6 +1,18 @@
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
-from routers import quote, kline, fundamental, news, industry, guba, sync, system
+from routers import (
+    quote,
+    kline,
+    fundamental,
+    news,
+    industry,
+    guba,
+    sync,
+    system,
+    global_market,
+    news_flash,
+    concept_board,
+)
 import akshare as ak
 from fastapi import HTTPException
 from db import init_db
@@ -26,6 +38,9 @@ app.include_router(industry.router, prefix="/api/industry", tags=["产业链"])
 app.include_router(guba.router, prefix="/api/guba", tags=["股吧资讯"])
 app.include_router(sync.router, prefix="/api/sync", tags=["数据同步"])
 app.include_router(system.router, prefix="/api/system", tags=["系统监控"])
+app.include_router(global_market.router, prefix="/api/global", tags=["全球市场"])
+app.include_router(news_flash.router, prefix="/api/flash", tags=["快讯"])
+app.include_router(concept_board.router, prefix="/api/board", tags=["概念板块"])
 
 _scheduler = BackgroundScheduler(timezone="Asia/Shanghai")
 
@@ -51,6 +66,30 @@ def startup():
         hour="9-14",
         minute="*/10",
         id="trading_hours_sync",
+        replace_existing=True,
+    )
+
+    _scheduler.add_job(
+        global_market.sync_global_indices,
+        trigger="interval",
+        minutes=3,
+        id="global_market_sync",
+        replace_existing=True,
+    )
+
+    _scheduler.add_job(
+        news_flash.sync_news_flash,
+        trigger="interval",
+        minutes=3,
+        id="news_flash_sync",
+        replace_existing=True,
+    )
+
+    _scheduler.add_job(
+        concept_board.sync_concept_boards,
+        trigger="interval",
+        minutes=3,
+        id="concept_board_sync",
         replace_existing=True,
     )
 

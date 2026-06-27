@@ -182,6 +182,51 @@ class IndustryList(Base):
     updated_at = Column(DateTime, default=datetime.utcnow)
 
 
+class NewsFlash(Base):
+    __tablename__ = "news_flash"
+    id = Column(String(50), primary_key=True)
+    title = Column(Text)
+    digest = Column(Text, default="")
+    url = Column(Text, default="")
+    ctime = Column(String(30))
+    category = Column(String(20), index=True)
+    updated_at = Column(DateTime, default=datetime.utcnow)
+
+
+class ConceptBoard(Base):
+    __tablename__ = "concept_board"
+    code = Column(String(20), primary_key=True)
+    name = Column(String(100))
+    change_pct = Column(Float)
+    change_amt = Column(Float)
+    price = Column(Float)
+    volume = Column(Float)
+    turnover = Column(Float)
+    rise_count = Column(Integer, default=0)
+    fall_count = Column(Integer, default=0)
+    lead_stock = Column(String(50), default="")
+    lead_stock_pct = Column(Float, default=0.0)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class GlobalMarketIndex(Base):
+    """全球主要市场指数快照"""
+
+    __tablename__ = "global_market_index"
+    code = Column(String(20), primary_key=True)
+    name = Column(String(100))
+    region = Column(String(20))  # cn / us / eu / asia / other
+    price = Column(Float)
+    change_amt = Column(Float)
+    change_pct = Column(Float)
+    open = Column(Float)
+    high = Column(Float)
+    low = Column(Float)
+    prev_close = Column(Float)
+    market_time = Column(String(30))  # 最新行情时间
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 def get_db():
     db = SessionLocal()
     try:

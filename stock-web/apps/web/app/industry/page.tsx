@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import {
   Plus,
@@ -19,13 +19,13 @@ interface Industry {
   id: string;
   name: string;
   description: string;
-  icon: "cpu" | "layers" | "factory";
+  icon: string;
   companyCount: number;
   lastAnalyzed: string;
   representatives: string[];
 }
 
-const ICONS = {
+const ICONS: Record<string, React.ElementType> = {
   cpu: Cpu,
   layers: Layers,
   factory: Factory,
@@ -304,7 +304,7 @@ export default function IndustryPage() {
 
       <div className="space-y-3">
         {industries.map((industry) => {
-          const Icon = ICONS[industry.icon];
+          const Icon = ICONS[industry.icon] || Cpu;
           return (
             <div
               key={industry.id}

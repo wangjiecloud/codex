@@ -44,6 +44,7 @@ interface SystemStats {
     count: number;
     updatedAt: string;
   }>;
+  gubaLastSync?: string | null;
 }
 
 interface LogEntry {
@@ -82,6 +83,7 @@ export default function SystemMonitorPage() {
   const [flashStats, setFlashStats] = useState<FlashCatStat[]>([]);
   const logsEndRef = useRef<HTMLDivElement>(null);
   const logsContainerRef = useRef<HTMLDivElement>(null);
+  const schedLogSeq = useRef<number>(0);
 
   const getPhaseDisplayName = (phase: string): string => {
     const phaseNames: Record<string, string> = {
@@ -120,6 +122,35 @@ export default function SystemMonitorPage() {
     try {
       const r = await fetch("http://localhost:8000/api/system/flash-stats");
       if (r.ok) setFlashStats(await r.json());
+    } catch {}
+  };
+
+  const fetchSchedulerLogs = async () => {
+    try {
+      const r = await fetch(
+        `http://localhost:8000/api/system/scheduler-logs?since=${schedLogSeq.current}`,
+      );
+      if (!r.ok) return;
+      const data: {
+        logs: Array<{
+          seq: number;
+          time: string;
+          level: string;
+          message: string;
+        }>;
+        latest_seq: number;
+      } = await r.json();
+      if (data.logs.length > 0) {
+        setLogs((prev) => {
+          const newEntries: LogEntry[] = data.logs.map((l) => ({
+            time: l.time,
+            level: l.level as LogEntry["level"],
+            message: `[定时] ${l.message}`,
+          }));
+          return [...prev, ...newEntries].slice(-200);
+        });
+        schedLogSeq.current = data.latest_seq;
+      }
     } catch {}
   };
 
@@ -179,9 +210,8 @@ export default function SystemMonitorPage() {
       let endpoint = "";
       switch (syncType) {
         case "guba":
-          addLog("info", "股吧数据需要单独同步，请使用输入框单独同步");
-          setSyncRunning(false);
-          return;
+          endpoint = "/api/guba/sync/batch";
+          break;
         case "kline":
           endpoint = "/api/sync/klines";
           break;
@@ -479,6 +509,7 @@ export default function SystemMonitorPage() {
   useEffect(() => {
     fetchStats();
     fetchFlashStats();
+    fetchSchedulerLogs();
     addLog("info", "系统监控已启动");
     checkAndResumeSyncStatus();
   }, []);
@@ -488,6 +519,7 @@ export default function SystemMonitorPage() {
     const interval = setInterval(() => {
       fetchStats();
       fetchFlashStats();
+      fetchSchedulerLogs();
     }, 5000);
     return () => clearInterval(interval);
   }, [autoRefresh, syncRunning]);
@@ -832,6 +864,7 @@ export default function SystemMonitorPage() {
                 count: stats.dataByType?.guba,
                 stocks: stats.stocksByDataType?.guba,
                 syncType: "guba" as const,
+                lastSync: stats.gubaLastSync,
               },
               {
                 key: "kline",
@@ -854,6 +887,11 @@ export default function SystemMonitorPage() {
                 stocks={item.stocks}
                 totalStocks={stats.totalStocks}
                 syncing={syncRunning}
+                lastSync={
+                  "lastSync" in item
+                    ? (item as { lastSync?: string | null }).lastSync
+                    : undefined
+                }
                 onSync={() => triggerBatchSync(item.syncType)}
               />
             ))}
@@ -999,6 +1037,7 @@ function SyncDataCard({
   stocks,
   totalStocks,
   syncing,
+  lastSync,
   onSync,
 }: {
   label: string;
@@ -1009,6 +1048,7 @@ function SyncDataCard({
   stocks?: number;
   totalStocks: number;
   syncing: boolean;
+  lastSync?: string | null;
   onSync: () => void;
 }) {
   const tokens = colorTokens[color] ?? colorTokens.blue;
@@ -1057,6 +1097,17 @@ function SyncDataCard({
         {stocks !== undefined && totalStocks > 0 && stocks <= totalStocks && (
           <div>
             覆盖: {stocks}/{totalStocks} 只股票
+          </div>
+        )}
+        {lastSync && (
+          <div>
+            同步:{" "}
+            {new Date(lastSync).toLocaleString("zh-CN", {
+              month: "2-digit",
+              day: "2-digit",
+              hour: "2-digit",
+              minute: "2-digit",
+            })}
           </div>
         )}
       </div>

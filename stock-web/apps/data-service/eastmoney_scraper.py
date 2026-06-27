@@ -3,6 +3,7 @@ from bs4 import BeautifulSoup
 from typing import List, Dict, Optional
 import re
 import time
+import json
 
 try:
     import akshare as ak
@@ -21,6 +22,27 @@ HEADERS = {
     "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
     "Accept-Encoding": "gzip, deflate, br",
     "Connection": "keep-alive",
+}
+
+_GUBA_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "*/*",
+    "Accept-Language": "zh-CN,zh;q=0.9",
+    "Referer": "https://so.eastmoney.com/",
+}
+
+_NEWS_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "*/*",
+    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+    "Referer": "https://so.eastmoney.com/",
+}
+
+_ANN_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "zh-CN,zh;q=0.9",
+    "Referer": "https://data.eastmoney.com/",
 }
 
 
@@ -48,10 +70,184 @@ def _parse_post_time(time_str: str) -> str:
     m = re.match(r"^(\d{4}-\d{2}-\d{2})$", time_str)
     if m:
         return f"{time_str} 00:00"
+    m = re.match(r"^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})", time_str)
+    if m:
+        return m.group(1)[:16]
     return time_str
 
 
+def _scrape_news_direct(code: str, max_pages: int = 10) -> List[Dict]:
+    posts = []
+    page_size = 10
+    for page in range(1, max_pages + 1):
+        try:
+            inner_param = {
+                "uid": "",
+                "keyword": code,
+                "type": ["cmsArticleWebOld"],
+                "client": "web",
+                "clientType": "web",
+                "clientVersion": "curr",
+                "param": {
+                    "cmsArticleWebOld": {
+                        "searchScope": "default",
+                        "sort": "default",
+                        "pageIndex": page,
+                        "pageSize": page_size,
+                        "preTag": "<em>",
+                        "postTag": "</em>",
+                    }
+                },
+            }
+            params = {
+                "cb": "jQuery_em_news",
+                "param": json.dumps(inner_param, ensure_ascii=False),
+                "_": str(int(time.time() * 1000)),
+            }
+            r = requests.get(
+                "https://search-api-web.eastmoney.com/search/jsonp",
+                params=params,
+                headers=_NEWS_HEADERS,
+                timeout=15,
+            )
+            text = r.text.strip()
+            m = re.search(r"jQuery_em_news\((.*)\)$", text, re.DOTALL)
+            if not m:
+                break
+            data = json.loads(m.group(1))
+            items = data.get("result", {}).get("cmsArticleWebOld", [])
+            if not items:
+                break
+            for item in items:
+                raw_time = str(item.get("date", ""))
+                post_date = _parse_post_time(raw_time)
+                art_code = str(item.get("code", ""))
+                url = (
+                    f"http://finance.eastmoney.com/a/{art_code}.html"
+                    if art_code
+                    else ""
+                )
+                post_id = (
+                    f"news_{art_code}" if art_code else f"news_{code}_{len(posts)}"
+                )
+                posts.append(
+                    {
+                        "post_id": post_id,
+                        "title": re.sub(r"<[^>]+>", "", str(item.get("title", ""))),
+                        "author": str(item.get("mediaName", "匿名")),
+                        "read_count": 0,
+                        "comment_count": 0,
+                        "post_time": raw_time,
+                        "post_date": post_date,
+                        "url": url,
+                        "category": "news",
+                        "content": str(item.get("content", "")),
+                    }
+                )
+            if len(items) < page_size:
+                break
+            time.sleep(0.3)
+        except Exception as e:
+            print(f"[scraper] news direct page {page} error for {code}: {e}")
+            break
+    return posts
+
+
+def _scrape_discussion_posts(
+    code: str, stock_name: str, max_pages: int = 10
+) -> List[Dict]:
+    if not stock_name:
+        return []
+    posts = []
+    page_size = 20
+    for page in range(1, max_pages + 1):
+        try:
+            inner_param = {
+                "uid": "",
+                "keyword": stock_name,
+                "type": ["gubaArticle"],
+                "client": "web",
+                "clientType": "web",
+                "clientVersion": "curr",
+                "param": {
+                    "gubaArticle": {
+                        "searchScope": "default",
+                        "sort": "time",
+                        "pageIndex": page,
+                        "pageSize": page_size,
+                        "preTag": "",
+                        "postTag": "",
+                    }
+                },
+            }
+            params = {
+                "cb": "jQuery_guba",
+                "param": json.dumps(inner_param, ensure_ascii=False),
+                "_": str(int(time.time() * 1000)),
+            }
+            r = requests.get(
+                "https://search-api-web.eastmoney.com/search/jsonp",
+                params=params,
+                headers=_GUBA_HEADERS,
+                timeout=15,
+            )
+            text = r.text.strip()
+            m = re.search(r"jQuery_guba\((.*)\)$", text, re.DOTALL)
+            if not m:
+                break
+            data = json.loads(m.group(1))
+            items = data.get("result", {}).get("gubaArticle", [])
+            if not items:
+                break
+            for item in items:
+                raw_time = str(item.get("date", ""))
+                post_date = _parse_post_time(raw_time)
+                post_id = str(item.get("id", ""))
+                url = (
+                    f"https://guba.eastmoney.com/news,{code},{post_id}.html"
+                    if post_id
+                    else ""
+                )
+                comment_num = item.get("commentNum") or 0
+                like_num = item.get("likeNum") or 0
+                posts.append(
+                    {
+                        "post_id": f"disc_{post_id}"
+                        if post_id
+                        else f"disc_{code}_{len(posts)}",
+                        "title": re.sub(r"<[^>]+>", "", str(item.get("title", ""))),
+                        "author": str(item.get("nickname", "匿名")),
+                        "read_count": int(like_num) if str(like_num).isdigit() else 0,
+                        "comment_count": int(comment_num)
+                        if str(comment_num).isdigit()
+                        else 0,
+                        "post_time": raw_time,
+                        "post_date": post_date,
+                        "url": url,
+                        "category": "discussion",
+                        "content": re.sub(
+                            r"<[^>]+>",
+                            "",
+                            str(
+                                item.get("introduction", "") or item.get("content", "")
+                            ),
+                        ),
+                    }
+                )
+            total_hits = data.get("hitsTotal", 0)
+            if len(posts) >= total_hits or len(items) < page_size:
+                break
+            time.sleep(0.3)
+        except Exception as e:
+            print(f"[scraper] discussion page {page} error for {code}: {e}")
+            break
+    return posts
+
+
 def _scrape_news_akshare(code: str) -> List[Dict]:
+    posts = _scrape_news_direct(code, max_pages=10)
+    if posts:
+        return posts
     if not _AKSHARE_AVAILABLE:
         return []
     try:
@@ -84,7 +280,69 @@ def _scrape_news_akshare(code: str) -> List[Dict]:
         return []
 
 
+def _is_sh(code: str) -> bool:
+    return code.startswith("6")
+
+
+def _scrape_announcement_direct(code: str, max_pages: int = 20) -> List[Dict]:
+    posts = []
+    page_size = 50
+    for page in range(1, max_pages + 1):
+        try:
+            api_url = (
+                f"https://np-anotice-stock.eastmoney.com/api/security/ann"
+                f"?sr=-1&page_size={page_size}&page_index={page}"
+                f"&ann_type=A&client_source=web&stock_list={code}"
+            )
+            r = requests.get(api_url, headers=_ANN_HEADERS, timeout=15)
+            data = r.json()
+            if not data.get("success"):
+                break
+            items = data.get("data", {}).get("list", [])
+            if not items:
+                break
+            for item in items:
+                raw_time = str(item.get("notice_date", ""))
+                post_date = _parse_post_time(raw_time)
+                art_code = str(item.get("art_code", ""))
+                url_detail = (
+                    f"https://data.eastmoney.com/notices/detail/{code}/{art_code}.html"
+                    if art_code
+                    else ""
+                )
+                cols = item.get("columns", [])
+                ann_type = cols[0].get("column_name", "公告") if cols else "公告"
+                title = str(item.get("title", "") or item.get("title_ch", ""))
+                posts.append(
+                    {
+                        "post_id": f"ann_{art_code}"
+                        if art_code
+                        else f"ann_{code}_{len(posts)}",
+                        "title": title,
+                        "author": ann_type,
+                        "read_count": 0,
+                        "comment_count": 0,
+                        "post_time": post_date,
+                        "post_date": post_date,
+                        "url": url_detail,
+                        "category": "announcement",
+                        "content": "",
+                    }
+                )
+            total_hits = data.get("data", {}).get("total_hits", 0)
+            if len(posts) >= total_hits or len(items) < page_size:
+                break
+            time.sleep(0.3)
+        except Exception as e:
+            print(f"[scraper] announcement direct page {page} error for {code}: {e}")
+            break
+    return posts
+
+
 def _scrape_announcement_akshare(code: str) -> List[Dict]:
+    posts = _scrape_announcement_direct(code, max_pages=20)
+    if posts:
+        return posts
     if not _AKSHARE_AVAILABLE:
         return []
     try:
@@ -181,11 +439,29 @@ def scrape_all(code: str, max_pages: int = 5) -> List[Dict]:
     return deduped
 
 
+def _get_stock_name(code: str) -> str:
+    try:
+        import sqlite3 as _sq3, os as _os
+
+        db_path = _os.path.join(
+            _os.path.dirname(_os.path.abspath(__file__)), "stock_data.db"
+        )
+        conn = _sq3.connect(_os.path.normpath(db_path), timeout=10)
+        row = conn.execute(
+            "SELECT name FROM stock_meta WHERE code=?", (code,)
+        ).fetchone()
+        conn.close()
+        return row[0] if row else ""
+    except Exception:
+        return ""
+
+
 def scrape_all_categories(code: str, max_pages: int = 5) -> Dict[str, List[Dict]]:
     result: Dict[str, List[Dict]] = {
         "announcement": [],
         "research": [],
         "news": [],
+        "discussion": [],
     }
 
     result["announcement"] = _scrape_announcement_akshare(code)
@@ -196,6 +472,12 @@ def scrape_all_categories(code: str, max_pages: int = 5) -> Dict[str, List[Dict]
 
     result["research"] = _scrape_research_akshare(code)
     print(f"[scraper] {code} research: {len(result['research'])} posts")
+
+    stock_name = _get_stock_name(code)
+    result["discussion"] = _scrape_discussion_posts(
+        code, stock_name, max_pages=max_pages
+    )
+    print(f"[scraper] {code} discussion: {len(result['discussion'])} posts")
 
     return result
 

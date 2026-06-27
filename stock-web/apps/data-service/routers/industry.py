@@ -1,12 +1,14 @@
-from fastapi import APIRouter, Depends, BackgroundTasks, Query, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Query, HTTPException
+from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy import text
 from datetime import datetime, date, timedelta
 import json
+import time
 
 from db import (
-    get_db,
     SessionLocal,
     StockQuote,
     StockKline,
@@ -21,6 +23,15 @@ from db import (
 from bs_session import get_bs, reset_bs
 
 router = APIRouter()
+
+_industry_list_cache: dict = {}
+_industry_stocks_cache: dict = {}
+_industry_graph_cache: dict[str, dict] = {}
+_industry_map_cache: dict = {}
+_INDUSTRY_LIST_TTL = 60
+_INDUSTRY_STOCKS_TTL = 30
+_INDUSTRY_GRAPH_TTL = 300
+_INDUSTRY_MAP_TTL = 300
 
 
 def _get_industry_meta(db: Session) -> dict[str, dict]:
@@ -67,8 +78,9 @@ _sync_running = False
 
 
 def sync_all_data():
-    """Full sync: quotes + daily klines for all A-shares. Called by scheduler."""
-    print("[sync_all_data] starting full sync...")
+    from routers.system import sched_log
+
+    sched_log("info", "每日全量同步开始（行情+K线）")
     _sync_all_quotes()
     db = SessionLocal()
     try:
@@ -77,7 +89,7 @@ def sync_all_data():
         db.close()
     for code in codes:
         _sync_klines(code, "daily")
-    print(f"[sync_all_data] done — {len(codes)} stocks updated")
+    sched_log("success", f"每日全量同步完成，共 {len(codes)} 只股票")
 
 
 def _to_bs_code(code: str) -> str:
@@ -203,10 +215,14 @@ def _sync_all_quotes():
         with _lock:
             _status["done"] = total_codes
 
-        print(f"[sync_quotes] done, saved {count} rows")
+        from routers.system import sched_log
+
+        sched_log("success", f"实时行情同步完成，更新 {count}/{total_codes} 只股票")
     except Exception as e:
         db.rollback()
-        print(f"[sync_quotes] error: {e}")
+        from routers.system import sched_log
+
+        sched_log("error", f"实时行情同步失败: {e}")
         import traceback
 
         traceback.print_exc()
@@ -383,90 +399,114 @@ def _sync_news(code: str):
     print(f"[sync_news] {code}: baostock has no news API, skipping")
 
 
+def _fetch_industry_quotes(codes: str) -> dict:
+    db = SessionLocal()
+    try:
+        code_list = (
+            [c.strip() for c in codes.split(",") if c.strip()]
+            if codes
+            else _get_a_shares(db)
+        )
+        rows = db.query(StockQuote).filter(StockQuote.code.in_(code_list)).all()
+        result = {}
+        for row in rows:
+            price = row.price
+            change = row.change
+            change_amt = row.change_amt
+            open_ = row.open
+            prev_close = row.prev_close
+            high = row.high
+            low = row.low
+            volume = row.volume
+            turnover = row.turnover
+            turnover_rate = row.turnover_rate
+            amplitude = row.amplitude
+
+            if amplitude == 0.0 and high > 0 and low > 0 and prev_close > 0:
+                amplitude = round((high - low) / prev_close * 100, 2)
+
+            quote_never_synced = price == 0.0 and row.updated_at is None
+            if quote_never_synced:
+                kline_rows = (
+                    db.query(StockKline)
+                    .filter(StockKline.code == row.code, StockKline.period == "daily")
+                    .order_by(StockKline.trade_date.desc())
+                    .limit(2)
+                    .all()
+                )
+                if kline_rows:
+                    latest = kline_rows[0]
+                    price = latest.close
+                    change = latest.change_pct
+                    open_ = latest.open
+                    high = latest.high
+                    low = latest.low
+                    volume = float(latest.volume)
+                    turnover = latest.turnover
+                    turnover_rate = latest.turn_rate if latest.turn_rate else 0.0
+                    prev_k = kline_rows[1] if len(kline_rows) > 1 else None
+                    prev_close = prev_k.close if prev_k else 0.0
+                    change_amt = round(price - prev_close, 4) if prev_close else 0.0
+                    amplitude = (
+                        round((high - low) / prev_close * 100, 2)
+                        if prev_close > 0
+                        else 0.0
+                    )
+
+            result[row.code] = {
+                "code": row.code,
+                "name": row.name,
+                "price": price,
+                "change": change,
+                "changeAmt": change_amt,
+                "open": open_,
+                "prevClose": prev_close,
+                "high": high,
+                "low": low,
+                "volume": volume,
+                "turnover": turnover,
+                "marketCap": row.market_cap,
+                "pe": row.pe,
+                "pb": row.pb,
+                "turnoverRate": turnover_rate,
+                "amplitude": amplitude,
+                "updatedAt": row.updated_at.isoformat() if row.updated_at else None,
+            }
+        return {"quotes": result, "total": len(result)}
+    finally:
+        db.close()
+
+
 @router.get("/stocks")
 async def get_industry_quotes(
     codes: str = Query("", description="逗号分隔的股票代码，留空返回全部产业链"),
-    db: Session = Depends(get_db),
 ):
-    code_list = (
-        [c.strip() for c in codes.split(",") if c.strip()]
-        if codes
-        else _get_a_shares(db)
-    )
-    rows = db.query(StockQuote).filter(StockQuote.code.in_(code_list)).all()
-    result = {}
-    for row in rows:
-        price = row.price
-        change = row.change
-        change_amt = row.change_amt
-        open_ = row.open
-        prev_close = row.prev_close
-        high = row.high
-        low = row.low
-        volume = row.volume
-        turnover = row.turnover
-        turnover_rate = row.turnover_rate
-        amplitude = row.amplitude
-
-        if amplitude == 0.0 and high > 0 and low > 0 and prev_close > 0:
-            amplitude = round((high - low) / prev_close * 100, 2)
-
-        quote_never_synced = price == 0.0 and row.updated_at is None
-        if quote_never_synced:
-            kline_rows = (
-                db.query(StockKline)
-                .filter(StockKline.code == row.code, StockKline.period == "daily")
-                .order_by(StockKline.trade_date.desc())
-                .limit(2)
-                .all()
-            )
-            if kline_rows:
-                latest = kline_rows[0]
-                price = latest.close
-                change = latest.change_pct
-                open_ = latest.open
-                high = latest.high
-                low = latest.low
-                volume = float(latest.volume)
-                turnover = latest.turnover
-                turnover_rate = latest.turn_rate if latest.turn_rate else 0.0
-                prev_k = kline_rows[1] if len(kline_rows) > 1 else None
-                prev_close = prev_k.close if prev_k else 0.0
-                change_amt = round(price - prev_close, 4) if prev_close else 0.0
-                amplitude = (
-                    round((high - low) / prev_close * 100, 2) if prev_close > 0 else 0.0
-                )
-
-        result[row.code] = {
-            "code": row.code,
-            "name": row.name,
-            "price": price,
-            "change": change,
-            "changeAmt": change_amt,
-            "open": open_,
-            "prevClose": prev_close,
-            "high": high,
-            "low": low,
-            "volume": volume,
-            "turnover": turnover,
-            "marketCap": row.market_cap,
-            "pe": row.pe,
-            "pb": row.pb,
-            "turnoverRate": turnover_rate,
-            "amplitude": amplitude,
-            "updatedAt": row.updated_at.isoformat() if row.updated_at else None,
-        }
-    return {"quotes": result, "total": len(result)}
+    if not codes:
+        cached = _industry_stocks_cache
+        if cached.get("ts") and time.time() - cached["ts"] < _INDUSTRY_STOCKS_TTL:
+            return JSONResponse(content=cached["data"])
+    out = await run_in_threadpool(_fetch_industry_quotes, codes)
+    if not codes:
+        _industry_stocks_cache["ts"] = time.time()
+        _industry_stocks_cache["data"] = out
+    return JSONResponse(content=out)
 
 
 @router.post("/sync")
-async def trigger_sync(
-    background_tasks: BackgroundTasks, db: Session = Depends(get_db)
-):
+async def trigger_sync(background_tasks: BackgroundTasks):
     if _sync_running:
         return {"status": "already_running"}
+
+    def _get_codes():
+        db = SessionLocal()
+        try:
+            return _get_a_shares(db)
+        finally:
+            db.close()
+
+    codes = await run_in_threadpool(_get_codes)
     background_tasks.add_task(_sync_all_quotes)
-    return {"status": "started", "codes": len(_get_a_shares(db))}
+    return {"status": "started", "codes": len(codes)}
 
 
 @router.post("/sync/kline/{code}")
@@ -474,9 +514,15 @@ async def sync_kline(
     code: str,
     period: str = Query("daily"),
     background_tasks: BackgroundTasks = None,
-    db: Session = Depends(get_db),
 ):
-    if code not in _get_a_shares(db):
+    def _check():
+        db = SessionLocal()
+        try:
+            return code in _get_a_shares(db)
+        finally:
+            db.close()
+
+    if not await run_in_threadpool(_check):
         raise HTTPException(status_code=400, detail="Not an industry stock")
     background_tasks.add_task(_sync_klines, code, period)
     return {"status": "started", "code": code, "period": period}
@@ -486,9 +532,15 @@ async def sync_kline(
 async def sync_fundamental(
     code: str,
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db),
 ):
-    if code not in _get_a_shares(db):
+    def _check():
+        db = SessionLocal()
+        try:
+            return code in _get_a_shares(db)
+        finally:
+            db.close()
+
+    if not await run_in_threadpool(_check):
         raise HTTPException(status_code=400, detail="Not an industry stock")
     background_tasks.add_task(_sync_fundamental, code)
     return {"status": "started", "code": code}
@@ -507,169 +559,221 @@ async def sync_news_for(
 async def get_industry_news(
     codes: str = Query("", description="逗号分隔的股票代码"),
     limit: int = Query(50, ge=5, le=200),
-    db: Session = Depends(get_db),
 ):
-    code_list = (
-        [c.strip() for c in codes.split(",") if c.strip()]
-        if codes
-        else _get_a_shares(db)
-    )
-    rows = (
-        db.query(StockNews)
-        .filter(StockNews.code.in_(code_list))
-        .order_by(StockNews.pub_time.desc())
-        .limit(limit)
-        .all()
-    )
-    return {
-        "news": [
-            {
-                "code": r.code,
-                "title": r.title,
-                "url": r.url,
-                "source": r.source,
-                "pubTime": r.pub_time,
+    def _fetch():
+        db = SessionLocal()
+        try:
+            code_list = (
+                [c.strip() for c in codes.split(",") if c.strip()]
+                if codes
+                else _get_a_shares(db)
+            )
+            rows = (
+                db.query(StockNews)
+                .filter(StockNews.code.in_(code_list))
+                .order_by(StockNews.pub_time.desc())
+                .limit(limit)
+                .all()
+            )
+            return {
+                "news": [
+                    {
+                        "code": r.code,
+                        "title": r.title,
+                        "url": r.url,
+                        "source": r.source,
+                        "pubTime": r.pub_time,
+                    }
+                    for r in rows
+                ]
             }
-            for r in rows
-        ]
-    }
+        finally:
+            db.close()
+
+    return await run_in_threadpool(_fetch)
 
 
 @router.get("/non-a-shares")
-async def get_non_a_share_info(db: Session = Depends(get_db)):
-    return {"symbols": _get_non_a_shares(db)}
+async def get_non_a_share_info():
+    def _fetch():
+        db = SessionLocal()
+        try:
+            return {"symbols": _get_non_a_shares(db)}
+        finally:
+            db.close()
+
+    return await run_in_threadpool(_fetch)
 
 
 @router.get("/stock-industry-map")
-async def get_stock_industry_map(db: Session = Depends(get_db)):
-    """Derive stock→industries mapping dynamically from industry_node.stocks in DB."""
-    nodes = db.query(IndustryNode).filter(IndustryNode.stocks != "[]").all()
-    stock_to_industries: dict[str, list[str]] = {}
-    for node in nodes:
-        codes = json.loads(node.stocks or "[]")
-        for code in codes:
-            stock_to_industries.setdefault(code, [])
-            if node.industry_id not in stock_to_industries[code]:
-                stock_to_industries[code].append(node.industry_id)
-    return {"mapping": stock_to_industries}
+async def get_stock_industry_map():
+    cached = _industry_map_cache
+    if cached.get("ts") and time.time() - cached["ts"] < _INDUSTRY_MAP_TTL:
+        return JSONResponse(content=cached["data"])
+
+    def _fetch():
+        db = SessionLocal()
+        try:
+            nodes = db.query(IndustryNode).filter(IndustryNode.stocks != "[]").all()
+            stock_to_industries: dict[str, list[str]] = {}
+            for node in nodes:
+                node_codes = json.loads(node.stocks or "[]")
+                for code in node_codes:
+                    stock_to_industries.setdefault(code, [])
+                    if node.industry_id not in stock_to_industries[code]:
+                        stock_to_industries[code].append(node.industry_id)
+            return {"mapping": stock_to_industries}
+        finally:
+            db.close()
+
+    result = await run_in_threadpool(_fetch)
+    _industry_map_cache["ts"] = time.time()
+    _industry_map_cache["data"] = result
+    return JSONResponse(content=result)
 
 
 @router.get("/perf")
-async def get_stock_performance(db: Session = Depends(get_db)):
-    rows = db.execute(
-        text("""
-        WITH
-        latest AS (
-            SELECT code, close AS cur
-            FROM stock_kline
-            WHERE period = 'daily'
-              AND (code, trade_date) IN (
-                  SELECT code, MAX(trade_date)
-                  FROM stock_kline
-                  WHERE period = 'daily'
-                  GROUP BY code
-              )
-        ),
-        ref_jan AS (
-            SELECT code, close AS base_jan
-            FROM stock_kline
-            WHERE period = 'daily'
-              AND (code, trade_date) IN (
-                  SELECT code, MIN(trade_date)
-                  FROM stock_kline
-                  WHERE period = 'daily' AND trade_date >= '2026-01-01'
-                  GROUP BY code
-              )
-        ),
-        ref_may AS (
-            SELECT code, close AS base_may
-            FROM stock_kline
-            WHERE period = 'daily'
-              AND (code, trade_date) IN (
-                  SELECT code, MIN(trade_date)
-                  FROM stock_kline
-                  WHERE period = 'daily' AND trade_date >= '2026-05-01'
-                  GROUP BY code
-              )
-        )
-        SELECT l.code,
-               ROUND((l.cur - j.base_jan) / j.base_jan * 100, 2) AS ytd,
-               ROUND((l.cur - m.base_may) / m.base_may * 100, 2) AS m5
-        FROM latest l
-        LEFT JOIN ref_jan j ON j.code = l.code
-        LEFT JOIN ref_may m ON m.code = l.code
-    """)
-    ).fetchall()
+async def get_stock_performance():
+    def _fetch():
+        db = SessionLocal()
+        try:
+            rows = db.execute(
+                text("""
+                WITH
+                latest AS (
+                    SELECT code, close AS cur
+                    FROM stock_kline
+                    WHERE period = 'daily'
+                      AND (code, trade_date) IN (
+                          SELECT code, MAX(trade_date)
+                          FROM stock_kline
+                          WHERE period = 'daily'
+                          GROUP BY code
+                      )
+                ),
+                ref_jan AS (
+                    SELECT code, close AS base_jan
+                    FROM stock_kline
+                    WHERE period = 'daily'
+                      AND (code, trade_date) IN (
+                          SELECT code, MIN(trade_date)
+                          FROM stock_kline
+                          WHERE period = 'daily' AND trade_date >= '2026-01-01'
+                          GROUP BY code
+                      )
+                ),
+                ref_may AS (
+                    SELECT code, close AS base_may
+                    FROM stock_kline
+                    WHERE period = 'daily'
+                      AND (code, trade_date) IN (
+                          SELECT code, MIN(trade_date)
+                          FROM stock_kline
+                          WHERE period = 'daily' AND trade_date >= '2026-05-01'
+                          GROUP BY code
+                      )
+                )
+                SELECT l.code,
+                       ROUND((l.cur - j.base_jan) / j.base_jan * 100, 2) AS ytd,
+                       ROUND((l.cur - m.base_may) / m.base_may * 100, 2) AS m5
+                FROM latest l
+                LEFT JOIN ref_jan j ON j.code = l.code
+                LEFT JOIN ref_may m ON m.code = l.code
+            """)
+            ).fetchall()
+            result: dict[str, dict] = {}
+            for code, ytd, m5 in rows:
+                result[code] = {"ytd": ytd, "m5": m5}
+            return {"perf": result}
+        finally:
+            db.close()
 
-    result: dict[str, dict] = {}
-    for code, ytd, m5 in rows:
-        result[code] = {
-            "ytd": ytd,
-            "m5": m5,
-        }
-    return {"perf": result}
+    return await run_in_threadpool(_fetch)
 
 
 @router.get("/node-stocks")
-async def get_node_stocks(db: Session = Depends(get_db)):
-    rows = db.query(IndustryNode).filter(IndustryNode.stocks != "[]").all()
-    result: dict[str, dict[str, list[str]]] = {}
-    for row in rows:
-        result.setdefault(row.industry_id, {})[row.node_id] = json.loads(
-            row.stocks or "[]"
-        )
-    return {"nodeStocks": result}
+async def get_node_stocks():
+    def _fetch():
+        db = SessionLocal()
+        try:
+            rows = db.query(IndustryNode).filter(IndustryNode.stocks != "[]").all()
+            result: dict[str, dict[str, list[str]]] = {}
+            for row in rows:
+                result.setdefault(row.industry_id, {})[row.node_id] = json.loads(
+                    row.stocks or "[]"
+                )
+            return {"nodeStocks": result}
+        finally:
+            db.close()
+
+    return await run_in_threadpool(_fetch)
 
 
 @router.get("/list")
-async def get_industry_list(db: Session = Depends(get_db)):
-    rows = db.query(IndustryList).order_by(IndustryList.sort_order).all()
+async def get_industry_list():
+    cached = _industry_list_cache
+    if cached.get("ts") and time.time() - cached["ts"] < _INDUSTRY_LIST_TTL:
+        return JSONResponse(content=cached["data"])
 
-    all_nodes = db.query(IndustryNode).all()
-    industry_stock_counts: dict[str, int] = {}
-    for n in all_nodes:
-        stocks = json.loads(n.stocks or "[]")
-        iid = n.industry_id
-        industry_stock_counts[iid] = industry_stock_counts.get(iid, 0) + len(stocks)
-
-    all_industry_stocks: set[str] = set()
-    for n in all_nodes:
-        if n.industry_id != "overview":
-            stocks = json.loads(n.stocks or "[]")
-            all_industry_stocks.update(stocks)
-    overview_count = len(all_industry_stocks)
-
-    def get_count(industry_id: str, fallback: int) -> int:
-        if industry_id == "overview":
-            return overview_count
-        return industry_stock_counts.get(industry_id, fallback)
-
-    return {
-        "industries": [
-            {
-                "id": r.industry_id,
-                "name": r.name,
-                "description": r.description,
-                "icon": r.icon,
-                "companyCount": get_count(r.industry_id, r.company_count),
-                "lastAnalyzed": r.last_analyzed,
-                "representatives": json.loads(r.representatives or "[]"),
+    def _fetch():
+        db = SessionLocal()
+        try:
+            rows = db.query(IndustryList).order_by(IndustryList.sort_order).all()
+            return {
+                "industries": [
+                    {
+                        "id": r.industry_id,
+                        "name": r.name,
+                        "description": r.description,
+                        "icon": r.icon,
+                        "companyCount": r.company_count or 0,
+                        "lastAnalyzed": r.last_analyzed,
+                        "representatives": json.loads(r.representatives or "[]"),
+                    }
+                    for r in rows
+                ]
             }
-            for r in rows
-        ]
-    }
+        finally:
+            db.close()
+
+    result = await run_in_threadpool(_fetch)
+    _industry_list_cache["ts"] = time.time()
+    _industry_list_cache["data"] = result
+    return JSONResponse(content=result)
 
 
 @router.get("/graph/{industry_id}")
-async def get_industry_graph(industry_id: str, db: Session = Depends(get_db)):
-    nodes = db.query(IndustryNode).filter(IndustryNode.industry_id == industry_id).all()
-    edges = db.query(IndustryEdge).filter(IndustryEdge.industry_id == industry_id).all()
-    meta_row = (
-        db.query(IndustryMeta).filter(IndustryMeta.industry_id == industry_id).first()
-    )
+async def get_industry_graph(industry_id: str):
+    cached = _industry_graph_cache.get(industry_id)
+    if cached and time.time() - cached["ts"] < _INDUSTRY_GRAPH_TTL:
+        return JSONResponse(content=cached["data"])
+
+    def _fetch():
+        db = SessionLocal()
+        try:
+            nodes = (
+                db.query(IndustryNode)
+                .filter(IndustryNode.industry_id == industry_id)
+                .all()
+            )
+            edges = (
+                db.query(IndustryEdge)
+                .filter(IndustryEdge.industry_id == industry_id)
+                .all()
+            )
+            meta_row = (
+                db.query(IndustryMeta)
+                .filter(IndustryMeta.industry_id == industry_id)
+                .first()
+            )
+            return nodes, edges, meta_row
+        finally:
+            db.close()
+
+    nodes, edges, meta_row = await run_in_threadpool(_fetch)
     if not nodes and not meta_row:
         raise HTTPException(status_code=404, detail="Industry not found")
-    return {
+    result = {
         "title": meta_row.title if meta_row else industry_id,
         "subtitle": meta_row.subtitle if meta_row else "",
         "layerLabels": json.loads(meta_row.layer_labels or "[]") if meta_row else [],
@@ -700,3 +804,5 @@ async def get_industry_graph(industry_id: str, db: Session = Depends(get_db)):
             for e in edges
         ],
     }
+    _industry_graph_cache[industry_id] = {"ts": time.time(), "data": result}
+    return JSONResponse(content=result)

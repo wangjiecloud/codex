@@ -87,6 +87,33 @@ function avg(values: (number | undefined)[]): number | null {
   return valid.reduce((s, v) => s + v, 0) / valid.length;
 }
 
+function _buildSubGroups(nodes: GraphNode[]): SubGroup[] {
+  const groupMap = new Map<string, { name: string; codes: string[] }>();
+  nodes.forEach((node) => {
+    if (!node.stocks?.length) return;
+    const aCodes = node.stocks.filter((c) => /^[036]/.test(c));
+    if (!aCodes.length) return;
+    const key = node.group ?? node.id;
+    const name = node.group ?? node.label;
+    if (groupMap.has(key)) {
+      groupMap.get(key)!.codes.push(...aCodes);
+    } else {
+      groupMap.set(key, { name, codes: aCodes });
+    }
+  });
+  const sgs: SubGroup[] = Array.from(groupMap.entries()).map(([id, g]) => ({
+    id,
+    name: g.name,
+    stocks: [...new Set(g.codes)],
+    avgChange: null,
+  }));
+  const allCodes = [...new Set(sgs.flatMap((sg) => sg.stocks))];
+  return [
+    { id: "__all__", name: "全部", stocks: allCodes, avgChange: null },
+    ...sgs,
+  ];
+}
+
 /* ─────────────────────────────────────────────
    AvgBadge — shown in tabs
 ───────────────────────────────────────────── */
@@ -334,7 +361,7 @@ export function WatchlistPanel() {
       fetch("http://localhost:8000/api/industry/stocks").then((r) => r.json()),
     ])
       .then(
-        async ([listData, stocksData]: [
+        ([listData, stocksData]: [
           { industries: Industry[] },
           { quotes: Record<string, StockQuote> },
         ]) => {
@@ -348,73 +375,20 @@ export function WatchlistPanel() {
           setQuotes(allQuotes);
           quotesLoaded.current = true;
 
-          const graphResults = await Promise.allSettled(
-            filtered.map((ind) =>
-              fetch(`http://localhost:8000/api/industry/graph/${ind.id}`)
-                .then((r) => r.json())
-                .then((data: { nodes: GraphNode[] }) => ({
-                  id: ind.id,
-                  nodes: data.nodes,
-                })),
-            ),
-          );
-
-          const newSubGroupsMap: Record<string, SubGroup[]> = {};
-          graphResults.forEach((result) => {
-            if (result.status !== "fulfilled") return;
-            const { id: industryId, nodes } = result.value;
-            loadedGraphs.current.add(industryId);
-
-            const groupMap = new Map<
-              string,
-              { name: string; codes: string[] }
-            >();
-            nodes.forEach((node: GraphNode) => {
-              if (!node.stocks?.length) return;
-              const aCodes = node.stocks.filter((c) => /^[036]/.test(c));
-              if (!aCodes.length) return;
-              const key = node.group ?? node.id;
-              const name = node.group ?? node.label;
-              if (groupMap.has(key)) {
-                groupMap.get(key)!.codes.push(...aCodes);
-              } else {
-                groupMap.set(key, { name, codes: aCodes });
-              }
-            });
-
-            const sgs: SubGroup[] = Array.from(groupMap.entries()).map(
-              ([sgId, g]) => {
-                const codes = [...new Set(g.codes)];
-                const vals = codes
-                  .map((c) => allQuotes[c]?.change)
-                  .filter((v): v is number => v !== undefined);
-                return {
-                  id: sgId,
-                  name: g.name,
-                  stocks: codes,
-                  avgChange: avg(vals),
-                };
-              },
-            );
-
-            const allCodes = [...new Set(sgs.flatMap((sg) => sg.stocks))];
-            const allVals = allCodes
-              .map((c) => allQuotes[c]?.change)
-              .filter((v): v is number => v !== undefined);
-            const allGroup: SubGroup = {
-              id: "__all__",
-              name: "全部",
-              stocks: allCodes,
-              avgChange: avg(allVals),
-            };
-            newSubGroupsMap[industryId] = [allGroup, ...sgs];
+          filtered.forEach((ind) => {
+            if (loadedGraphs.current.has(ind.id)) return;
+            fetch(`http://localhost:8000/api/industry/graph/${ind.id}`)
+              .then((r) => r.json())
+              .then((data: { nodes: GraphNode[] }) => {
+                const sgs = _buildSubGroups(data.nodes);
+                loadedGraphs.current.add(ind.id);
+                setSubGroupsMap((prev) => {
+                  if (prev[ind.id]) return prev;
+                  return { ...prev, [ind.id]: sgs };
+                });
+              })
+              .catch(() => {});
           });
-
-          setSubGroupsMap(newSubGroupsMap);
-          if (filtered.length > 0) {
-            const firstSgs = newSubGroupsMap[filtered[0].id];
-            if (firstSgs?.length > 0) setActiveSubGroup(firstSgs[0].id);
-          }
         },
       )
       .catch(() => {})
@@ -425,7 +399,6 @@ export function WatchlistPanel() {
   useEffect(() => {
     if (!activeIndustry) return;
     if (loadedGraphs.current.has(activeIndustry)) {
-      // already loaded — just reset subgroup selection
       const sgs = subGroupsMap[activeIndustry];
       if (sgs && sgs.length > 0) setActiveSubGroup(sgs[0].id);
       return;
@@ -435,39 +408,7 @@ export function WatchlistPanel() {
     fetch(`http://localhost:8000/api/industry/graph/${activeIndustry}`)
       .then((r) => r.json())
       .then((data: { nodes: GraphNode[] }) => {
-        // group nodes by node.group (or node.id if no group)
-        const groupMap = new Map<string, { name: string; codes: string[] }>();
-        data.nodes.forEach((node) => {
-          if (!node.stocks?.length) return;
-          const aCodes = node.stocks.filter((c) => /^[036]/.test(c));
-          if (!aCodes.length) return;
-          const key = node.group ?? node.id;
-          const name = node.group ?? node.label;
-          if (groupMap.has(key)) {
-            groupMap.get(key)!.codes.push(...aCodes);
-          } else {
-            groupMap.set(key, { name, codes: aCodes });
-          }
-        });
-
-        const sgs: SubGroup[] = Array.from(groupMap.entries()).map(
-          ([id, g]) => ({
-            id,
-            name: g.name,
-            stocks: [...new Set(g.codes)],
-            avgChange: null, // will be computed below
-          }),
-        );
-
-        const allCodes = [...new Set(sgs.flatMap((sg) => sg.stocks))];
-        const allGroup: SubGroup = {
-          id: "__all__",
-          name: "全部",
-          stocks: allCodes,
-          avgChange: null,
-        };
-        const finalSgs = [allGroup, ...sgs];
-
+        const finalSgs = _buildSubGroups(data.nodes);
         loadedGraphs.current.add(activeIndustry);
         setSubGroupsMap((prev) => ({ ...prev, [activeIndustry]: finalSgs }));
         setActiveSubGroup(finalSgs[0].id);
@@ -513,7 +454,7 @@ export function WatchlistPanel() {
       });
       return next;
     });
-  }, [Object.keys(quotes).length]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [Object.keys(quotes).length, Object.keys(subGroupsMap).length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ── Load quotes for missing stocks in current subgroup (fallback) ── */
   const currentSgs = subGroupsMap[activeIndustry] ?? [];

@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException, Query
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from datetime import datetime, timedelta
@@ -14,6 +15,10 @@ _CACHE_TTL_MINUTES = 5
 
 _syncing: set = set()
 _syncing_lock = threading.Lock()
+
+_incremental_running = False
+_incremental_lock = threading.Lock()
+_guba_last_sync: str = ""
 
 VALID_CATEGORIES = {"all", "announcement", "news", "research", "discussion", "article"}
 
@@ -180,25 +185,37 @@ def _post_to_dict(post: GubaPost) -> dict:
     }
 
 
+def _fetch_and_save_content(post_id: str, url: str):
+    content = fetch_post_content(url) or ""
+    if not content:
+        return
+    db = SessionLocal()
+    try:
+        post = db.query(GubaPost).filter(GubaPost.post_id == post_id).first()
+        if post:
+            post.content = content
+            post.content_fetched = 1
+            db.commit()
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()
+
+
 @router.get("/post/{post_id}")
-async def get_post_detail(post_id: str, db: Session = Depends(get_db)):
+async def get_post_detail(
+    post_id: str, background_tasks: BackgroundTasks, db: Session = Depends(get_db)
+):
     post = db.query(GubaPost).filter(GubaPost.post_id == post_id).first()
     if not post:
         raise HTTPException(status_code=404, detail="Post not found")
 
-    content = post.content or ""
-    if not content and not post.content_fetched:
-        content = fetch_post_content(post.url) or ""
-        try:
-            post.content = content
-            post.content_fetched = 1
-            db.commit()
-        except Exception:
-            db.rollback()
+    if not post.content and not post.content_fetched:
+        background_tasks.add_task(_fetch_and_save_content, post_id, post.url)
 
     return {
         **_post_to_dict(post),
-        "content": content,
+        "content": post.content or "",
     }
 
 
@@ -209,25 +226,29 @@ async def get_guba_data(
     category: str = Query("all"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
-    db: Session = Depends(get_db),
 ):
     if category not in VALID_CATEGORIES:
         raise HTTPException(status_code=400, detail=f"Invalid category: {category}")
 
-    has_fresh = _is_data_fresh(db, code)
-    has_any = _has_any_data(db, code)
+    def _fetch():
+        db = SessionLocal()
+        try:
+            has_fresh = _is_data_fresh(db, code)
+            has_any = _has_any_data(db, code)
+            q = db.query(GubaPost).filter(GubaPost.code == code)
+            if category != "all":
+                q = q.filter(GubaPost.category == category)
+            q = q.order_by(GubaPost.post_date.desc(), GubaPost.id.desc())
+            total = q.count()
+            posts = q.offset((page - 1) * page_size).limit(page_size).all()
+            return has_fresh, has_any, total, [_post_to_dict(p) for p in posts]
+        finally:
+            db.close()
+
+    has_fresh, has_any, total, items = await run_in_threadpool(_fetch)
 
     if not has_fresh:
         background_tasks.add_task(_sync_guba_posts, code)
-
-    q = db.query(GubaPost).filter(GubaPost.code == code)
-    if category != "all":
-        q = q.filter(GubaPost.category == category)
-
-    q = q.order_by(GubaPost.post_date.desc(), GubaPost.id.desc())
-
-    total = q.count()
-    posts = q.offset((page - 1) * page_size).limit(page_size).all()
 
     return {
         "code": code,
@@ -236,7 +257,7 @@ async def get_guba_data(
         "page_size": page_size,
         "total": total,
         "total_pages": max(1, (total + page_size - 1) // page_size),
-        "items": [_post_to_dict(p) for p in posts],
+        "items": items,
         "syncing": not has_fresh,
         "source": "database" if has_any else "empty",
     }
@@ -276,6 +297,111 @@ async def trigger_guba_all_sync(code: str, background_tasks: BackgroundTasks):
 async def trigger_guba_sync(code: str, background_tasks: BackgroundTasks):
     background_tasks.add_task(_sync_guba_posts, code)
     return {"status": "started", "code": code}
+
+
+def sync_guba_incremental():
+    global _incremental_running, _guba_last_sync
+    with _incremental_lock:
+        if _incremental_running:
+            return
+        _incremental_running = True
+
+    from routers.system import sched_log
+
+    try:
+        from db import SessionLocal, StockMeta
+
+        db = SessionLocal()
+        try:
+            codes = [row.code for row in db.query(StockMeta.code).all()]
+        finally:
+            db.close()
+
+        total = len(codes)
+        sched_log("info", f"股吧增量同步开始，共 {total} 只股票")
+        saved_total = 0
+        errors = 0
+
+        for idx, code in enumerate(codes):
+            try:
+                data = scrape_all_categories(code, max_pages=1)
+                if not data:
+                    continue
+                now = datetime.utcnow().isoformat()
+                all_rows = []
+                for category, posts in data.items():
+                    for post in posts:
+                        pre_content = post.get("content", "") or ""
+                        all_rows.append(
+                            (
+                                code,
+                                post["post_id"],
+                                post["title"],
+                                post["author"],
+                                post["read_count"],
+                                post["comment_count"],
+                                post["post_time"],
+                                post.get("post_date", ""),
+                                post["url"],
+                                post["category"],
+                                pre_content,
+                                1 if pre_content else 0,
+                                now,
+                            )
+                        )
+                if not all_rows:
+                    continue
+
+                import sqlite3 as _sqlite3, os
+
+                db_path = os.path.join(os.path.dirname(__file__), "..", "stock_data.db")
+                conn = _sqlite3.connect(os.path.normpath(db_path), timeout=30)
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("PRAGMA busy_timeout=30000")
+                for i in range(0, len(all_rows), 100):
+                    batch = all_rows[i : i + 100]
+                    try:
+                        conn.executemany(
+                            """INSERT INTO guba_post
+                               (code, post_id, title, author, read_count, comment_count,
+                                post_time, post_date, url, category, content, content_fetched, updated_at)
+                               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                               ON CONFLICT(code, post_id) DO UPDATE SET
+                                 read_count=excluded.read_count,
+                                 comment_count=excluded.comment_count,
+                                 post_time=excluded.post_time,
+                                 post_date=excluded.post_date,
+                                 content=excluded.content,
+                                 content_fetched=excluded.content_fetched,
+                                 updated_at=excluded.updated_at""",
+                            batch,
+                        )
+                        conn.commit()
+                        saved_total += len(batch)
+                    except Exception as e:
+                        print(f"[guba_incremental] batch error for {code}: {e}")
+                conn.close()
+
+                if (idx + 1) % 50 == 0:
+                    sched_log(
+                        "info",
+                        f"股吧增量同步进度 {idx + 1}/{total}，已写入 {saved_total} 条",
+                    )
+
+            except Exception as e:
+                errors += 1
+                print(f"[guba_incremental] error for {code}: {e}")
+            time.sleep(0.3)
+
+        _guba_last_sync = datetime.utcnow().isoformat()
+        sched_log(
+            "success", f"股吧增量同步完成，写入 {saved_total} 条，错误 {errors} 只"
+        )
+    except Exception as e:
+        sched_log("error", f"股吧增量同步异常: {e}")
+    finally:
+        with _incremental_lock:
+            _incremental_running = False
 
 
 def _run_batch_guba_sync():

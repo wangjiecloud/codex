@@ -136,18 +136,22 @@ def sync_global_indices() -> int:
                 db.execute(stmt)
                 count += 1
             db.commit()
-            print(
-                f"[global_market] synced {count} indices at {datetime.now().strftime('%H:%M:%S')}"
-            )
+            from routers.system import sched_log
+
+            sched_log("success", f"全球市场指数同步完成，共 {count} 条")
             return count
         except Exception as e:
             db.rollback()
-            print(f"[global_market] DB error: {e}")
+            from routers.system import sched_log
+
+            sched_log("error", f"全球市场指数同步DB错误: {e}")
             return 0
         finally:
             db.close()
     except Exception as e:
-        print(f"[global_market] fetch error: {e}")
+        from routers.system import sched_log
+
+        sched_log("error", f"全球市场指数同步失败: {e}")
         return 0
     finally:
         with _sync_lock:

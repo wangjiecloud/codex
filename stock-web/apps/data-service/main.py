@@ -49,9 +49,67 @@ app.include_router(portfolio.router, prefix="/api/portfolio", tags=["持仓管�
 _scheduler = BackgroundScheduler(timezone="Asia/Shanghai")
 
 
+def _warmup_caches():
+    from routers.industry import (
+        _fetch_industry_quotes,
+        _industry_list_cache,
+        _industry_stocks_cache,
+        _industry_map_cache,
+        _INDUSTRY_LIST_TTL,
+        _INDUSTRY_STOCKS_TTL,
+        _INDUSTRY_MAP_TTL,
+    )
+    from db import SessionLocal, IndustryList, IndustryNode
+    import json, time
+
+    print("[warmup] pre-warming caches...")
+    try:
+        db = SessionLocal()
+        try:
+            rows = db.query(IndustryList).order_by(IndustryList.sort_order).all()
+            list_data = {
+                "industries": [
+                    {
+                        "id": r.industry_id,
+                        "name": r.name,
+                        "description": r.description,
+                        "icon": r.icon,
+                        "companyCount": r.company_count or 0,
+                        "lastAnalyzed": r.last_analyzed,
+                        "representatives": json.loads(r.representatives or "[]"),
+                    }
+                    for r in rows
+                ]
+            }
+            _industry_list_cache["ts"] = time.time()
+            _industry_list_cache["data"] = list_data
+
+            nodes = db.query(IndustryNode).filter(IndustryNode.stocks != "[]").all()
+            stock_to_industries: dict = {}
+            for node in nodes:
+                for code in json.loads(node.stocks or "[]"):
+                    stock_to_industries.setdefault(code, [])
+                    if node.industry_id not in stock_to_industries[code]:
+                        stock_to_industries[code].append(node.industry_id)
+            map_data = {"mapping": stock_to_industries}
+            _industry_map_cache["ts"] = time.time()
+            _industry_map_cache["data"] = map_data
+        finally:
+            db.close()
+
+        stocks_data = _fetch_industry_quotes("")
+        _industry_stocks_cache["ts"] = time.time()
+        _industry_stocks_cache["data"] = stocks_data
+        print("[warmup] done")
+    except Exception as e:
+        print(f"[warmup] error: {e}")
+
+
 @app.on_event("startup")
 def startup():
     init_db()
+
+    threading.Thread(target=_warmup_caches, daemon=True).start()
 
     # 每日全量同步（盘后17:30）
     _scheduler.add_job(
@@ -94,6 +152,14 @@ def startup():
         trigger="interval",
         minutes=3,
         id="concept_board_sync",
+        replace_existing=True,
+    )
+
+    _scheduler.add_job(
+        guba.sync_guba_incremental,
+        trigger="interval",
+        minutes=20,
+        id="guba_incremental_sync",
         replace_existing=True,
     )
 

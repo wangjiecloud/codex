@@ -19,7 +19,9 @@ DATABASE_URL = "sqlite:///./stock_data.db"
 
 engine = create_engine(
     DATABASE_URL,
-    connect_args={"check_same_thread": False, "timeout": 60},
+    connect_args={"check_same_thread": False, "timeout": 5},
+    pool_size=10,
+    max_overflow=20,
 )
 
 from sqlalchemy import event
@@ -29,7 +31,7 @@ from sqlalchemy import event
 def set_wal_mode(dbapi_conn, connection_record):
     dbapi_conn.execute("PRAGMA journal_mode=WAL")
     dbapi_conn.execute("PRAGMA synchronous=NORMAL")
-    dbapi_conn.execute("PRAGMA busy_timeout=15000")
+    dbapi_conn.execute("PRAGMA busy_timeout=5000")
 
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

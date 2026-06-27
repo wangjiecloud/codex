@@ -1,5 +1,7 @@
 import json
-from fastapi import APIRouter, Depends
+import threading
+from collections import deque
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from db import (
@@ -15,6 +17,45 @@ from db import (
 from datetime import datetime, timedelta
 
 router = APIRouter()
+
+_sched_logs: deque = deque(maxlen=200)
+_sched_logs_lock = threading.Lock()
+_sched_log_seq: int = 0
+
+
+def sched_log(level: str, message: str):
+    global _sched_log_seq
+    with _sched_logs_lock:
+        _sched_log_seq += 1
+        _sched_logs.append(
+            {
+                "seq": _sched_log_seq,
+                "time": datetime.now().strftime("%H:%M:%S"),
+                "level": level,
+                "message": message,
+            }
+        )
+
+
+def _get_guba_last_sync() -> str | None:
+    try:
+        from routers.guba import _guba_last_sync
+
+        if _guba_last_sync:
+            return _guba_last_sync
+    except Exception:
+        pass
+    from db import SessionLocal, GubaPost
+    from sqlalchemy import func as _func
+
+    db = SessionLocal()
+    try:
+        row = db.query(_func.max(GubaPost.updated_at)).scalar()
+        return row.isoformat() if row else None
+    except Exception:
+        return None
+    finally:
+        db.close()
 
 
 @router.get("/stats")
@@ -108,6 +149,7 @@ async def get_system_stats(db: Session = Depends(get_db)):
             }
             for update in recent_updates
         ],
+        "gubaLastSync": _get_guba_last_sync(),
     }
 
 
@@ -154,3 +196,10 @@ async def get_flash_stats(db: Session = Depends(get_db)):
             }
         )
     return result
+
+
+@router.get("/scheduler-logs")
+async def get_scheduler_logs(since: int = Query(0)):
+    with _sched_logs_lock:
+        logs = [e for e in _sched_logs if e["seq"] > since]
+    return {"logs": logs, "latest_seq": _sched_log_seq}

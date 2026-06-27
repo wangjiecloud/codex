@@ -33,6 +33,20 @@ import {
 } from "lucide-react";
 import { cn, getPriceColor, formatPercent } from "@/lib/utils";
 import { useTheme } from "@/app/theme-provider";
+import {
+  OpticsAnimation,
+  MlccAnimation,
+  MemoryAnimation,
+  AigpuAnimation,
+  FiberAnimation,
+  LiquidcoolAnimation,
+  AipowerAnimation,
+  CoppercableAnimation,
+  IdcAnimation,
+  GlasssubAnimation,
+  AiserverAnimation,
+  SemieqAnimation,
+} from "./IndustryAnimations";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1029,6 +1043,38 @@ function ProcessFlowView({
                     {guide.intro}
                   </div>
                 </div>
+
+                {industryId === "pcb" && (
+                  <PCBManufacturingAnimation isLight={isLight} />
+                )}
+                {industryId === "optics" && (
+                  <OpticsAnimation isLight={isLight} />
+                )}
+                {industryId === "mlcc" && <MlccAnimation isLight={isLight} />}
+                {industryId === "memory" && (
+                  <MemoryAnimation isLight={isLight} />
+                )}
+                {industryId === "aigpu" && <AigpuAnimation isLight={isLight} />}
+                {industryId === "fiber" && <FiberAnimation isLight={isLight} />}
+                {industryId === "liquidcool" && (
+                  <LiquidcoolAnimation isLight={isLight} />
+                )}
+                {industryId === "aipower" && (
+                  <AipowerAnimation isLight={isLight} />
+                )}
+                {industryId === "coppercable" && (
+                  <CoppercableAnimation isLight={isLight} />
+                )}
+                {industryId === "idc" && <IdcAnimation isLight={isLight} />}
+                {industryId === "glasssub" && (
+                  <GlasssubAnimation isLight={isLight} />
+                )}
+                {industryId === "aiserver" && (
+                  <AiserverAnimation isLight={isLight} />
+                )}
+                {industryId === "semieq" && (
+                  <SemieqAnimation isLight={isLight} />
+                )}
 
                 <div
                   style={{ display: "flex", gap: 24, alignItems: "flex-start" }}
@@ -5373,6 +5419,23 @@ export default function IndustryCanvasPage() {
     }
   }, [searchParams, nodes]);
 
+  useEffect(() => {
+    const tab = searchParams.get("tab") as ViewTab | null;
+    const nodeId = searchParams.get("node");
+    if (!tab || nodes.length === 0) return;
+
+    if (tab === "chain" || tab === "anatomy") {
+      setActiveTab(tab);
+    }
+    if (nodeId) {
+      setSelectedId(nodeId);
+      setPanelVisible(true);
+    }
+
+    const newUrl = window.location.pathname;
+    window.history.replaceState({}, "", newUrl);
+  }, [searchParams, nodes]);
+
   const handleOverride = useCallback((id: string, codes: string[]) => {
     setStockOverrides((prev) => ({ ...prev, [id]: codes }));
   }, []);
@@ -5949,7 +6012,9 @@ export default function IndustryCanvasPage() {
                   onOverride={handleOverride}
                   onClose={() => setSelectedId(null)}
                   onNavigate={(code) =>
-                    router.push(`/stock/${code}?from=/industry/${industryId}`)
+                    router.push(
+                      `/stock/${code}?from=/industry/${industryId}&tab=chain${selectedId ? `&node=${selectedId}` : ""}`,
+                    )
                   }
                   quickItems={quickItems}
                   onSelectQuick={setSelectedId}
@@ -5998,7 +6063,9 @@ export default function IndustryCanvasPage() {
                   onOverride={handleOverride}
                   onClose={() => setSelectedId(null)}
                   onNavigate={(code) =>
-                    router.push(`/stock/${code}?from=/industry/${industryId}`)
+                    router.push(
+                      `/stock/${code}?from=/industry/${industryId}&tab=anatomy${selectedId ? `&node=${selectedId}` : ""}`,
+                    )
                   }
                   quickItems={[]}
                   onSelectQuick={setSelectedId}
@@ -6010,5 +6077,1622 @@ export default function IndustryCanvasPage() {
         )}
       </div>
     </div>
+  );
+}
+
+function IndustryAnimation({
+  isLight,
+  title,
+  steps,
+  renderStep,
+  extraDefs,
+}: {
+  isLight: boolean;
+  title: string;
+  steps: { id: number; label: string }[];
+  renderStep: (step: number) => React.ReactNode;
+  extraDefs?: React.ReactNode;
+}) {
+  const [step, setStep] = React.useState(0);
+  const [playing, setPlaying] = React.useState(true);
+  const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  React.useEffect(() => {
+    if (!playing) return;
+    timerRef.current = setTimeout(() => {
+      setStep((s) => (s + 1) % steps.length);
+    }, 2500);
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, [step, playing, steps.length]);
+
+  const bg = isLight ? "#f8fafc" : "#0f172a";
+  const border = isLight ? "#e2e8f0" : "#1e293b";
+  const textPri = isLight ? "#0f172a" : "#f1f5f9";
+  const textSec = isLight ? "#64748b" : "#94a3b8";
+
+  return (
+    <div
+      style={{
+        marginBottom: 20,
+        borderRadius: 12,
+        border: `1px solid ${border}`,
+        background: bg,
+        overflow: "hidden",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "10px 16px",
+          borderBottom: `1px solid ${border}`,
+        }}
+      >
+        <span style={{ fontSize: 12, fontWeight: 700, color: textPri }}>
+          {title}
+        </span>
+        <button
+          onClick={() => setPlaying((p) => !p)}
+          style={{
+            fontSize: 11,
+            padding: "3px 10px",
+            borderRadius: 6,
+            border: `1px solid ${border}`,
+            background: "transparent",
+            color: textSec,
+            cursor: "pointer",
+          }}
+        >
+          {playing ? "暂停" : "播放"}
+        </button>
+      </div>
+      <div style={{ display: "flex" }}>
+        <div
+          style={{
+            flex: 1,
+            padding: "16px 20px",
+            position: "relative",
+            minHeight: 200,
+          }}
+        >
+          <svg width="100%" viewBox="0 0 480 200" style={{ display: "block" }}>
+            <defs>
+              <filter id="ia-glow">
+                <feGaussianBlur stdDeviation="2.5" result="coloredBlur" />
+                <feMerge>
+                  <feMergeNode in="coloredBlur" />
+                  <feMergeNode in="SourceGraphic" />
+                </feMerge>
+              </filter>
+              {extraDefs}
+            </defs>
+            {renderStep(step)}
+          </svg>
+        </div>
+        <div
+          style={{
+            width: 130,
+            borderLeft: `1px solid ${border}`,
+            padding: "12px 0",
+            display: "flex",
+            flexDirection: "column",
+            gap: 0,
+          }}
+        >
+          {steps.map((s) => (
+            <button
+              key={s.id}
+              onClick={() => {
+                setStep(s.id);
+                setPlaying(false);
+              }}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "6px 12px",
+                background:
+                  step === s.id
+                    ? isLight
+                      ? "#f0f9ff"
+                      : "#0f2744"
+                    : "transparent",
+                borderLeft:
+                  step === s.id ? "2px solid #3b82f6" : "2px solid transparent",
+                cursor: "pointer",
+                textAlign: "left" as const,
+                width: "100%",
+              }}
+            >
+              <span
+                style={{
+                  width: 18,
+                  height: 18,
+                  borderRadius: "50%",
+                  flexShrink: 0,
+                  background:
+                    step === s.id ? "#3b82f6" : isLight ? "#e2e8f0" : "#1e293b",
+                  color: step === s.id ? "#fff" : textSec,
+                  fontSize: 9,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontWeight: 700,
+                }}
+              >
+                {s.id + 1}
+              </span>
+              <span
+                style={{
+                  fontSize: 10,
+                  color:
+                    step === s.id ? (isLight ? "#1d4ed8" : "#60a5fa") : textSec,
+                  lineHeight: 1.3,
+                }}
+              >
+                {s.label}
+              </span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PCBManufacturingAnimation({ isLight }: { isLight: boolean }) {
+  const steps = [
+    { id: 0, label: "原材料准备" },
+    { id: 1, label: "CCL压合" },
+    { id: 2, label: "涂布光刻胶" },
+    { id: 3, label: "曝光显影" },
+    { id: 4, label: "蚀刻线路" },
+    { id: 5, label: "钻孔" },
+    { id: 6, label: "电镀铜" },
+    { id: 7, label: "成品测试" },
+  ];
+
+  const pcbDefs = (
+    <>
+      <linearGradient id="pcb-green" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stopColor="#22c55e" stopOpacity="0.9" />
+        <stop offset="100%" stopColor="#16a34a" stopOpacity="0.9" />
+      </linearGradient>
+      <linearGradient id="copper" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stopColor="#f97316" stopOpacity="0.95" />
+        <stop offset="100%" stopColor="#c2410c" stopOpacity="0.95" />
+      </linearGradient>
+      <linearGradient id="fiberglass" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stopColor="#e2e8f0" />
+        <stop offset="100%" stopColor="#cbd5e1" />
+      </linearGradient>
+      <filter id="glow">
+        <feGaussianBlur stdDeviation="2.5" result="coloredBlur" />
+        <feMerge>
+          <feMergeNode in="coloredBlur" />
+          <feMergeNode in="SourceGraphic" />
+        </feMerge>
+      </filter>
+    </>
+  );
+
+  const renderStep = (s: number) => {
+    if (s === 0) return <StepRawMaterials />;
+    if (s === 1) return <StepCCLPress />;
+    if (s === 2) return <StepCoatPhotoresist />;
+    if (s === 3) return <StepExposure />;
+    if (s === 4) return <StepEtching />;
+    if (s === 5) return <StepDrilling />;
+    if (s === 6) return <StepPlating />;
+    return <StepTesting />;
+  };
+
+  return (
+    <IndustryAnimation
+      isLight={isLight}
+      title="PCB制造工艺动画"
+      steps={steps}
+      renderStep={renderStep}
+      extraDefs={pcbDefs}
+    />
+  );
+}
+
+// ─── PCB Cross-section base layers (shared across steps 2-8) ───
+// Coordinate system: viewBox="0 0 480 160"
+// CCL structure (after press):
+//   Top copper:    y=52, h=10
+//   Top prepreg:   y=62, h=6
+//   FR4 core:      y=68, h=20
+//   Bottom prepreg:y=88, h=6
+//   Bottom copper: y=94, h=10
+// All steps show this base; each step highlights its own operation above/below.
+
+function PCBBase({
+  showTopCopper = true,
+  showPhotoresist = false,
+  photoresistMaskLeft = 0,
+  photoresistMaskWidth = 0,
+}: {
+  showTopCopper?: boolean;
+  showPhotoresist?: boolean;
+  photoresistMaskLeft?: number;
+  photoresistMaskWidth?: number;
+}) {
+  return (
+    <g>
+      {showTopCopper && (
+        <rect
+          x="60"
+          y="52"
+          width="360"
+          height="10"
+          rx="1"
+          fill="url(#copper)"
+        />
+      )}
+      <rect
+        x="60"
+        y="62"
+        width="360"
+        height="6"
+        rx="0"
+        fill="#a78bfa"
+        opacity="0.5"
+      />
+      {/* FR4 core with weave lines */}
+      <rect
+        x="60"
+        y="68"
+        width="360"
+        height="20"
+        rx="0"
+        fill="url(#fiberglass)"
+      />
+      {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17].map(
+        (i) => (
+          <line
+            key={`v${i}`}
+            x1={65 + i * 20}
+            y1="68"
+            x2={65 + i * 20}
+            y2="88"
+            stroke="#94a3b8"
+            strokeWidth="0.5"
+            opacity="0.3"
+          />
+        ),
+      )}
+      {[0, 1, 2, 3].map((i) => (
+        <line
+          key={`h${i}`}
+          x1="60"
+          y1={71 + i * 6}
+          x2="420"
+          y2={71 + i * 6}
+          stroke="#94a3b8"
+          strokeWidth="0.5"
+          opacity="0.3"
+        />
+      ))}
+      <rect
+        x="60"
+        y="88"
+        width="360"
+        height="6"
+        rx="0"
+        fill="#a78bfa"
+        opacity="0.5"
+      />
+      <rect x="60" y="94" width="360" height="10" rx="1" fill="url(#copper)" />
+      {showPhotoresist && (
+        <rect
+          x="60"
+          y="42"
+          width="360"
+          height="9"
+          rx="1"
+          fill="#8b5cf6"
+          opacity="0.7"
+        />
+      )}
+    </g>
+  );
+}
+
+function PCBLabel({
+  x,
+  y,
+  text,
+  color,
+}: {
+  x: number;
+  y: number;
+  text: string;
+  color: string;
+}) {
+  return (
+    <text x={x} y={y} textAnchor="middle" fontSize="7.5" fill={color}>
+      {text}
+    </text>
+  );
+}
+
+function StepRawMaterials() {
+  return (
+    <g>
+      <text
+        x="240"
+        y="12"
+        textAnchor="middle"
+        fontSize="10"
+        fontWeight="700"
+        fill="#f97316"
+      >
+        所有原材料一览
+      </text>
+
+      {/* ── 左侧：CCL压合用材料（5层结构） ── */}
+      <text x="100" y="26" textAnchor="middle" fontSize="8" fill="#94a3b8">
+        CCL压合层叠
+      </text>
+
+      {/* 铜箔 top */}
+      <rect x="30" y="30" width="140" height="14" rx="2" fill="url(#copper)">
+        <animate
+          attributeName="opacity"
+          from="0"
+          to="1"
+          dur="0.3s"
+          fill="freeze"
+        />
+      </rect>
+      <text x="100" y="40" textAnchor="middle" fontSize="8" fill="#fff">
+        铜箔 Copper Foil
+      </text>
+
+      {/* 树脂 prepreg top */}
+      <rect
+        x="30"
+        y="46"
+        width="140"
+        height="10"
+        rx="1"
+        fill="#a78bfa"
+        opacity="0.75"
+      >
+        <animate
+          attributeName="opacity"
+          from="0"
+          to="0.75"
+          dur="0.3s"
+          begin="0.15s"
+          fill="freeze"
+        />
+      </rect>
+      <text x="100" y="54" textAnchor="middle" fontSize="7" fill="#fff">
+        环氧树脂 Prepreg
+      </text>
+
+      {/* 玻纤布 core */}
+      <rect
+        x="30"
+        y="58"
+        width="140"
+        height="22"
+        rx="2"
+        fill="url(#fiberglass)"
+      >
+        <animate
+          attributeName="opacity"
+          from="0"
+          to="1"
+          dur="0.3s"
+          begin="0.3s"
+          fill="freeze"
+        />
+      </rect>
+      {/* 玻纤纹路 */}
+      {[0, 1, 2, 3, 4, 5, 6].map((i) => (
+        <line
+          key={i}
+          x1={32 + i * 20}
+          y1="58"
+          x2={32 + i * 20}
+          y2="80"
+          stroke="#94a3b8"
+          strokeWidth="0.5"
+          opacity="0.4"
+        />
+      ))}
+      {[0, 1, 2].map((i) => (
+        <line
+          key={i}
+          x1="30"
+          y1={62 + i * 7}
+          x2="170"
+          y2={62 + i * 7}
+          stroke="#94a3b8"
+          strokeWidth="0.5"
+          opacity="0.4"
+        />
+      ))}
+      <text x="100" y="73" textAnchor="middle" fontSize="8" fill="#475569">
+        玻纤布 FR4 Core
+      </text>
+
+      {/* 树脂 prepreg bottom */}
+      <rect
+        x="30"
+        y="82"
+        width="140"
+        height="10"
+        rx="1"
+        fill="#a78bfa"
+        opacity="0.75"
+      >
+        <animate
+          attributeName="opacity"
+          from="0"
+          to="0.75"
+          dur="0.3s"
+          begin="0.45s"
+          fill="freeze"
+        />
+      </rect>
+      <text x="100" y="90" textAnchor="middle" fontSize="7" fill="#fff">
+        环氧树脂 Prepreg
+      </text>
+
+      {/* 铜箔 bottom */}
+      <rect x="30" y="94" width="140" height="14" rx="2" fill="url(#copper)">
+        <animate
+          attributeName="opacity"
+          from="0"
+          to="1"
+          dur="0.3s"
+          begin="0.6s"
+          fill="freeze"
+        />
+      </rect>
+      <text x="100" y="104" textAnchor="middle" fontSize="8" fill="#fff">
+        铜箔 Copper Foil
+      </text>
+
+      <text x="100" y="118" textAnchor="middle" fontSize="7" fill="#a78bfa">
+        ↑ 共5层 → 下一步高温压合
+      </text>
+
+      {/* ── 分隔线 ── */}
+      <line
+        x1="185"
+        y1="20"
+        x2="185"
+        y2="135"
+        stroke="#e2e8f0"
+        strokeWidth="0.8"
+        strokeDasharray="3,2"
+        opacity="0.5"
+      />
+
+      {/* ── 右侧：后续工序耗材/设备 ── */}
+      <text x="330" y="26" textAnchor="middle" fontSize="8" fill="#94a3b8">
+        后续工序耗材/设备
+      </text>
+
+      {/* 钻针 */}
+      <rect x="198" y="35" width="8" height="30" rx="2" fill="#64748b">
+        <animate
+          attributeName="opacity"
+          from="0"
+          to="1"
+          dur="0.3s"
+          begin="0.4s"
+          fill="freeze"
+        />
+      </rect>
+      <polygon points="198,65 206,65 202,75" fill="#475569">
+        <animate
+          attributeName="opacity"
+          from="0"
+          to="1"
+          dur="0.3s"
+          begin="0.4s"
+          fill="freeze"
+        />
+      </polygon>
+      <text x="230" y="48" fontSize="8" fill="#64748b">
+        钻针 / 刀具
+      </text>
+      <text x="230" y="58" fontSize="7" fill="#94a3b8">
+        钻孔工序使用
+      </text>
+
+      {/* 激光设备 */}
+      <rect
+        x="198"
+        y="82"
+        width="18"
+        height="22"
+        rx="2"
+        fill="#1e293b"
+        stroke="#3b82f6"
+        strokeWidth="1"
+      >
+        <animate
+          attributeName="opacity"
+          from="0"
+          to="1"
+          dur="0.3s"
+          begin="0.6s"
+          fill="freeze"
+        />
+      </rect>
+      <line
+        x1="207"
+        y1="104"
+        x2="207"
+        y2="118"
+        stroke="#fbbf24"
+        strokeWidth="2"
+        opacity="0.9"
+      >
+        <animate
+          attributeName="opacity"
+          values="0.4;1;0.4"
+          dur="0.8s"
+          repeatCount="indefinite"
+        />
+      </line>
+      <ellipse cx="207" cy="119" rx="4" ry="2" fill="#fbbf24" opacity="0.6">
+        <animate
+          attributeName="opacity"
+          values="0.3;0.8;0.3"
+          dur="0.8s"
+          repeatCount="indefinite"
+        />
+      </ellipse>
+      <text x="230" y="95" fontSize="8" fill="#3b82f6">
+        激光设备
+      </text>
+      <text x="230" y="105" fontSize="7" fill="#94a3b8">
+        钻孔/切割使用
+      </text>
+
+      {/* 化学药水烧杯 */}
+      <path
+        d="M285,35 L280,65 L300,65 L295,35 Z"
+        fill="#ef4444"
+        opacity="0.25"
+        stroke="#ef4444"
+        strokeWidth="1"
+      >
+        <animate
+          attributeName="opacity"
+          from="0"
+          to="0.25"
+          dur="0.3s"
+          begin="0.8s"
+          fill="freeze"
+        />
+      </path>
+      <rect
+        x="280"
+        y="65"
+        width="20"
+        height="4"
+        rx="1"
+        fill="#ef4444"
+        opacity="0.6"
+      />
+      <text x="283" y="52" fontSize="7" fill="#ef4444">
+        HCl
+      </text>
+      <path d="M285,35 L295,35" stroke="#ef4444" strokeWidth="1.5" />
+      <text x="310" y="48" fontSize="8" fill="#ef4444">
+        化学药水
+      </text>
+      <text x="310" y="58" fontSize="7" fill="#94a3b8">
+        蚀刻工序使用
+      </text>
+
+      {/* 光刻胶桶 */}
+      <rect
+        x="283"
+        y="78"
+        width="14"
+        height="20"
+        rx="2"
+        fill="#8b5cf6"
+        opacity="0.7"
+      >
+        <animate
+          attributeName="opacity"
+          from="0"
+          to="0.7"
+          dur="0.3s"
+          begin="1s"
+          fill="freeze"
+        />
+      </rect>
+      <rect
+        x="281"
+        y="76"
+        width="18"
+        height="5"
+        rx="1"
+        fill="#7c3aed"
+        opacity="0.8"
+      />
+      <text x="310" y="91" fontSize="8" fill="#8b5cf6">
+        光刻胶
+      </text>
+      <text x="310" y="101" fontSize="7" fill="#94a3b8">
+        曝光工序使用
+      </text>
+
+      <line
+        x1="20"
+        y1="142"
+        x2="460"
+        y2="142"
+        stroke="#334155"
+        strokeWidth="0.6"
+        opacity="0.6"
+      />
+      <text
+        x="240"
+        y="154"
+        textAnchor="middle"
+        fontSize="8"
+        fontWeight="600"
+        fill="#f97316"
+      >
+        为什么需要这些原材料？
+      </text>
+      <text x="240" y="166" textAnchor="middle" fontSize="7.5" fill="#94a3b8">
+        铜箔导电、玻纤布支撑骨架、树脂粘合绝缘——三者缺一不可。
+      </text>
+      <text x="240" y="178" textAnchor="middle" fontSize="7.5" fill="#94a3b8">
+        就像盖楼：铜是电线，玻纤是钢筋，树脂是水泥。
+      </text>
+    </g>
+  );
+}
+
+function StepCCLPress() {
+  return (
+    <g>
+      <text
+        x="240"
+        y="12"
+        textAnchor="middle"
+        fontSize="10"
+        fontWeight="700"
+        fill="#06b6d4"
+      >
+        CCL覆铜板压合
+      </text>
+
+      <rect
+        x="55"
+        y="38"
+        width="370"
+        height="10"
+        rx="2"
+        fill="#475569"
+        opacity="0.8"
+      >
+        <animate
+          attributeName="y"
+          from="2"
+          to="38"
+          dur="0.7s"
+          begin="0.9s"
+          fill="freeze"
+        />
+      </rect>
+      <text x="240" y="46" textAnchor="middle" fontSize="7.5" fill="#e2e8f0">
+        压板机 200°C / 30 kg/cm²
+      </text>
+
+      <rect x="60" y="52" width="360" height="10" rx="1" fill="url(#copper)">
+        <animate attributeName="y" from="10" to="52" dur="0.5s" fill="freeze" />
+      </rect>
+      <PCBLabel x={240} y={59} text="铜箔" color="#fff" />
+
+      <rect
+        x="60"
+        y="62"
+        width="360"
+        height="6"
+        rx="0"
+        fill="#a78bfa"
+        opacity="0.75"
+      >
+        <animate
+          attributeName="y"
+          from="26"
+          to="62"
+          dur="0.5s"
+          begin="0.15s"
+          fill="freeze"
+        />
+      </rect>
+      <PCBLabel x={240} y={67} text="Prepreg" color="#ede9fe" />
+
+      <rect
+        x="60"
+        y="68"
+        width="360"
+        height="20"
+        rx="0"
+        fill="url(#fiberglass)"
+      >
+        <animate
+          attributeName="y"
+          from="60"
+          to="68"
+          dur="0.4s"
+          begin="0.3s"
+          fill="freeze"
+        />
+      </rect>
+      {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17].map(
+        (i) => (
+          <line
+            key={`cv${i}`}
+            x1={65 + i * 20}
+            y1="68"
+            x2={65 + i * 20}
+            y2="88"
+            stroke="#94a3b8"
+            strokeWidth="0.5"
+            opacity="0.3"
+          />
+        ),
+      )}
+      {[0, 1, 2, 3].map((i) => (
+        <line
+          key={`ch${i}`}
+          x1="60"
+          y1={71 + i * 6}
+          x2="420"
+          y2={71 + i * 6}
+          stroke="#94a3b8"
+          strokeWidth="0.5"
+          opacity="0.3"
+        />
+      ))}
+      <PCBLabel x={240} y={80} text="FR4玻纤布芯层" color="#475569" />
+
+      <rect
+        x="60"
+        y="88"
+        width="360"
+        height="6"
+        rx="0"
+        fill="#a78bfa"
+        opacity="0.75"
+      >
+        <animate
+          attributeName="y"
+          from="106"
+          to="88"
+          dur="0.5s"
+          begin="0.15s"
+          fill="freeze"
+        />
+      </rect>
+      <PCBLabel x={240} y={93} text="Prepreg" color="#ede9fe" />
+
+      <rect x="60" y="94" width="360" height="10" rx="1" fill="url(#copper)">
+        <animate
+          attributeName="y"
+          from="136"
+          to="94"
+          dur="0.5s"
+          fill="freeze"
+        />
+      </rect>
+      <PCBLabel x={240} y={101} text="铜箔" color="#fff" />
+
+      <rect
+        x="55"
+        y="106"
+        width="370"
+        height="10"
+        rx="2"
+        fill="#475569"
+        opacity="0.8"
+      >
+        <animate
+          attributeName="y"
+          from="150"
+          to="106"
+          dur="0.7s"
+          begin="0.9s"
+          fill="freeze"
+        />
+      </rect>
+
+      <text x="240" y="126" textAnchor="middle" fontSize="8" fill="#f97316">
+        ↑ 高温高压压合 → 形成CCL覆铜板
+      </text>
+      <text x="240" y="138" textAnchor="middle" fontSize="7.5" fill="#94a3b8">
+        温度200°C · 压力30kg/cm² · 时长60min
+      </text>
+
+      <line
+        x1="20"
+        y1="148"
+        x2="460"
+        y2="148"
+        stroke="#334155"
+        strokeWidth="0.6"
+        opacity="0.6"
+      />
+      <text
+        x="240"
+        y="160"
+        textAnchor="middle"
+        fontSize="8"
+        fontWeight="600"
+        fill="#06b6d4"
+      >
+        为什么要压合？
+      </text>
+      <text x="240" y="172" textAnchor="middle" fontSize="7.5" fill="#94a3b8">
+        散的材料没法用，压合后才是一块硬邦邦的"基板"——后续所有工序都在它上面做。
+      </text>
+      <text x="240" y="184" textAnchor="middle" fontSize="7.5" fill="#94a3b8">
+        相当于把面粉、水、酵母揉成面团，之后才能继续加工。
+      </text>
+    </g>
+  );
+}
+
+function StepCoatPhotoresist() {
+  return (
+    <g>
+      <text
+        x="240"
+        y="12"
+        textAnchor="middle"
+        fontSize="10"
+        fontWeight="700"
+        fill="#8b5cf6"
+      >
+        涂布光刻胶
+      </text>
+
+      <PCBBase showTopCopper={true} />
+
+      <rect
+        x="60"
+        y="42"
+        width="360"
+        height="9"
+        rx="1"
+        fill="#8b5cf6"
+        opacity="0.85"
+      >
+        <animate
+          attributeName="width"
+          from="0"
+          to="360"
+          dur="0.8s"
+          fill="freeze"
+        />
+        <animate
+          attributeName="opacity"
+          from="0.3"
+          to="0.85"
+          dur="0.8s"
+          fill="freeze"
+        />
+      </rect>
+      <text x="240" y="49" textAnchor="middle" fontSize="7.5" fill="#ede9fe">
+        光刻胶 Photoresist
+      </text>
+
+      <rect
+        x="415"
+        y="30"
+        width="22"
+        height="30"
+        rx="3"
+        fill="#1e293b"
+        stroke="#7c3aed"
+        strokeWidth="1"
+      >
+        <animate
+          attributeName="x"
+          from="60"
+          to="415"
+          dur="0.8s"
+          fill="freeze"
+        />
+      </rect>
+      <line x1="426" y1="60" x2="426" y2="52" stroke="#a78bfa" strokeWidth="2">
+        <animate
+          attributeName="x1"
+          from="61"
+          to="426"
+          dur="0.8s"
+          fill="freeze"
+        />
+        <animate
+          attributeName="x2"
+          from="61"
+          to="426"
+          dur="0.8s"
+          fill="freeze"
+        />
+      </line>
+      <text x="395" y="28" fontSize="7.5" fill="#a78bfa">
+        旋涂机
+      </text>
+
+      <text x="240" y="126" textAnchor="middle" fontSize="7.5" fill="#94a3b8">
+        厚度精度 ±0.5μm · 旋涂后烘烤固化
+      </text>
+
+      <line
+        x1="20"
+        y1="136"
+        x2="460"
+        y2="136"
+        stroke="#334155"
+        strokeWidth="0.6"
+        opacity="0.6"
+      />
+      <text
+        x="240"
+        y="148"
+        textAnchor="middle"
+        fontSize="8"
+        fontWeight="600"
+        fill="#8b5cf6"
+      >
+        为什么要涂光刻胶？
+      </text>
+      <text x="240" y="160" textAnchor="middle" fontSize="7.5" fill="#94a3b8">
+        光刻胶遇到紫外线会变硬——涂上它是为了用"光"来画出电路图案，
+      </text>
+      <text x="240" y="172" textAnchor="middle" fontSize="7.5" fill="#94a3b8">
+        没被光照到的部分之后会被洗掉，形成保护掩膜。就像晒蓝图一样。
+      </text>
+    </g>
+  );
+}
+
+function StepExposure() {
+  return (
+    <g>
+      <text
+        x="240"
+        y="12"
+        textAnchor="middle"
+        fontSize="10"
+        fontWeight="700"
+        fill="#fbbf24"
+      >
+        UV曝光 → 线路图形转移
+      </text>
+
+      <PCBBase showTopCopper={true} showPhotoresist={true} />
+
+      <rect
+        x="60"
+        y="30"
+        width="360"
+        height="11"
+        rx="1"
+        fill="#1d4ed8"
+        opacity="0.55"
+      />
+      {[90, 140, 200, 265, 330, 375].map((x, i) => (
+        <rect
+          key={`mask${i}`}
+          x={x}
+          y="30"
+          width={i % 2 === 0 ? 22 : 32}
+          height="11"
+          fill="#0f172a"
+          opacity="0.9"
+        />
+      ))}
+      <text x="240" y="28" textAnchor="middle" fontSize="7.5" fill="#93c5fd">
+        菲林掩膜
+      </text>
+
+      <rect
+        x="60"
+        y="16"
+        width="360"
+        height="8"
+        rx="2"
+        fill="#fbbf24"
+        opacity="0.85"
+      />
+      <text x="240" y="22" textAnchor="middle" fontSize="7" fill="#fff">
+        UV光源
+      </text>
+
+      {[90, 130, 175, 220, 270, 315, 360, 400].map((x, i) => (
+        <line
+          key={`beam${i}`}
+          x1={x}
+          y1="24"
+          x2={x}
+          y2="30"
+          stroke="#fde68a"
+          strokeWidth="1.5"
+          filter="url(#glow)"
+        >
+          <animate
+            attributeName="opacity"
+            values="0.3;1;0.3"
+            dur="0.9s"
+            repeatCount="indefinite"
+            begin={`${i * 0.1}s`}
+          />
+        </line>
+      ))}
+
+      <text x="240" y="118" textAnchor="middle" fontSize="7.5" fill="#fbbf24">
+        曝光区域光刻胶发生光化学反应
+      </text>
+      <text x="240" y="130" textAnchor="middle" fontSize="7.5" fill="#94a3b8">
+        分辨率可达 2μm线宽 · 对准精度 ±1μm
+      </text>
+
+      <line
+        x1="20"
+        y1="140"
+        x2="460"
+        y2="140"
+        stroke="#334155"
+        strokeWidth="0.6"
+        opacity="0.6"
+      />
+      <text
+        x="240"
+        y="152"
+        textAnchor="middle"
+        fontSize="8"
+        fontWeight="600"
+        fill="#fbbf24"
+      >
+        为什么要曝光？
+      </text>
+      <text x="240" y="164" textAnchor="middle" fontSize="7.5" fill="#94a3b8">
+        用紫外线把"电路图纸"（菲林掩膜）投影到光刻胶上——被光照到的区域变硬留下，
+      </text>
+      <text x="240" y="176" textAnchor="middle" fontSize="7.5" fill="#94a3b8">
+        没被照到的软胶再用显影液洗掉，铜线路轮廓就被"画"出来了。
+      </text>
+    </g>
+  );
+}
+
+function StepEtching() {
+  const traces = [
+    { x: 60, w: 55 },
+    { x: 135, w: 70 },
+    { x: 225, w: 50 },
+    { x: 295, w: 65 },
+    { x: 380, w: 40 },
+  ];
+  const gaps = [
+    { x: 115, w: 20 },
+    { x: 205, w: 20 },
+    { x: 275, w: 20 },
+    { x: 360, w: 20 },
+  ];
+  return (
+    <g>
+      <text
+        x="240"
+        y="12"
+        textAnchor="middle"
+        fontSize="10"
+        fontWeight="700"
+        fill="#ef4444"
+      >
+        蚀刻 → 线路成型
+      </text>
+
+      <PCBBase showTopCopper={false} />
+
+      {traces.map((t, i) => (
+        <rect
+          key={`tr${i}`}
+          x={t.x}
+          y="52"
+          width={t.w}
+          height="10"
+          rx="1"
+          fill="url(#copper)"
+        />
+      ))}
+
+      {traces.map((t, i) => (
+        <rect
+          key={`pr${i}`}
+          x={t.x}
+          y="42"
+          width={t.w}
+          height="10"
+          rx="1"
+          fill="#8b5cf6"
+          opacity="0.75"
+        />
+      ))}
+
+      {gaps.map((g, i) => (
+        <rect
+          key={`gap${i}`}
+          x={g.x}
+          y="52"
+          width={g.w}
+          height="10"
+          fill="#ef4444"
+          opacity="0.4"
+        >
+          <animate
+            attributeName="opacity"
+            values="0.4;0;0.4"
+            dur="0.9s"
+            repeatCount="indefinite"
+            begin={`${i * 0.22}s`}
+          />
+          <animate
+            attributeName="height"
+            values="10;0;10"
+            dur="0.9s"
+            repeatCount="indefinite"
+            begin={`${i * 0.22}s`}
+          />
+        </rect>
+      ))}
+
+      <text x="240" y="38" textAnchor="middle" fontSize="7" fill="#a78bfa">
+        光刻胶保护罩（不被腐蚀）
+      </text>
+      <text x="240" y="118" textAnchor="middle" fontSize="7.5" fill="#ef4444">
+        ← 间隙铜箔被蚀刻液溶掉，线路铜箔被光刻胶护住
+      </text>
+      <text x="240" y="130" textAnchor="middle" fontSize="7.5" fill="#94a3b8">
+        蚀刻后再"去膜"洗掉光刻胶，露出干净铜线路
+      </text>
+
+      <line
+        x1="20"
+        y1="142"
+        x2="460"
+        y2="142"
+        stroke="#334155"
+        strokeWidth="0.6"
+        opacity="0.6"
+      />
+      <text
+        x="240"
+        y="154"
+        textAnchor="middle"
+        fontSize="8"
+        fontWeight="600"
+        fill="#ef4444"
+      >
+        为什么要蚀刻？
+      </text>
+      <text x="240" y="166" textAnchor="middle" fontSize="7.5" fill="#94a3b8">
+        铜箔整层铺满，蚀刻就是把"不需要的铜"用化学液腐蚀溶解掉，
+      </text>
+      <text x="240" y="178" textAnchor="middle" fontSize="7.5" fill="#94a3b8">
+        只留下有光刻胶保护的那部分——那才是真正的电路线路。
+      </text>
+    </g>
+  );
+}
+
+function StepDrilling() {
+  const viaXs = [140, 200, 260, 320];
+  const traces = [
+    { x: 60, w: 55 },
+    { x: 135, w: 70 },
+    { x: 225, w: 50 },
+    { x: 295, w: 65 },
+    { x: 380, w: 40 },
+  ];
+  return (
+    <g>
+      <text
+        x="240"
+        y="12"
+        textAnchor="middle"
+        fontSize="10"
+        fontWeight="700"
+        fill="#fbbf24"
+      >
+        激光钻孔 → 层间通道
+      </text>
+
+      <PCBBase showTopCopper={false} />
+
+      {traces.map((t, i) => (
+        <rect
+          key={`tr${i}`}
+          x={t.x}
+          y="52"
+          width={t.w}
+          height="10"
+          rx="1"
+          fill="url(#copper)"
+        />
+      ))}
+
+      {viaXs.map((x, i) => (
+        <g key={`via${i}`}>
+          <rect
+            x={x - 3}
+            y="18"
+            width="6"
+            height="28"
+            rx="2"
+            fill={i === 1 ? "#fbbf24" : "#64748b"}
+            opacity="0.85"
+          >
+            {i === 1 && (
+              <animate
+                attributeName="y"
+                values="6;18;6"
+                dur="1.1s"
+                repeatCount="indefinite"
+              />
+            )}
+          </rect>
+          {i === 1 && (
+            <circle cx={x} cy="46" r="3.5" fill="#fbbf24" filter="url(#glow)">
+              <animate
+                attributeName="cy"
+                values="34;46;34"
+                dur="1.1s"
+                repeatCount="indefinite"
+              />
+            </circle>
+          )}
+
+          <rect
+            x={x - 3}
+            y="52"
+            width="6"
+            height="52"
+            rx="1"
+            fill="#0f172a"
+            opacity="0.75"
+          >
+            <animate
+              attributeName="opacity"
+              from="0"
+              to="0.75"
+              dur="0.4s"
+              begin={`${0.3 + i * 0.15}s`}
+              fill="freeze"
+            />
+          </rect>
+        </g>
+      ))}
+
+      <text x="240" y="120" textAnchor="middle" fontSize="7.5" fill="#fbbf24">
+        激光钻孔机 精度 ±25μm
+      </text>
+      <text x="240" y="132" textAnchor="middle" fontSize="7.5" fill="#94a3b8">
+        孔径最小 0.1mm · 40层板需钻数万孔
+      </text>
+
+      <line
+        x1="20"
+        y1="142"
+        x2="460"
+        y2="142"
+        stroke="#334155"
+        strokeWidth="0.6"
+        opacity="0.6"
+      />
+      <text
+        x="240"
+        y="154"
+        textAnchor="middle"
+        fontSize="8"
+        fontWeight="600"
+        fill="#fbbf24"
+      >
+        为什么要钻孔？
+      </text>
+      <text x="240" y="166" textAnchor="middle" fontSize="7.5" fill="#94a3b8">
+        PCB有很多层，上下层的电路需要"打通"才能连通电信号。
+      </text>
+      <text x="240" y="178" textAnchor="middle" fontSize="7.5" fill="#94a3b8">
+        钻出的小孔就是层与层之间的"电梯井"，之后填铜才能导电。
+      </text>
+    </g>
+  );
+}
+
+function StepPlating() {
+  const viaXs = [140, 200, 260, 320];
+  const traces = [
+    { x: 60, w: 55 },
+    { x: 135, w: 70 },
+    { x: 225, w: 50 },
+    { x: 295, w: 65 },
+    { x: 380, w: 40 },
+  ];
+  return (
+    <g>
+      <text
+        x="240"
+        y="12"
+        textAnchor="middle"
+        fontSize="10"
+        fontWeight="700"
+        fill="#f97316"
+      >
+        电镀铜 → 层间导通
+      </text>
+
+      <PCBBase showTopCopper={false} />
+
+      {traces.map((t, i) => (
+        <rect
+          key={`tr${i}`}
+          x={t.x}
+          y="52"
+          width={t.w}
+          height="10"
+          rx="1"
+          fill="url(#copper)"
+        />
+      ))}
+
+      {viaXs.map((x, i) => (
+        <g key={`via${i}`}>
+          <rect
+            x={x - 3}
+            y="52"
+            width="6"
+            height="52"
+            rx="1"
+            fill="#0f172a"
+            opacity="0.6"
+          />
+          <rect
+            x={x - 3}
+            y="52"
+            width="6"
+            height="52"
+            rx="1"
+            fill="#f97316"
+            opacity="0.9"
+          >
+            <animate
+              attributeName="height"
+              from="0"
+              to="52"
+              dur="0.9s"
+              fill="freeze"
+              begin={`${i * 0.2}s`}
+            />
+            <animate
+              attributeName="y"
+              from="104"
+              to="52"
+              dur="0.9s"
+              fill="freeze"
+              begin={`${i * 0.2}s`}
+            />
+          </rect>
+          <ellipse cx={x} cy="52" rx="3" ry="1.5" fill="#fbbf24" opacity="0.7">
+            <animate
+              attributeName="opacity"
+              values="0.4;1;0.4"
+              dur="1s"
+              repeatCount="indefinite"
+              begin={`${i * 0.2}s`}
+            />
+          </ellipse>
+        </g>
+      ))}
+
+      <text x="240" y="120" textAnchor="middle" fontSize="7.5" fill="#f97316">
+        电解铜沉积 · 电流密度 15–25 A/dm²
+      </text>
+      <text x="240" y="132" textAnchor="middle" fontSize="7.5" fill="#22c55e">
+        铜厚 ≥ 25μm → 通孔导通可靠
+      </text>
+
+      <line
+        x1="20"
+        y1="142"
+        x2="460"
+        y2="142"
+        stroke="#334155"
+        strokeWidth="0.6"
+        opacity="0.6"
+      />
+      <text
+        x="240"
+        y="154"
+        textAnchor="middle"
+        fontSize="8"
+        fontWeight="600"
+        fill="#f97316"
+      >
+        为什么要电镀铜？
+      </text>
+      <text x="240" y="166" textAnchor="middle" fontSize="7.5" fill="#94a3b8">
+        钻出的孔只是空洞，无法导电。通电后铜离子会沉积在孔壁，
+      </text>
+      <text x="240" y="178" textAnchor="middle" fontSize="7.5" fill="#94a3b8">
+        像给管道内壁镀上铜衬，上下层才真正"接通"。
+      </text>
+    </g>
+  );
+}
+
+function StepTesting() {
+  const viaXs = [140, 200, 260, 320];
+  const traces = [
+    { x: 60, w: 55 },
+    { x: 135, w: 70 },
+    { x: 225, w: 50 },
+    { x: 295, w: 65 },
+    { x: 380, w: 40 },
+  ];
+  const probeXs = [87, 170, 247, 327, 400];
+  return (
+    <g>
+      <text
+        x="240"
+        y="12"
+        textAnchor="middle"
+        fontSize="10"
+        fontWeight="700"
+        fill="#22c55e"
+      >
+        成品测试 → 出货
+      </text>
+
+      <PCBBase showTopCopper={false} />
+
+      {traces.map((t, i) => (
+        <rect
+          key={`tr${i}`}
+          x={t.x}
+          y="52"
+          width={t.w}
+          height="10"
+          rx="1"
+          fill="url(#copper)"
+        />
+      ))}
+
+      {viaXs.map((x, i) => (
+        <rect
+          key={`via${i}`}
+          x={x - 3}
+          y="52"
+          width="6"
+          height="52"
+          rx="1"
+          fill="#f97316"
+          opacity="0.9"
+        />
+      ))}
+
+      <rect
+        x="60"
+        y="42"
+        width="360"
+        height="10"
+        rx="1"
+        fill="url(#pcb-green)"
+        opacity="0.85"
+      >
+        <animate
+          attributeName="opacity"
+          from="0"
+          to="0.85"
+          dur="0.6s"
+          fill="freeze"
+        />
+      </rect>
+      <text x="240" y="49" textAnchor="middle" fontSize="7" fill="#fff">
+        阻焊层 Solder Mask
+      </text>
+
+      <rect
+        x="60"
+        y="104"
+        width="360"
+        height="6"
+        rx="1"
+        fill="url(#pcb-green)"
+        opacity="0.8"
+      />
+
+      {probeXs.map((x, i) => (
+        <g key={`probe${i}`}>
+          <line
+            x1={x}
+            y1="20"
+            x2={x}
+            y2="42"
+            stroke={i % 2 === 0 ? "#22c55e" : "#ef4444"}
+            strokeWidth="1.5"
+          >
+            <animate
+              attributeName="y2"
+              values="20;42;20"
+              dur="0.65s"
+              repeatCount="indefinite"
+              begin={`${i * 0.13}s`}
+            />
+          </line>
+          <circle
+            cx={x}
+            cy="20"
+            r="3"
+            fill={i % 2 === 0 ? "#22c55e" : "#ef4444"}
+          >
+            <animate
+              attributeName="cy"
+              values="14;20;14"
+              dur="0.65s"
+              repeatCount="indefinite"
+              begin={`${i * 0.13}s`}
+            />
+          </circle>
+        </g>
+      ))}
+
+      <text x="240" y="120" textAnchor="middle" fontSize="7.5" fill="#22c55e">
+        AOI光学检测 + 飞针测试
+      </text>
+      <text x="240" y="132" textAnchor="middle" fontSize="7.5" fill="#94a3b8">
+        40层AI服务器PCB良率目标 &gt;99.5%
+      </text>
+
+      <line
+        x1="20"
+        y1="142"
+        x2="460"
+        y2="142"
+        stroke="#334155"
+        strokeWidth="0.6"
+        opacity="0.6"
+      />
+      <text
+        x="240"
+        y="154"
+        textAnchor="middle"
+        fontSize="8"
+        fontWeight="600"
+        fill="#22c55e"
+      >
+        为什么要测试？
+      </text>
+      <text x="240" y="166" textAnchor="middle" fontSize="7.5" fill="#94a3b8">
+        一块PCB有数万条线路，任何一处断路或短路都会让整台服务器报废。
+      </text>
+      <text x="240" y="178" textAnchor="middle" fontSize="7.5" fill="#94a3b8">
+        飞针逐点探测，相当于给每根"血管"做一次通断体检再出货。
+      </text>
+    </g>
   );
 }

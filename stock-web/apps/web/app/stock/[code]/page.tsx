@@ -233,10 +233,19 @@ export default function StockDetailPage() {
   const searchParams = useSearchParams();
   const code = params.code as string;
   const fromPath = searchParams.get("from") ?? null;
+  const fromTab = searchParams.get("tab") ?? null;
+  const fromNode = searchParams.get("node") ?? null;
   const fromIndustryId = fromPath?.match(/^\/industry\/(.+)$/)?.[1] ?? null;
   const fromLabel = fromIndustryId
     ? (INDUSTRY_LABELS[fromIndustryId] ?? fromIndustryId)
     : null;
+  const backUrl = (() => {
+    if (!fromPath) return "/stock/search";
+    const parts: string[] = [];
+    if (fromTab) parts.push(`tab=${fromTab}`);
+    if (fromNode) parts.push(`node=${fromNode}`);
+    return parts.length > 0 ? `${fromPath}?${parts.join("&")}` : fromPath;
+  })();
 
   const [quote, setQuote] = useState<QuoteData>(DEFAULT_QUOTE);
   const [klineData, setKlineData] = useState<KLineBar[]>(() =>
@@ -457,7 +466,7 @@ export default function StockDetailPage() {
       {/* Top toolbar */}
       <div className="flex items-center gap-1 px-3 py-1.5 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] shrink-0 overflow-x-auto">
         <button
-          onClick={() => router.push(fromPath ?? "/stock/search")}
+          onClick={() => router.push(backUrl)}
           className="flex items-center gap-1 text-[var(--text-tertiary)] hover:text-[var(--text-primary)] mr-2 shrink-0"
         >
           <ArrowLeft size={13} />

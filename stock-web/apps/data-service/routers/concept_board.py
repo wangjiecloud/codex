@@ -85,18 +85,22 @@ def sync_concept_boards() -> int:
                 db.execute(stmt)
                 count += 1
             db.commit()
-            print(
-                f"[concept_board] synced {count} boards at {datetime.now().strftime('%H:%M:%S')}"
-            )
+            from routers.system import sched_log
+
+            sched_log("success", f"概念板块同步完成，共 {count} 条")
             return count
         except Exception as e:
             db.rollback()
-            print(f"[concept_board] DB error: {e}")
+            from routers.system import sched_log
+
+            sched_log("error", f"概念板块同步DB错误: {e}")
             return 0
         finally:
             db.close()
     except Exception as e:
-        print(f"[concept_board] fetch error: {e}")
+        from routers.system import sched_log
+
+        sched_log("error", f"概念板块同步失败: {e}")
         return 0
     finally:
         with _sync_lock:

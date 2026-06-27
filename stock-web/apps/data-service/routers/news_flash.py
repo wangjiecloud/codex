@@ -170,7 +170,9 @@ def sync_news_flash() -> int:
     for t in threads:
         t.join()
     total = sum(results.values())
-    print(f"[news_flash] all categories synced: {total} total items")
+    from routers.system import sched_log
+
+    sched_log("success", f"快讯同步完成，新增 {total} 条")
     return total
 
 

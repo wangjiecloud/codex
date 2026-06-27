@@ -92,28 +92,21 @@ export default function IndustryPage() {
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    fetch("http://localhost:8000/api/industry/list")
-      .then((r) => r.json())
-      .then((data: { industries: Industry[] }) => {
-        setIndustries(data.industries);
-      })
-      .catch(() => {});
-  }, []);
-
-  useEffect(() => {
     Promise.all([
+      fetch("http://localhost:8000/api/industry/list").then((r) => r.json()),
       fetch("http://localhost:8000/api/industry/stocks").then((r) => r.json()),
       fetch("http://localhost:8000/api/industry/stock-industry-map").then((r) =>
         r.json(),
       ),
-      fetch("http://localhost:8000/api/industry/list").then((r) => r.json()),
     ])
       .then(
-        ([quotesData, mappingData, listData]: [
+        ([listData, quotesData, mappingData]: [
+          { industries: Industry[] },
           { quotes: Record<string, { code: string; name: string }> },
           { mapping: Record<string, string[]> },
-          { industries: Industry[] },
         ]) => {
+          setIndustries(listData.industries);
+
           const industryById = Object.fromEntries(
             listData.industries.map((i) => [i.id, i]),
           );
@@ -468,7 +461,18 @@ export default function IndustryPage() {
               }}
             >
               <button
-                onClick={() => router.push(`/industry/${company.id}`)}
+                onClick={() => {
+                  const exists = industries.some(
+                    (ind) => ind.id === company.id,
+                  );
+                  if (exists) {
+                    router.push(`/industry/${company.id}`);
+                  } else {
+                    alert(
+                      `「${company.name}」企业供应链图谱正在建设中，敬请期待`,
+                    );
+                  }
+                }}
                 className="w-full p-5 text-left"
               >
                 <div className="flex items-start justify-between">

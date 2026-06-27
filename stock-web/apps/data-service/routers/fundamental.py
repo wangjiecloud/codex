@@ -1,7 +1,7 @@
 import json
-from fastapi import APIRouter, HTTPException, Depends
-from sqlalchemy.orm import Session
-from db import get_db, StockFundamental
+from fastapi import APIRouter, HTTPException
+from fastapi.concurrency import run_in_threadpool
+from db import SessionLocal, StockFundamental
 
 router = APIRouter()
 
@@ -27,8 +27,17 @@ _KEY_MAP = {
 
 
 @router.get("/{code}")
-async def get_fundamental(code: str, db: Session = Depends(get_db)):
-    row = db.query(StockFundamental).filter(StockFundamental.code == code).first()
+async def get_fundamental(code: str):
+    def _fetch():
+        db = SessionLocal()
+        try:
+            return (
+                db.query(StockFundamental).filter(StockFundamental.code == code).first()
+            )
+        finally:
+            db.close()
+
+    row = await run_in_threadpool(_fetch)
     if not row:
         raise HTTPException(status_code=404, detail=f"No fundamental data for {code}")
 

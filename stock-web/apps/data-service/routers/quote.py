@@ -1,32 +1,44 @@
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
+from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from datetime import datetime, date, timedelta
 
-from db import get_db, SessionLocal, StockQuote, StockMeta
+from db import SessionLocal, StockQuote, StockMeta
 from bs_session import get_bs, reset_bs
 
 router = APIRouter()
 
+_quote_refresh_lock: set[str] = set()
+_QUOTE_STALE_HOURS = 24
+
 
 @router.get("/search")
-async def search_stocks(
-    q: str = Query("", description="股票代码或名称关键字"),
-    db: Session = Depends(get_db),
-):
+async def search_stocks(q: str = Query("", description="股票代码或名称关键字")):
     if not q.strip():
         return {"results": []}
     keyword = q.strip().lower()
-    rows = (
-        db.query(StockMeta.code, StockMeta.name).filter(StockMeta.market == "A股").all()
-    )
-    results = [
-        {"code": r.code, "name": r.name}
-        for r in rows
-        if keyword in r.code.lower() or keyword in (r.name or "").lower()
-    ]
-    results.sort(key=lambda x: (not x["code"].startswith(q.strip()), x["code"]))
-    return {"results": results[:20]}
+
+    def _fetch():
+        db = SessionLocal()
+        try:
+            rows = (
+                db.query(StockMeta.code, StockMeta.name)
+                .filter(StockMeta.market == "A股")
+                .all()
+            )
+            results = [
+                {"code": r.code, "name": r.name}
+                for r in rows
+                if keyword in r.code.lower() or keyword in (r.name or "").lower()
+            ]
+            results.sort(key=lambda x: (not x["code"].startswith(q.strip()), x["code"]))
+            return {"results": results[:20]}
+        finally:
+            db.close()
+
+    return await run_in_threadpool(_fetch)
 
 
 def get_stock_name(code: str) -> str:
@@ -167,68 +179,68 @@ def _fetch_and_cache_quote(code: str) -> dict:
 
 
 @router.get("/{code}")
-async def get_quote(code: str, db: Session = Depends(get_db)):
-    row = db.query(StockQuote).filter(StockQuote.code == code).first()
+async def get_quote(code: str, background_tasks: BackgroundTasks):
+    def _read_cached():
+        db = SessionLocal()
+        try:
+            return db.query(StockQuote).filter(StockQuote.code == code).first()
+        finally:
+            db.close()
+
+    row = await run_in_threadpool(_read_cached)
+
+    def _row_to_dict(r: StockQuote, warning: str | None = None) -> dict:
+        d = {
+            "code": r.code,
+            "name": r.name,
+            "price": r.price,
+            "change": r.change,
+            "changeAmt": r.change_amt,
+            "open": r.open,
+            "prevClose": r.prev_close,
+            "high": r.high,
+            "low": r.low,
+            "volume": r.volume,
+            "turnover": r.turnover,
+            "marketCap": r.market_cap,
+            "pe": r.pe,
+            "pb": r.pb,
+            "turnoverRate": r.turnover_rate,
+            "amplitude": r.amplitude,
+            "updatedAt": r.updated_at.isoformat() if r.updated_at else None,
+        }
+        if warning:
+            d["cacheWarning"] = warning
+        return d
+
+    def _needs_refresh(r: StockQuote) -> bool:
+        if r.price == 0 or r.updated_at is None:
+            return True
+        age_hours = (datetime.utcnow() - r.updated_at).total_seconds() / 3600
+        return age_hours >= _QUOTE_STALE_HOURS
+
+    def _bg_refresh(c: str) -> None:
+        if c in _quote_refresh_lock:
+            return
+        _quote_refresh_lock.add(c)
+        try:
+            _fetch_and_cache_quote(c)
+        except Exception:
+            pass
+        finally:
+            _quote_refresh_lock.discard(c)
+
+    if row and not _needs_refresh(row):
+        return JSONResponse(content=_row_to_dict(row))
+
+    if row and row.price > 0:
+        background_tasks.add_task(_bg_refresh, code)
+        return JSONResponse(
+            content=_row_to_dict(row, "数据可能不是最新，正在更新中...")
+        )
+
     if row:
-        cache_age_hours = (
-            (datetime.utcnow() - row.updated_at).total_seconds() / 3600
-            if row.updated_at
-            else 9999
+        return JSONResponse(
+            content=_row_to_dict(row, "数据可能不是最新，正在更新中...")
         )
-
-        # 如果缓存较新(24小时内)且价格有效，直接返回
-        if cache_age_hours < 24 and row.price > 0:
-            return {
-                "code": row.code,
-                "name": row.name,
-                "price": row.price,
-                "change": row.change,
-                "changeAmt": row.change_amt,
-                "open": row.open,
-                "prevClose": row.prev_close,
-                "high": row.high,
-                "low": row.low,
-                "volume": row.volume,
-                "turnover": row.turnover,
-                "marketCap": row.market_cap,
-                "pe": row.pe,
-                "pb": row.pb,
-                "turnoverRate": row.turnover_rate,
-                "amplitude": row.amplitude,
-                "updatedAt": row.updated_at.isoformat() if row.updated_at else None,
-            }
-
-    # 尝试获取最新数据
-    try:
-        return _fetch_and_cache_quote(code)
-    except (RuntimeError, HTTPException) as e:
-        # 如果baostock失败但有旧缓存，返回旧缓存
-        if row:
-            print(
-                f"[quote] baostock failed for {code}, returning stale cache ({cache_age_hours:.1f}h old)"
-            )
-            return {
-                "code": row.code,
-                "name": row.name,
-                "price": row.price,
-                "change": row.change,
-                "changeAmt": row.change_amt,
-                "open": row.open,
-                "prevClose": row.prev_close,
-                "high": row.high,
-                "low": row.low,
-                "volume": row.volume,
-                "turnover": row.turnover,
-                "marketCap": row.market_cap,
-                "pe": row.pe,
-                "pb": row.pb,
-                "turnoverRate": row.turnover_rate,
-                "amplitude": row.amplitude,
-                "updatedAt": row.updated_at.isoformat() if row.updated_at else None,
-                "cacheWarning": "数据可能不是最新，正在更新中...",
-            }
-        # 无缓存且baostock失败，返回503
-        raise HTTPException(
-            status_code=503,
-            detail="数据服务暂时不可用，请稍后重试。",
-        )
+    raise HTTPException(status_code=404, detail=f"No quote data for {code}")

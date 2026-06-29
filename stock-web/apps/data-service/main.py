@@ -108,6 +108,7 @@ def _warmup_caches():
 @app.on_event("startup")
 def startup():
     init_db()
+    industry.seed_company_chains()
 
     threading.Thread(target=_warmup_caches, daemon=True).start()
 

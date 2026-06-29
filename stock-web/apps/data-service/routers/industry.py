@@ -33,6 +33,51 @@ _INDUSTRY_STOCKS_TTL = 30
 _INDUSTRY_GRAPH_TTL = 300
 _INDUSTRY_MAP_TTL = 300
 
+_COMPANY_CHAIN_SEEDS = [
+    {
+        "industry_id": "nvidia_chain",
+        "name": "英伟达",
+        "icon": "🟢",
+        "description": "英伟达GPU/AI加速器相关A股产业链：受益于NVDA算力需求的上下游国内企业",
+        "representatives": json.dumps(
+            ["中际旭创", "工业富联", "沪电股份", "长电科技"], ensure_ascii=False
+        ),
+        "company_count": 0,
+        "last_analyzed": "未分析",
+        "sort_order": 100,
+        "tab": "company",
+    },
+    {
+        "industry_id": "changxin_chain",
+        "name": "长鑫存储",
+        "icon": "🔵",
+        "description": "长鑫存储DRAM自主化相关A股产业链：设备/材料/封测等国产替代供应链",
+        "representatives": json.dumps(
+            ["北方华创", "中微公司", "沪硅产业", "拓荆科技"], ensure_ascii=False
+        ),
+        "company_count": 0,
+        "last_analyzed": "未分析",
+        "sort_order": 101,
+        "tab": "company",
+    },
+]
+
+
+def seed_company_chains() -> None:
+    db = SessionLocal()
+    try:
+        for seed in _COMPANY_CHAIN_SEEDS:
+            exists = (
+                db.query(IndustryList)
+                .filter(IndustryList.industry_id == seed["industry_id"])
+                .first()
+            )
+            if not exists:
+                db.add(IndustryList(**seed))
+        db.commit()
+    finally:
+        db.close()
+
 
 def _get_industry_meta(db: Session) -> dict[str, dict]:
     """Load industry meta (title/subtitle/layerLabels) from DB."""
@@ -729,6 +774,7 @@ async def get_industry_list():
                         "companyCount": r.company_count or 0,
                         "lastAnalyzed": r.last_analyzed,
                         "representatives": json.loads(r.representatives or "[]"),
+                        "tab": r.tab or "ai_infra",
                     }
                     for r in rows
                 ]

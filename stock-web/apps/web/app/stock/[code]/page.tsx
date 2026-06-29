@@ -600,6 +600,11 @@ export default function StockDetailPage() {
                         </span>
                       );
                     })()}
+                    {klineData.length > 0 && (
+                      <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-[var(--bg-tertiary)] text-[var(--text-tertiary)] border border-[var(--border-color)]">
+                        {klineData[klineData.length - 1].time}
+                      </span>
+                    )}
                   </>
                 )}
               </div>

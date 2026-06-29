@@ -3,7 +3,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Plus,
   ChevronRight,
   Factory,
   Cpu,
@@ -15,36 +14,6 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-interface CompanyEntry {
-  id: string;
-  name: string;
-  icon: string;
-  description: string;
-  representatives: string[];
-  nodeCount: number;
-}
-
-const COMPANIES: CompanyEntry[] = [
-  {
-    id: "nvidia_chain",
-    name: "英伟达",
-    icon: "🟢",
-    description:
-      "英伟达GPU/AI加速器相关A股产业链：受益于NVDA算力需求的上下游国内企业",
-    representatives: ["中际旭创", "工业富联", "沪电股份", "长电科技"],
-    nodeCount: 0,
-  },
-  {
-    id: "changxin_chain",
-    name: "长鑫存储",
-    icon: "🔵",
-    description:
-      "长鑫存储DRAM自主化相关A股产业链：设备/材料/封测等国产替代供应链",
-    representatives: ["北方华创", "中微公司", "沪硅产业", "拓荆科技"],
-    nodeCount: 0,
-  },
-];
-
 interface Industry {
   id: string;
   name: string;
@@ -53,6 +22,7 @@ interface Industry {
   companyCount: number;
   lastAnalyzed: string;
   representatives: string[];
+  tab: string;
 }
 
 const ICONS: Record<string, React.ElementType> = {
@@ -70,6 +40,11 @@ export default function IndustryPage() {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formData, setFormData] = useState({ name: "", description: "" });
+
+  const aiInfraList = industries.filter(
+    (i) => (i.tab || "ai_infra") === "ai_infra",
+  );
+  const companyList = industries.filter((i) => i.tab === "company");
 
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<
@@ -219,6 +194,7 @@ export default function IndustryPage() {
         companyCount: 0,
         lastAnalyzed: "未分析",
         representatives: [],
+        tab: "ai_infra",
       };
       setIndustries((prev) => [...prev, newIndustry]);
     }
@@ -372,7 +348,7 @@ export default function IndustryPage() {
 
       {activeTab === "ai_infra" && (
         <div className="space-y-3">
-          {industries.map((industry) => {
+          {aiInfraList.map((industry) => {
             const Icon = ICONS[industry.icon] || Cpu;
             return (
               <div
@@ -451,7 +427,7 @@ export default function IndustryPage() {
 
       {activeTab === "company" && (
         <div className="space-y-3">
-          {COMPANIES.map((company) => (
+          {companyList.map((company) => (
             <div
               key={company.id}
               className="border rounded-xl overflow-hidden hover:border-[#f5a623]/30 transition-all group"
@@ -461,18 +437,7 @@ export default function IndustryPage() {
               }}
             >
               <button
-                onClick={() => {
-                  const exists = industries.some(
-                    (ind) => ind.id === company.id,
-                  );
-                  if (exists) {
-                    router.push(`/industry/${company.id}`);
-                  } else {
-                    alert(
-                      `「${company.name}」企业供应链图谱正在建设中，敬请期待`,
-                    );
-                  }
-                }}
+                onClick={() => router.push(`/industry/${company.id}`)}
                 className="w-full p-5 text-left"
               >
                 <div className="flex items-start justify-between">

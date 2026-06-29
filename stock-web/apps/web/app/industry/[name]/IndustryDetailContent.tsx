@@ -1362,6 +1362,56 @@ function ProcessFlowView({
                           );
                         })}
                       </svg>
+                      {layerLabels[li - 1] && (
+                        <div
+                          style={{
+                            position: "absolute",
+                            top: "50%",
+                            left: "50%",
+                            transform: "translate(-50%, -50%)",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 6,
+                            background: isLight
+                              ? "rgba(255,255,255,0.92)"
+                              : "rgba(15,23,42,0.88)",
+                            border: `1px solid ${lc.accent}55`,
+                            borderRadius: 20,
+                            padding: "3px 10px",
+                            fontSize: 10,
+                            fontWeight: 600,
+                            color: lc.accent,
+                            whiteSpace: "nowrap",
+                            pointerEvents: "none",
+                            zIndex: 2,
+                            boxShadow: `0 2px 8px ${lc.accent}22`,
+                          }}
+                        >
+                          <span
+                            style={{
+                              color: isLight ? "#94a3b8" : "#64748b",
+                              fontWeight: 400,
+                            }}
+                          >
+                            {layerLabels[li - 1].replace(/^L\d\s/, "")}
+                          </span>
+                          <svg
+                            width="14"
+                            height="10"
+                            viewBox="0 0 14 10"
+                            fill="none"
+                          >
+                            <path
+                              d="M1 5h10M8 2l3 3-3 3"
+                              stroke={lc.accent}
+                              strokeWidth="1.5"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            />
+                          </svg>
+                          <span>{layer.label.replace(/^L\d\s/, "")}</span>
+                        </div>
+                      )}
                     </div>
                   )}
 
@@ -5175,50 +5225,89 @@ function buildEdge(
 const COMPANY_CHAIN_IDS = new Set(["nvidia_chain", "changxin_chain"]);
 
 function buildRadialLayout(rawNodes: ComponentNode[]): ComponentNode[] {
-  const centerNode = rawNodes.find(
-    (n) => n.data.layer === "application" && n.data.stocks.length === 0,
-  );
+  const centerNode =
+    rawNodes.find(
+      (n) => n.data.stocks.length === 0 && n.data.layer === "core",
+    ) ?? rawNodes.find((n) => n.data.stocks.length === 0);
   if (!centerNode) return rawNodes;
 
   const suppliers = rawNodes.filter((n) => n.id !== centerNode.id);
 
-  const layerRadii: Record<string, number> = {
-    upstream: 380,
-    core: 620,
-    downstream: 860,
-  };
-
   const byLayer: Record<string, ComponentNode[]> = {};
   for (const n of suppliers) {
-    const l = n.data.layer ?? "core";
+    const l = n.data.layer ?? "upstream";
     if (!byLayer[l]) byLayer[l] = [];
     byLayer[l].push(n);
   }
 
   const cx = 900;
-  const cy = 480;
+  const cy = 500;
+  const NODE_W = 180;
+  const NODE_H = 100;
 
   const result: ComponentNode[] = [
-    { ...centerNode, position: { x: cx - 90, y: cy - 50 } },
+    { ...centerNode, position: { x: cx - NODE_W / 2, y: cy - NODE_H / 2 } },
   ];
 
-  const layerOrder = ["upstream", "core", "downstream"] as const;
-  for (const layer of layerOrder) {
-    const group = byLayer[layer] ?? [];
-    if (group.length === 0) continue;
-    const radius = layerRadii[layer];
-    const total = group.length;
-    const startAngle = -Math.PI / 2;
+  const upstreamNodes = byLayer["upstream"] ?? [];
+  const downstreamNodes = byLayer["downstream"] ?? [];
+  const applicationNodes = byLayer["application"] ?? [];
+
+  const minArcSpacing = (count: number, radius: number) => {
+    const minAngleGap = Math.atan2(NODE_W + 30, radius);
+    return Math.max(Math.PI / Math.max(count - 1, 1), minAngleGap);
+  };
+
+  const placeArc = (
+    group: ComponentNode[],
+    radius: number,
+    arcStart: number,
+    arcEnd: number,
+  ) => {
+    const count = group.length;
+    if (count === 0) return;
+    if (count === 1) {
+      const angle = (arcStart + arcEnd) / 2;
+      result.push({
+        ...group[0],
+        position: {
+          x: cx + radius * Math.cos(angle) - NODE_W / 2,
+          y: cy + radius * Math.sin(angle) - NODE_H / 2,
+        },
+      });
+      return;
+    }
+    const spread = arcEnd - arcStart;
+    const step = spread / (count - 1);
     group.forEach((n, i) => {
-      const angle = startAngle + (2 * Math.PI * i) / total;
+      const angle = arcStart + step * i;
       result.push({
         ...n,
         position: {
-          x: cx + radius * Math.cos(angle) - 90,
-          y: cy + radius * Math.sin(angle) - 50,
+          x: cx + radius * Math.cos(angle) - NODE_W / 2,
+          y: cy + radius * Math.sin(angle) - NODE_H / 2,
         },
       });
     });
+  };
+
+  const upCount = upstreamNodes.length;
+  const downCount = downstreamNodes.length;
+
+  const upRadius = Math.max(420, upCount * 70);
+  const downRadius = Math.max(420, downCount * 70);
+  const appRadius = Math.max(700, (upRadius + downRadius) / 2 + 200);
+
+  void minArcSpacing;
+
+  const upPad = upCount <= 3 ? Math.PI / 6 : Math.PI / 12;
+  const downPad = downCount <= 3 ? Math.PI / 6 : Math.PI / 12;
+
+  placeArc(upstreamNodes, upRadius, Math.PI + upPad, 2 * Math.PI - upPad);
+  placeArc(downstreamNodes, downRadius, downPad, Math.PI - downPad);
+
+  if (applicationNodes.length > 0) {
+    placeArc(applicationNodes, appRadius, -Math.PI / 2, (3 * Math.PI) / 2);
   }
 
   return result;
@@ -5454,6 +5543,7 @@ export default function IndustryCanvasPage() {
     () => (isCompanyChain ? buildRadialLayout(nodes) : nodes),
     [isCompanyChain, nodes],
   );
+
   const flowLayerLabels = graph?.layerLabels ?? [];
 
   const selectedFlowNode = nodes.find((n) => n.id === selectedId) as
@@ -5797,16 +5887,7 @@ export default function IndustryCanvasPage() {
                     : { opacity: 0.2, filter: "grayscale(0.6)" }
                   : { opacity: 1 },
               }))}
-              edges={(isCompanyChain
-                ? edges.filter(
-                    (e) =>
-                      e.source === "nv_nvidia" ||
-                      e.target === "nv_nvidia" ||
-                      e.source === "cx_changxin" ||
-                      e.target === "cx_changxin",
-                  )
-                : edges
-              ).map((edge) => {
+              edges={edges.map((edge) => {
                 const isConnected =
                   !selectedId ||
                   edge.source === selectedId ||
@@ -5960,7 +6041,13 @@ export default function IndustryCanvasPage() {
           </div>
         ) : (
           <ProcessFlowView
-            nodes={nodes}
+            nodes={
+              isCompanyChain
+                ? nodes.filter(
+                    (n) => (n as ComponentNode).data.stocks.length > 0,
+                  )
+                : nodes
+            }
             selectedId={selectedId}
             onSelect={(id) => {
               setSelectedId(id);

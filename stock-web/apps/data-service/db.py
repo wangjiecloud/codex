@@ -187,6 +187,7 @@ class IndustryList(Base):
     last_analyzed = Column(String(20), default="未分析")
     representatives = Column(Text, default="[]")  # JSON list of company names
     sort_order = Column(Integer, default=0)
+    tab = Column(String(20), default="ai_infra")  # "ai_infra" | "company"
     updated_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -270,14 +271,25 @@ def get_db():
 def init_db():
     Base.metadata.create_all(bind=engine)
     with engine.connect() as conn:
-        existing = {
+        nf_cols = {
             row[1] for row in conn.execute(text("PRAGMA table_info(news_flash)"))
         }
-        if "seq" not in existing:
+        if "seq" not in nf_cols:
             conn.execute(
                 text("ALTER TABLE news_flash ADD COLUMN seq VARCHAR(30) DEFAULT ''")
             )
             conn.execute(
                 text("CREATE INDEX IF NOT EXISTS ix_news_flash_seq ON news_flash (seq)")
+            )
+            conn.commit()
+
+        il_cols = {
+            row[1] for row in conn.execute(text("PRAGMA table_info(industry_list)"))
+        }
+        if "tab" not in il_cols:
+            conn.execute(
+                text(
+                    "ALTER TABLE industry_list ADD COLUMN tab VARCHAR(20) DEFAULT 'ai_infra'"
+                )
             )
             conn.commit()

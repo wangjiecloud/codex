@@ -96,7 +96,9 @@ def _get_a_shares(db: Session) -> list[str]:
     """Return sorted list of A-share codes from stock_meta."""
     import re
 
-    rows = db.query(StockMeta.code).filter(StockMeta.market == "A股").all()
+    rows = (
+        db.query(StockMeta.code).filter(StockMeta.market.in_(["A股", "SH", "SZ"])).all()
+    )
     return sorted({r.code for r in rows if re.match(r"^[036]\d{5}$", r.code)})
 
 
@@ -119,14 +121,25 @@ def get_stock_name(code: str, db: Session | None = None) -> str:
     return row.name if row else ""
 
 
+import threading as _threading
+
 _sync_running = False
+_quotes_lock = _threading.Lock()
 
 
 def sync_all_data():
     from routers.system import sched_log
+    from routers.sw_industry import sync_sw_industries
 
-    sched_log("info", "每日全量同步开始（行情+K线）")
+    sched_log("info", "每日全量同步开始（行情+申万板块+K线）", source="scheduler")
     _sync_all_quotes()
+    try:
+        count = sync_sw_industries()
+        sched_log(
+            "success", f"申万行业板块同步完成，共 {count} 个板块", source="scheduler"
+        )
+    except Exception as e:
+        sched_log("error", f"申万行业板块同步失败: {e}", source="scheduler")
     db = SessionLocal()
     try:
         codes = _get_a_shares(db)
@@ -134,7 +147,9 @@ def sync_all_data():
         db.close()
     for code in codes:
         _sync_klines(code, "daily")
-    sched_log("success", f"每日全量同步完成，共 {len(codes)} 只股票")
+    sched_log(
+        "success", f"每日全量同步完成，共 {len(codes)} 只股票", source="scheduler"
+    )
 
 
 def _to_bs_code(code: str) -> str:
@@ -153,6 +168,11 @@ def _safe_float(val, default=0.0) -> float:
 
 def _sync_all_quotes():
     from routers.sync import _status, _lock
+    from routers.system import sched_log
+
+    if not _quotes_lock.acquire(blocking=False):
+        sched_log("warning", "行情同步已在运行中，跳过本次触发", source="scheduler")
+        return
 
     global _sync_running
     _sync_running = True
@@ -164,24 +184,61 @@ def _sync_all_quotes():
         fields = "date,code,open,high,low,close,preclose,volume,amount,turn,pctChg,peTTM,pbMRQ"
         count = 0
 
-        all_codes = list(_get_a_shares(db))
+        all_codes_raw = list(_get_a_shares(db))
+
+        quotes = {
+            r.code: r
+            for r in db.query(StockQuote)
+            .filter(StockQuote.code.in_(all_codes_raw))
+            .all()
+        }
+
+        def _quote_priority(code: str) -> int:
+            q = quotes.get(code)
+            if q is None or q.updated_at is None or q.price == 0:
+                return 0
+            return 1
+
+        all_codes = sorted(all_codes_raw, key=_quote_priority)
         total_codes = len(all_codes)
 
         for idx, raw_code in enumerate(all_codes):
+            from routers.sync import _stop_requested
+
+            if _stop_requested.is_set():
+                sched_log("warning", "行情同步已被用户停止")
+                break
+
             with _lock:
                 _status["current"] = raw_code
                 _status["done"] = idx
 
             bs_code = _to_bs_code(raw_code)
             try:
-                rs = bs.query_history_k_data_plus(
-                    bs_code,
-                    fields,
-                    start_date=yesterday,
-                    end_date=today,
-                    frequency="d",
-                    adjustflag="2",
+                from concurrent.futures import (
+                    ThreadPoolExecutor,
+                    TimeoutError as FuturesTimeout,
                 )
+
+                def _fetch_quote():
+                    return bs.query_history_k_data_plus(
+                        bs_code,
+                        fields,
+                        start_date=yesterday,
+                        end_date=today,
+                        frequency="d",
+                        adjustflag="2",
+                    )
+
+                with ThreadPoolExecutor(max_workers=1) as ex:
+                    fut = ex.submit(_fetch_quote)
+                    try:
+                        rs = fut.result(timeout=20)
+                    except FuturesTimeout:
+                        print(f"[sync_quotes] {raw_code} timed out, skipping")
+                        reset_bs()
+                        bs = get_bs()
+                        continue
 
                 if rs.error_code != "0":
                     print(f"[sync_quotes] {raw_code} baostock error: {rs.error_msg}")
@@ -275,19 +332,20 @@ def _sync_all_quotes():
     finally:
         db.close()
         _sync_running = False
+        _quotes_lock.release()
 
 
 def _sync_klines(code: str, period: str = "daily"):
-    db = SessionLocal()
-    bs_period = "d" if period == "daily" else ("w" if period == "weekly" else "m")
-    try:
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
+
+    def _fetch_rows():
+        bs_period = "d" if period == "daily" else ("w" if period == "weekly" else "m")
         bs = get_bs()
         bs_code = _to_bs_code(code)
         fields = "date,code,open,high,low,close,volume,amount,turn,pctChg"
         start = (date.today() - timedelta(days=400)).strftime("%Y-%m-%d")
         end = date.today().strftime("%Y-%m-%d")
 
-        print(f"[sync_klines] {code} querying baostock...")
         rs = bs.query_history_k_data_plus(
             bs_code,
             fields,
@@ -296,19 +354,42 @@ def _sync_klines(code: str, period: str = "daily"):
             frequency=bs_period,
             adjustflag="2",
         )
-
         if rs.error_code != "0":
-            print(f"[sync_klines] {code} baostock error: {rs.error_msg}")
             reset_bs()
+            return None
+
+        rows = []
+        while rs.next() and len(rows) < 1000:
+            r = rs.get_row_data()
+            if r and len(r) >= 10:
+                rows.append(r)
+        return rows
+
+    with ThreadPoolExecutor(max_workers=1) as ex:
+        fut = ex.submit(_fetch_rows)
+        try:
+            rows = fut.result(timeout=30)
+        except FuturesTimeout:
+            print(f"[sync_klines] {code} timed out, skipping")
+            reset_bs()
+            from routers.system import record_failed_stock
+
+            record_failed_stock(code, get_stock_name(code), "超时", "kline")
+            return
+        except Exception as e:
+            print(f"[sync_klines] {code} fetch error: {e}")
+            reset_bs()
+            from routers.system import record_failed_stock
+
+            record_failed_stock(code, get_stock_name(code), str(e), "kline")
             return
 
-        rows_saved = 0
-        max_rows = 1000
-        while rs.next() and rows_saved < max_rows:
-            r = rs.get_row_data()
-            if not r or len(r) < 10:
-                break
+    if not rows:
+        return
 
+    db = SessionLocal()
+    try:
+        for r in rows:
             stmt = sqlite_insert(StockKline).values(
                 code=code,
                 period=period,
@@ -336,16 +417,11 @@ def _sync_klines(code: str, period: str = "daily"):
                 },
             )
             db.execute(stmt)
-            rows_saved += 1
         db.commit()
-        print(f"[sync_klines] {code} done, {rows_saved} bars saved")
+        print(f"[sync_klines] {code} done, {len(rows)} bars saved")
     except Exception as e:
         db.rollback()
-        print(f"[sync_klines] {code} error: {e}")
-        import traceback
-
-        traceback.print_exc()
-        reset_bs()
+        print(f"[sync_klines] {code} db error: {e}")
     finally:
         db.close()
 

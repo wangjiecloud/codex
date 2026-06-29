@@ -11,6 +11,7 @@ import {
   Activity,
   Globe,
   Star,
+  Layers,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -33,6 +34,12 @@ const navItems = [
     icon: LineChart,
     match: (p: string) =>
       p.startsWith("/stock/") && !p.startsWith("/stock/search"),
+  },
+  {
+    href: "/sw",
+    label: "板块",
+    icon: Layers,
+    match: (p: string) => p.startsWith("/sw"),
   },
   {
     href: "/watchlist",

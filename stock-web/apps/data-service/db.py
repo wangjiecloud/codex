@@ -19,7 +19,7 @@ DATABASE_URL = "sqlite:///./stock_data.db"
 
 engine = create_engine(
     DATABASE_URL,
-    connect_args={"check_same_thread": False, "timeout": 5},
+    connect_args={"check_same_thread": False, "timeout": 30},
     pool_size=10,
     max_overflow=20,
 )
@@ -31,7 +31,7 @@ from sqlalchemy import event
 def set_wal_mode(dbapi_conn, connection_record):
     dbapi_conn.execute("PRAGMA journal_mode=WAL")
     dbapi_conn.execute("PRAGMA synchronous=NORMAL")
-    dbapi_conn.execute("PRAGMA busy_timeout=5000")
+    dbapi_conn.execute("PRAGMA busy_timeout=30000")
 
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -258,6 +258,37 @@ class PortfolioTrade(Base):
     shares = Column(Integer)
     note = Column(Text, default="")
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class SwIndustry(Base):
+    __tablename__ = "sw_industry"
+    code = Column(String(20), primary_key=True)
+    name = Column(String(100))
+    level = Column(String(10), default="二级")
+    prev_close = Column(_P, default=0.0)
+    open = Column(_P, default=0.0)
+    price = Column(_P, default=0.0)
+    high = Column(_P, default=0.0)
+    low = Column(_P, default=0.0)
+    volume = Column(Float, default=0.0)
+    turnover = Column(Float, default=0.0)
+    change_pct = Column(_P, default=0.0)
+    pe_static = Column(_P, default=0.0)
+    pe_ttm = Column(_P, default=0.0)
+    pb = Column(_P, default=0.0)
+    dividend_yield = Column(_P, default=0.0)
+    comp_count = Column(Integer, default=0)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class SwIndustryConstituent(Base):
+    __tablename__ = "sw_industry_constituent"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    board_code = Column(String(20), index=True)
+    stock_code = Column(String(10), index=True)
+    stock_name = Column(String(50))
+    updated_at = Column(DateTime, default=datetime.utcnow)
+    __table_args__ = (UniqueConstraint("board_code", "stock_code"),)
 
 
 def get_db():

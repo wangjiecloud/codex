@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from datetime import datetime
 import threading
+import time
 import requests
 
 import akshare as ak
@@ -92,7 +93,17 @@ def sync_global_indices() -> int:
         _is_syncing = True
 
     try:
-        df = ak.index_global_spot_em()
+        df = None
+        for attempt in range(3):
+            try:
+                df = ak.index_global_spot_em()
+                if df is not None and not df.empty:
+                    break
+            except Exception:
+                if attempt < 2:
+                    time.sleep(2)
+                else:
+                    raise
         if df is None or df.empty:
             return 0
 
@@ -138,20 +149,22 @@ def sync_global_indices() -> int:
             db.commit()
             from routers.system import sched_log
 
-            sched_log("success", f"全球市场指数同步完成，共 {count} 条")
+            sched_log(
+                "success", f"全球市场指数同步完成，共 {count} 条", source="scheduler"
+            )
             return count
         except Exception as e:
             db.rollback()
             from routers.system import sched_log
 
-            sched_log("error", f"全球市场指数同步DB错误: {e}")
+            sched_log("error", f"全球市场指数同步DB错误: {e}", source="scheduler")
             return 0
         finally:
             db.close()
     except Exception as e:
         from routers.system import sched_log
 
-        sched_log("error", f"全球市场指数同步失败: {e}")
+        sched_log("error", f"全球市场指数同步失败: {e}", source="scheduler")
         return 0
     finally:
         with _sync_lock:

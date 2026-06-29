@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from datetime import datetime
 import threading
+import time
 import requests
 
 from db import get_db, SessionLocal, ConceptBoard
@@ -40,8 +41,18 @@ def sync_concept_boards() -> int:
             "&fs=m:90+t:3"
             "&fields=f1,f2,f3,f4,f5,f6,f7,f8,f10,f12,f14,f20,f21,f128,f136,f140,f141,f207,f208,f209,f222"
         )
-        r = requests.get(url, headers=_HEADERS, timeout=15)
-        items = r.json().get("data", {}).get("diff", [])
+        items = []
+        for attempt in range(3):
+            try:
+                r = requests.get(url, headers=_HEADERS, timeout=15)
+                items = r.json().get("data", {}).get("diff", [])
+                if items:
+                    break
+            except Exception:
+                if attempt < 2:
+                    time.sleep(2)
+                else:
+                    raise
         if not items:
             return 0
 
@@ -87,20 +98,20 @@ def sync_concept_boards() -> int:
             db.commit()
             from routers.system import sched_log
 
-            sched_log("success", f"概念板块同步完成，共 {count} 条")
+            sched_log("success", f"概念板块同步完成，共 {count} 条", source="scheduler")
             return count
         except Exception as e:
             db.rollback()
             from routers.system import sched_log
 
-            sched_log("error", f"概念板块同步DB错误: {e}")
+            sched_log("error", f"概念板块同步DB错误: {e}", source="scheduler")
             return 0
         finally:
             db.close()
     except Exception as e:
         from routers.system import sched_log
 
-        sched_log("error", f"概念板块同步失败: {e}")
+        sched_log("error", f"概念板块同步失败: {e}", source="scheduler")
         return 0
     finally:
         with _sync_lock:

@@ -22,8 +22,23 @@ _sched_logs: deque = deque(maxlen=200)
 _sched_logs_lock = threading.Lock()
 _sched_log_seq: int = 0
 
+_failed_stocks: dict = {}
+_failed_stocks_lock = threading.Lock()
 
-def sched_log(level: str, message: str):
+
+def record_failed_stock(code: str, name: str, reason: str, sync_type: str = "kline"):
+    with _failed_stocks_lock:
+        key = f"{sync_type}:{code}"
+        _failed_stocks[key] = {
+            "code": code,
+            "name": name,
+            "reason": reason,
+            "syncType": sync_type,
+            "time": datetime.now().isoformat(),
+        }
+
+
+def sched_log(level: str, message: str, source: str = "manual"):
     global _sched_log_seq
     with _sched_logs_lock:
         _sched_log_seq += 1
@@ -33,6 +48,7 @@ def sched_log(level: str, message: str):
                 "time": datetime.now().strftime("%H:%M:%S"),
                 "level": level,
                 "message": message,
+                "source": source,
             }
         )
 
@@ -58,20 +74,23 @@ def _get_guba_last_sync() -> str | None:
         db.close()
 
 
+def _get_last_sync(table_class, field_name="updated_at") -> str | None:
+    from db import SessionLocal
+    from sqlalchemy import func as _func
+
+    db = SessionLocal()
+    try:
+        row = db.query(_func.max(getattr(table_class, field_name))).scalar()
+        return row.isoformat() if row else None
+    except Exception:
+        return None
+    finally:
+        db.close()
+
+
 @router.get("/stats")
 async def get_system_stats(db: Session = Depends(get_db)):
-    node_rows = (
-        db.query(IndustryNode.industry_id, IndustryNode.stocks)
-        .filter(IndustryNode.industry_id != "overview")
-        .all()
-    )
-    industry_stocks: set[str] = set()
-    for _, stocks_json in node_rows:
-        try:
-            industry_stocks.update(json.loads(stocks_json) if stocks_json else [])
-        except Exception:
-            pass
-    total_stocks = len(industry_stocks)
+    total_stocks = db.query(func.count(StockMeta.code)).scalar() or 0
 
     total_guba_data = db.query(func.count(GubaPost.id)).scalar() or 0
     total_quote_data = db.query(func.count(StockQuote.code)).scalar() or 0
@@ -116,7 +135,12 @@ async def get_system_stats(db: Session = Depends(get_db)):
     )
 
     stocks_with_guba = db.query(func.count(func.distinct(GubaPost.code))).scalar() or 0
-    stocks_with_quote = db.query(func.count(StockQuote.code)).scalar() or 0
+    stocks_with_quote = (
+        db.query(func.count(StockQuote.code))
+        .filter(StockQuote.updated_at.isnot(None))
+        .scalar()
+        or 0
+    )
     stocks_with_fundamental = db.query(func.count(StockFundamental.code)).scalar() or 0
 
     return {
@@ -150,6 +174,10 @@ async def get_system_stats(db: Session = Depends(get_db)):
             for update in recent_updates
         ],
         "gubaLastSync": _get_guba_last_sync(),
+        "quoteLastSync": _get_last_sync(StockQuote),
+        "fundamentalLastSync": _get_last_sync(StockFundamental),
+        "klineLastSync": _get_last_sync(StockKline),
+        "stockInfoLastSync": _get_last_sync(StockMeta),
     }
 
 
@@ -196,6 +224,51 @@ async def get_flash_stats(db: Session = Depends(get_db)):
             }
         )
     return result
+
+
+@router.get("/failed-stocks")
+async def get_failed_stocks():
+    with _failed_stocks_lock:
+        return {"failed": list(_failed_stocks.values())}
+
+
+@router.post("/retry-failed")
+async def retry_failed_stocks(codes: list[str] = None):
+    from routers.industry import _sync_klines
+    import threading
+
+    def _retry():
+        with _failed_stocks_lock:
+            targets = (
+                [
+                    _failed_stocks.get(f"kline:{c}")
+                    for c in codes
+                    if f"kline:{c}" in _failed_stocks
+                ]
+                if codes
+                else list(_failed_stocks.values())
+            )
+        for item in targets:
+            if not item:
+                continue
+            try:
+                if item["syncType"] == "kline":
+                    _sync_klines(item["code"], "daily")
+                    with _failed_stocks_lock:
+                        _failed_stocks.pop(f"kline:{item['code']}", None)
+                    sched_log("success", f"重试成功: {item['code']} {item['name']}")
+            except Exception as e:
+                sched_log("error", f"重试失败: {item['code']} - {e}")
+
+    threading.Thread(target=_retry, daemon=True).start()
+    return {"status": "started"}
+
+
+@router.delete("/failed-stocks")
+async def clear_failed_stocks():
+    with _failed_stocks_lock:
+        _failed_stocks.clear()
+    return {"status": "ok"}
 
 
 @router.get("/scheduler-logs")

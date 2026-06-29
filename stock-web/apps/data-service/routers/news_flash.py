@@ -28,6 +28,7 @@ _MAX_PAGES = 50
 _sync_locks: dict[str, threading.Lock] = {k: threading.Lock() for k in _CATEGORY_MAP}
 _syncing_cats: set[str] = set()
 _syncing_lock = threading.Lock()
+_flash_sync_lock = threading.Lock()
 
 
 def _fetch_ths_page(tag_id: str, last_seq: str = "0") -> list[dict]:
@@ -156,24 +157,29 @@ def sync_category(cate_key: str, pages: int | None = None) -> int:
 
 
 def sync_news_flash() -> int:
-    total = 0
-    threads = []
-    results: dict[str, int] = {}
+    if not _flash_sync_lock.acquire(blocking=False):
+        return 0
+    try:
+        total = 0
+        threads = []
+        results: dict[str, int] = {}
 
-    def _run(key: str):
-        results[key] = sync_category(key)
+        def _run(key: str):
+            results[key] = sync_category(key)
 
-    for key in _CATEGORY_MAP:
-        t = threading.Thread(target=_run, args=(key,), daemon=True)
-        threads.append(t)
-        t.start()
-    for t in threads:
-        t.join()
-    total = sum(results.values())
-    from routers.system import sched_log
+        for key in _CATEGORY_MAP:
+            t = threading.Thread(target=_run, args=(key,), daemon=True)
+            threads.append(t)
+            t.start()
+        for t in threads:
+            t.join()
+        total = sum(results.values())
+        from routers.system import sched_log
 
-    sched_log("success", f"快讯同步完成，新增 {total} 条")
-    return total
+        sched_log("success", f"快讯同步完成，新增 {total} 条", source="scheduler")
+        return total
+    finally:
+        _flash_sync_lock.release()
 
 
 @router.get("")

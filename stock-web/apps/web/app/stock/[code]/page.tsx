@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeft, ExternalLink, Plus, Star, X } from "lucide-react";
+import { ArrowLeft, ExternalLink, Plus, Star, X, Search } from "lucide-react";
 import { StockChart, generateMockData } from "@/components/stock/StockChart";
 import { AgentPanel } from "@/components/agents/AgentPanel";
 import { cn, getPriceColor, formatPercent } from "@/lib/utils";
@@ -60,6 +60,13 @@ interface GubaPageData {
   total: number;
   total_pages: number;
   syncing: boolean;
+}
+
+interface StockSearchResult {
+  code: string;
+  name: string;
+  price?: number;
+  change?: number;
 }
 
 interface FundamentalData {
@@ -159,6 +166,7 @@ function removeFromRecentlyViewed(code: string) {
   } catch {}
 }
 
+const API = "http://localhost:8000";
 const INDICATORS = ["VOL", "MACD", "KDJ", "BOLL", "RSI", "DMI", "CCI", "W&R"];
 const PERIODS = ["日K", "周K", "月K"];
 const BOTTOM_TABS = ["全部", "公告", "研报", "资讯", "财务", "AI分析"];
@@ -280,6 +288,11 @@ export default function StockDetailPage() {
   const [quoteLoading, setQuoteLoading] = useState(true);
   const [gubaLoading, setGubaLoading] = useState(true);
   const [fundamental, setFundamental] = useState<FundamentalData | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<StockSearchResult[]>([]);
+  const [showSearchDropdown, setShowSearchDropdown] = useState(false);
+  const searchRef = useRef<HTMLDivElement>(null);
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     setWatchlist(getRecentlyViewed());
@@ -461,6 +474,57 @@ export default function StockDetailPage() {
     };
   }, [isResizing]);
 
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
+        setShowSearchDropdown(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  const handleSearchInput = (val: string) => {
+    setSearchQuery(val);
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    if (!val.trim()) {
+      setSearchResults([]);
+      setShowSearchDropdown(false);
+      return;
+    }
+    searchDebounceRef.current = setTimeout(async () => {
+      try {
+        const url = `${API}/api/search?q=${encodeURIComponent(val)}&limit=8`;
+        console.log("[Stock Search] Fetching:", url);
+        const r = await fetch(url);
+        console.log("[Stock Search] Response status:", r.status);
+        if (r.ok) {
+          const data = await r.json();
+          console.log(
+            "[Stock Search] Results:",
+            data.results?.length ?? 0,
+            "items",
+          );
+          setSearchResults(data.results ?? []);
+          setShowSearchDropdown(true);
+        } else {
+          console.error("[Stock Search] Error:", r.status, r.statusText);
+        }
+      } catch (err) {
+        console.error("[Stock Search] Fetch error:", err);
+        setSearchResults([]);
+      }
+    }, 200);
+  };
+
+  const handleSelectStock = (stock: StockSearchResult) => {
+    addToRecentlyViewed(stock.code, stock.name);
+    setSearchQuery("");
+    setShowSearchDropdown(false);
+    setSearchResults([]);
+    router.push(`/stock/${stock.code}`);
+  };
+
   return (
     <div className="flex flex-col h-full text-xs overflow-hidden">
       {/* Top toolbar */}
@@ -484,6 +548,67 @@ export default function StockDetailPage() {
           <Star size={12} fill={isStarred ? "currentColor" : "none"} />
           自选股
         </button>
+
+        <div ref={searchRef} className="relative mr-2 shrink-0">
+          <div className="flex items-center gap-1 px-2 py-1 rounded border border-[var(--border-color)] bg-[var(--bg-deep)] w-[140px]">
+            <Search size={11} className="text-[var(--text-tertiary)]" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => handleSearchInput(e.target.value)}
+              placeholder="搜索股票"
+              className="flex-1 bg-transparent outline-none text-[11px] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)]"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => {
+                  setSearchQuery("");
+                  setSearchResults([]);
+                  setShowSearchDropdown(false);
+                }}
+                className="text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
+              >
+                <X size={10} />
+              </button>
+            )}
+          </div>
+          {showSearchDropdown && searchResults.length > 0 && (
+            <div className="absolute top-full left-0 mt-1 w-[220px] bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded shadow-lg z-50 max-h-[280px] overflow-y-auto">
+              {searchResults.map((stock) => (
+                <button
+                  key={stock.code}
+                  onClick={() => handleSelectStock(stock)}
+                  className="w-full flex items-center justify-between px-2 py-1.5 hover:bg-[var(--bg-hover)] transition-colors border-b border-[var(--border-color)] last:border-0"
+                >
+                  <div className="flex flex-col items-start">
+                    <span className="text-[11px] text-[var(--text-primary)]">
+                      {stock.name}
+                    </span>
+                    <span className="text-[10px] text-[var(--text-tertiary)]">
+                      {stock.code}
+                    </span>
+                  </div>
+                  {stock.change !== undefined && (
+                    <span
+                      className={cn(
+                        "text-[10px]",
+                        stock.change > 0
+                          ? "text-[#e84444]"
+                          : stock.change < 0
+                            ? "text-[#09d464]"
+                            : "text-[var(--text-secondary)]",
+                      )}
+                    >
+                      {stock.change > 0 ? "+" : ""}
+                      {stock.change.toFixed(2)}%
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
         {PERIODS.map((p) => (
           <button
             key={p}

@@ -13,6 +13,7 @@ import {
   TrendingUp,
   Loader2,
   Zap,
+  StopCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -45,6 +46,10 @@ interface SystemStats {
     updatedAt: string;
   }>;
   gubaLastSync?: string | null;
+  quoteLastSync?: string | null;
+  fundamentalLastSync?: string | null;
+  klineLastSync?: string | null;
+  stockInfoLastSync?: string | null;
 }
 
 interface LogEntry {
@@ -62,6 +67,91 @@ interface FlashCatStat {
   syncing: boolean;
 }
 
+function SwIndustryMonitor() {
+  const [boardCount, setBoardCount] = useState(0);
+  const [syncing, setSyncing] = useState(false);
+  const [lastSync, setLastSync] = useState<string | null>(null);
+
+  const fetchCount = async () => {
+    try {
+      const r = await fetch("http://localhost:8000/api/sw-industry");
+      if (r.ok) {
+        const data = await r.json();
+        setBoardCount(data.length);
+        if (data.length > 0 && data[0].updatedAt)
+          setLastSync(data[0].updatedAt);
+      }
+    } catch {}
+  };
+
+  const handleSync = async () => {
+    setSyncing(true);
+    try {
+      await fetch("http://localhost:8000/api/sw-industry/sync", {
+        method: "POST",
+      });
+      setTimeout(fetchCount, 2000);
+    } catch {
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchCount();
+  }, []);
+
+  return (
+    <div className="bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-xl p-5">
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-base font-semibold text-[var(--text-primary)] flex items-center gap-2">
+          <TrendingUp size={16} className="text-[#e8a235]" />
+          申万行业板块
+        </h2>
+        <button
+          onClick={handleSync}
+          disabled={syncing}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-[#e8a23510] border border-[#e8a23530] text-[#e8a235] rounded-lg hover:bg-[#e8a23520] transition-colors disabled:opacity-40"
+        >
+          <RefreshCw size={12} className={syncing ? "animate-spin" : ""} />
+          {syncing ? "同步中..." : "立即同步"}
+        </button>
+      </div>
+      <div className="text-xs text-[var(--text-tertiary)] mb-4">
+        申万二级行业实时行情，每 3 分钟自动同步。
+      </div>
+      <div className="flex gap-6">
+        <div className="bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg p-4 flex-1">
+          <div className="text-xs text-[var(--text-tertiary)] mb-1">
+            板块数量
+          </div>
+          <div className="text-2xl font-bold text-[var(--text-primary)]">
+            {boardCount || "--"}
+          </div>
+        </div>
+        <div className="bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg p-4 flex-1">
+          <div className="text-xs text-[var(--text-tertiary)] mb-1">
+            最近同步
+          </div>
+          <div className="text-sm text-[var(--text-secondary)]">
+            {lastSync
+              ? new Date(lastSync)
+                  .toLocaleString("zh-CN", { hour12: false })
+                  .slice(5)
+              : "--"}
+          </div>
+        </div>
+        <div className="bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg p-4 flex-1">
+          <div className="text-xs text-[var(--text-tertiary)] mb-1">
+            同步频率
+          </div>
+          <div className="text-sm text-[var(--text-secondary)]">每 3 分钟</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function SystemMonitorPage() {
   const [stats, setStats] = useState<SystemStats>({
     totalStocks: 0,
@@ -70,8 +160,19 @@ export default function SystemMonitorPage() {
     recentUpdates: [],
   });
   const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [failedStocks, setFailedStocks] = useState<
+    Array<{
+      code: string;
+      name: string;
+      reason: string;
+      syncType: string;
+      time: string;
+    }>
+  >([]);
+  const [logTab, setLogTab] = useState<"logs" | "failed">("logs");
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [syncRunning, setSyncRunning] = useState(false);
+  const [currentSyncType, setCurrentSyncType] = useState<string | null>(null);
   const [currentSyncInfo, setCurrentSyncInfo] = useState<{
     phase: string;
     progress: number;
@@ -84,11 +185,20 @@ export default function SystemMonitorPage() {
   const logsEndRef = useRef<HTMLDivElement>(null);
   const logsContainerRef = useRef<HTMLDivElement>(null);
   const schedLogSeq = useRef<number>(0);
+  const unmountedRef = useRef(false);
+
+  useEffect(() => {
+    unmountedRef.current = false;
+    return () => {
+      unmountedRef.current = true;
+    };
+  }, []);
 
   const getPhaseDisplayName = (phase: string): string => {
     const phaseNames: Record<string, string> = {
       quotes: "实时行情",
       klines: "K线数据",
+      sw_industry: "申万板块行情",
       stock_info: "基本信息",
       fundamental: "财务数据",
       guba: "股吧数据",
@@ -106,7 +216,7 @@ export default function SystemMonitorPage() {
   const fetchStats = async () => {
     try {
       const response = await fetch("http://localhost:8000/api/system/stats");
-      if (response.ok) {
+      if (response.ok && !unmountedRef.current) {
         const data = await response.json();
         setStats(data);
         setLastUpdated(
@@ -114,14 +224,14 @@ export default function SystemMonitorPage() {
         );
       }
     } catch (error) {
-      addLog("error", `获取统计数据失败: ${error}`);
+      if (!unmountedRef.current) addLog("error", `获取统计数据失败: ${error}`);
     }
   };
 
   const fetchFlashStats = async () => {
     try {
       const r = await fetch("http://localhost:8000/api/system/flash-stats");
-      if (r.ok) setFlashStats(await r.json());
+      if (r.ok && !unmountedRef.current) setFlashStats(await r.json());
     } catch {}
   };
 
@@ -130,27 +240,66 @@ export default function SystemMonitorPage() {
       const r = await fetch(
         `http://localhost:8000/api/system/scheduler-logs?since=${schedLogSeq.current}`,
       );
-      if (!r.ok) return;
+      if (!r.ok || unmountedRef.current) return;
       const data: {
         logs: Array<{
           seq: number;
           time: string;
           level: string;
           message: string;
+          source?: string;
         }>;
         latest_seq: number;
       } = await r.json();
-      if (data.logs.length > 0) {
+      if (data.logs.length > 0 && !unmountedRef.current) {
         setLogs((prev) => {
           const newEntries: LogEntry[] = data.logs.map((l) => ({
             time: l.time,
             level: l.level as LogEntry["level"],
-            message: `[定时] ${l.message}`,
+            message:
+              l.source === "scheduler" ? `[定时] ${l.message}` : l.message,
           }));
           return [...prev, ...newEntries].slice(-200);
         });
         schedLogSeq.current = data.latest_seq;
       }
+    } catch {}
+  };
+
+  const fetchFailedStocks = async () => {
+    try {
+      const r = await fetch("http://localhost:8000/api/system/failed-stocks");
+      if (r.ok) {
+        const data = await r.json();
+        setFailedStocks(data.failed || []);
+      }
+    } catch {}
+  };
+
+  const retryFailedStocks = async (codes?: string[]) => {
+    try {
+      await fetch("http://localhost:8000/api/system/retry-failed", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(codes ? codes : null),
+      });
+      addLog(
+        "info",
+        codes ? `开始重试 ${codes.length} 只股票` : "开始重试所有失败股票",
+      );
+      setTimeout(fetchFailedStocks, 2000);
+    } catch (e) {
+      addLog("error", `重试失败: ${e}`);
+    }
+  };
+
+  const clearFailedStocks = async () => {
+    try {
+      await fetch("http://localhost:8000/api/system/failed-stocks", {
+        method: "DELETE",
+      });
+      setFailedStocks([]);
+      addLog("success", "失败记录已清空");
     } catch {}
   };
 
@@ -195,6 +344,7 @@ export default function SystemMonitorPage() {
     }
 
     setSyncRunning(true);
+    setCurrentSyncType(syncType);
     const typeNames = {
       guba: "股吧数据",
       kline: "K线数据",
@@ -203,8 +353,6 @@ export default function SystemMonitorPage() {
       fundamental: "财务数据",
     };
     const typeName = typeNames[syncType];
-
-    addLog("info", `开始批量同步${typeName}...`);
 
     try {
       let endpoint = "";
@@ -216,7 +364,7 @@ export default function SystemMonitorPage() {
           endpoint = "/api/sync/klines";
           break;
         case "quote":
-          endpoint = "/api/sync/all";
+          endpoint = "/api/sync/quotes";
           break;
         case "stock_info":
           endpoint = "/api/sync/stock_info";
@@ -225,6 +373,8 @@ export default function SystemMonitorPage() {
           endpoint = "/api/sync/fundamental";
           break;
       }
+
+      addLog("info", `开始批量同步${typeName}，接口: ${endpoint}`);
 
       const response = await fetch(`http://localhost:8000${endpoint}`, {
         method: "POST",
@@ -238,6 +388,7 @@ export default function SystemMonitorPage() {
         } else if (data.status === "already_running") {
           addLog("warning", `${typeName}同步任务已在运行中`);
           setSyncRunning(false);
+          setCurrentSyncType(null);
         }
       } else {
         throw new Error(`HTTP ${response.status}`);
@@ -245,6 +396,7 @@ export default function SystemMonitorPage() {
     } catch (error) {
       addLog("error", `启动${typeName}同步失败: ${error}`);
       setSyncRunning(false);
+      setCurrentSyncType(null);
     }
   };
 
@@ -253,9 +405,12 @@ export default function SystemMonitorPage() {
     let attempts = 0;
 
     const poll = async () => {
+      if (unmountedRef.current) return;
       try {
         const response = await fetch("http://localhost:8000/api/sync/status");
         const data = await response.json();
+
+        if (unmountedRef.current) return;
 
         if (!data.running) {
           addLog(
@@ -263,6 +418,7 @@ export default function SystemMonitorPage() {
             `${typeName}同步完成！共处理 ${data.done}/${data.total} 只股票`,
           );
           setSyncRunning(false);
+          setCurrentSyncType(null);
           setCurrentSyncInfo(null);
           fetchStats();
           return;
@@ -283,6 +439,8 @@ export default function SystemMonitorPage() {
           fetchStats();
         }
 
+        fetchSchedulerLogs();
+
         if (attempts % 10 === 0) {
           addLog(
             "info",
@@ -296,6 +454,7 @@ export default function SystemMonitorPage() {
           throw new Error("同步超时");
         }
       } catch (error) {
+        if (unmountedRef.current) return;
         addLog("error", `${typeName}同步状态查询失败: ${error}`);
         setSyncRunning(false);
       }
@@ -313,11 +472,11 @@ export default function SystemMonitorPage() {
     setSyncRunning(true);
     addLog(
       "info",
-      "开始一键全量刷新：行情 → 基本信息 → 财务数据 → 股吧数据 → 快讯",
+      "开始一键全量刷新：行情+申万板块 → 基本信息 → 财务数据 → 股吧数据 → 快讯",
     );
 
     try {
-      addLog("info", "[1/5] 同步实时行情数据...");
+      addLog("info", "[1/5] 同步实时行情 + 申万板块行情 + K线数据...");
       const quoteResponse = await fetch("http://localhost:8000/api/sync/all", {
         method: "POST",
       });
@@ -368,7 +527,7 @@ export default function SystemMonitorPage() {
         }
       }
 
-      addLog("info", "[5/5] 同步全球市场快讯（6个分类）...");
+      addLog("info", "[5/5] 同步快讯（6个分类）...");
       const flashResponse = await fetch(
         "http://localhost:8000/api/flash/sync",
         {
@@ -384,10 +543,31 @@ export default function SystemMonitorPage() {
 
       addLog("success", "✨ 一键全量刷新完成！所有数据已更新");
       setSyncRunning(false);
-      fetchStats();
     } catch (error) {
-      addLog("error", `一键刷新失败: ${error}`);
+      addLog("error", `同步失败: ${error}`);
       setSyncRunning(false);
+    } finally {
+      fetchStats();
+    }
+  };
+
+  const stopAllSync = async () => {
+    try {
+      addLog("warning", "正在停止所有同步任务...");
+      const response = await fetch("http://localhost:8000/api/sync/stop", {
+        method: "POST",
+      });
+      if (response.ok) {
+        const data = await response.json();
+        addLog("warning", data.message || "停止请求已发送");
+        setTimeout(() => {
+          setSyncRunning(false);
+          setCurrentSyncInfo(null);
+          fetchStats();
+        }, 2000);
+      }
+    } catch (error) {
+      addLog("error", `停止同步失败: ${error}`);
     }
   };
 
@@ -396,11 +576,37 @@ export default function SystemMonitorPage() {
       const maxAttempts = 200;
       let attempts = 0;
       let lastLoggedProgress = -1;
+      let confirmedStarted = false;
+      let startCheckAttempts = 0;
+      const maxStartChecks = 6;
 
       const poll = async () => {
+        if (unmountedRef.current) {
+          resolve();
+          return;
+        }
         try {
           const response = await fetch("http://localhost:8000/api/sync/status");
           const data = await response.json();
+
+          if (unmountedRef.current) {
+            resolve();
+            return;
+          }
+
+          if (!confirmedStarted) {
+            if (data.running) {
+              confirmedStarted = true;
+            } else {
+              startCheckAttempts++;
+              if (startCheckAttempts >= maxStartChecks) {
+                resolve();
+                return;
+              }
+              setTimeout(poll, 500);
+              return;
+            }
+          }
 
           if (!data.running) {
             addLog(
@@ -424,7 +630,6 @@ export default function SystemMonitorPage() {
           const progress =
             data.total > 0 ? Math.floor((data.done / data.total) * 100) : 0;
 
-          // 每10%输出一次日志，或者每5次轮询（10秒）输出一次
           if (
             (progress !== lastLoggedProgress && progress % 10 === 0) ||
             attempts % 5 === 1
@@ -436,12 +641,18 @@ export default function SystemMonitorPage() {
             lastLoggedProgress = progress;
           }
 
+          fetchSchedulerLogs();
+
           if (attempts < maxAttempts) {
             setTimeout(poll, 2000);
           } else {
             reject(new Error("同步超时"));
           }
         } catch (error) {
+          if (unmountedRef.current) {
+            resolve();
+            return;
+          }
           reject(error);
         }
       };
@@ -459,6 +670,8 @@ export default function SystemMonitorPage() {
     try {
       const response = await fetch("http://localhost:8000/api/sync/status");
       const data = await response.json();
+
+      if (unmountedRef.current) return;
 
       if (data.running) {
         setSyncRunning(true);
@@ -523,6 +736,13 @@ export default function SystemMonitorPage() {
     }, 5000);
     return () => clearInterval(interval);
   }, [autoRefresh, syncRunning]);
+
+  useEffect(() => {
+    fetchFailedStocks();
+    if (!autoRefresh) return;
+    const interval = setInterval(fetchFailedStocks, 10000);
+    return () => clearInterval(interval);
+  }, [autoRefresh]);
 
   useEffect(() => {
     if (logsContainerRef.current) {
@@ -728,7 +948,7 @@ export default function SystemMonitorPage() {
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-base font-semibold text-[var(--text-primary)] flex items-center gap-2">
               <Zap size={16} className="text-yellow-400" />
-              全球市场 · 快讯数据
+              快讯数据
             </h2>
             <button
               onClick={syncAllFlash}
@@ -799,28 +1019,42 @@ export default function SystemMonitorPage() {
           </div>
         </div>
 
+        {/* SW Industry Monitor */}
+        <SwIndustryMonitor />
+
         {/* Sync Control */}
         <div className="bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-xl p-5">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-base font-semibold text-[var(--text-primary)]">
               数据同步
             </h2>
-            <button
-              onClick={triggerFullRefresh}
-              disabled={syncRunning}
-              className={cn(
-                "flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-all",
-                syncRunning
-                  ? "bg-[var(--bg-tertiary)] text-[var(--text-tertiary)] cursor-not-allowed"
-                  : "bg-gradient-to-r from-blue-500 to-purple-500 text-white hover:from-blue-600 hover:to-purple-600 shadow-md",
+            <div className="flex gap-2">
+              <button
+                onClick={triggerFullRefresh}
+                disabled={syncRunning}
+                className={cn(
+                  "flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-all",
+                  syncRunning
+                    ? "bg-[var(--bg-tertiary)] text-[var(--text-tertiary)] cursor-not-allowed"
+                    : "bg-gradient-to-r from-blue-500 to-purple-500 text-white hover:from-blue-600 hover:to-purple-600 shadow-md",
+                )}
+              >
+                <RefreshCw
+                  size={12}
+                  className={syncRunning ? "animate-spin" : ""}
+                />
+                同步全部
+              </button>
+              {syncRunning && (
+                <button
+                  onClick={stopAllSync}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-all bg-gradient-to-r from-red-500 to-orange-500 text-white hover:from-red-600 hover:to-orange-600 shadow-md"
+                >
+                  <StopCircle size={12} />
+                  停止同步
+                </button>
               )}
-            >
-              <RefreshCw
-                size={12}
-                className={syncRunning ? "animate-spin" : ""}
-              />
-              同步全部
-            </button>
+            </div>
           </div>
 
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
@@ -834,6 +1068,7 @@ export default function SystemMonitorPage() {
                 count: stats.dataByType?.quote,
                 stocks: stats.stocksByDataType?.quote,
                 syncType: "quote" as const,
+                lastSync: stats.quoteLastSync,
               },
               {
                 key: "stock_info",
@@ -844,6 +1079,7 @@ export default function SystemMonitorPage() {
                 count: stats.dataByType?.stock_info,
                 stocks: undefined,
                 syncType: "stock_info" as const,
+                lastSync: stats.stockInfoLastSync,
               },
               {
                 key: "fundamental",
@@ -854,6 +1090,7 @@ export default function SystemMonitorPage() {
                 count: stats.dataByType?.fundamental,
                 stocks: stats.stocksByDataType?.fundamental,
                 syncType: "fundamental" as const,
+                lastSync: stats.fundamentalLastSync,
               },
               {
                 key: "guba",
@@ -875,6 +1112,7 @@ export default function SystemMonitorPage() {
                 count: stats.dataByType?.kline,
                 stocks: stats.stocksByDataType?.kline,
                 syncType: "kline" as const,
+                lastSync: stats.klineLastSync,
               },
             ].map((item) => (
               <SyncDataCard
@@ -886,7 +1124,7 @@ export default function SystemMonitorPage() {
                 count={item.count}
                 stocks={item.stocks}
                 totalStocks={stats.totalStocks}
-                syncing={syncRunning}
+                syncing={syncRunning && currentSyncType === item.syncType}
                 lastSync={
                   "lastSync" in item
                     ? (item as { lastSync?: string | null }).lastSync
@@ -898,61 +1136,158 @@ export default function SystemMonitorPage() {
           </div>
         </div>
 
-        {/* System Logs */}
+        {/* System Logs & Failed Stocks */}
         <div className="bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-xl p-5">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-base font-semibold text-[var(--text-primary)]">
-              系统日志
-            </h2>
-            <div className="flex gap-2">
+            <div className="flex items-center gap-4">
               <button
-                onClick={exportLogs}
-                className="px-3 py-1.5 text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors flex items-center gap-1"
+                onClick={() => setLogTab("logs")}
+                className={cn(
+                  "text-sm font-semibold pb-2 border-b-2 transition-colors",
+                  logTab === "logs"
+                    ? "text-[var(--text-primary)] border-[var(--accent)]"
+                    : "text-[var(--text-tertiary)] border-transparent",
+                )}
               >
-                <Download size={14} />
-                导出
+                系统日志
               </button>
               <button
-                onClick={clearLogs}
-                className="px-3 py-1.5 text-xs text-[var(--text-secondary)] hover:text-red-400 transition-colors flex items-center gap-1"
+                onClick={() => setLogTab("failed")}
+                className={cn(
+                  "text-sm font-semibold pb-2 border-b-2 transition-colors flex items-center gap-1",
+                  logTab === "failed"
+                    ? "text-[var(--text-primary)] border-[var(--accent)]"
+                    : "text-[var(--text-tertiary)] border-transparent",
+                )}
               >
-                <Trash2 size={14} />
-                清空
+                失败记录
+                {failedStocks.length > 0 && (
+                  <span className="px-1.5 py-0.5 text-xs bg-red-500/20 text-red-400 rounded">
+                    {failedStocks.length}
+                  </span>
+                )}
               </button>
             </div>
+            <div className="flex gap-2">
+              {logTab === "logs" ? (
+                <>
+                  <button
+                    onClick={exportLogs}
+                    className="px-3 py-1.5 text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors flex items-center gap-1"
+                  >
+                    <Download size={14} />
+                    导出
+                  </button>
+                  <button
+                    onClick={clearLogs}
+                    className="px-3 py-1.5 text-xs text-[var(--text-secondary)] hover:text-red-400 transition-colors flex items-center gap-1"
+                  >
+                    <Trash2 size={14} />
+                    清空
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    onClick={() => retryFailedStocks()}
+                    disabled={failedStocks.length === 0}
+                    className="px-3 py-1.5 text-xs bg-blue-500/10 border border-blue-500/30 text-blue-400 rounded hover:bg-blue-500/20 transition-colors flex items-center gap-1 disabled:opacity-40"
+                  >
+                    <RefreshCw size={14} />
+                    重试全部
+                  </button>
+                  <button
+                    onClick={clearFailedStocks}
+                    className="px-3 py-1.5 text-xs text-[var(--text-secondary)] hover:text-red-400 transition-colors flex items-center gap-1"
+                  >
+                    <Trash2 size={14} />
+                    清空
+                  </button>
+                </>
+              )}
+            </div>
           </div>
-          <div
-            ref={logsContainerRef}
-            className="bg-[var(--bg-deep)] border border-[var(--border-color)] rounded-lg p-4 h-80 overflow-y-auto font-mono text-xs"
-          >
-            {logs.length === 0 ? (
-              <div className="text-center py-8 text-[var(--text-tertiary)]">
-                暂无日志
-              </div>
-            ) : (
-              logs.map((log, i) => (
-                <div
-                  key={i}
-                  className={cn(
-                    "py-1",
-                    log.level === "error" && "text-red-400",
-                    log.level === "success" && "text-green-400",
-                    log.level === "warning" && "text-yellow-400",
-                    log.level === "info" && "text-[var(--text-secondary)]",
-                  )}
-                >
-                  <span className="text-[var(--text-tertiary)]">
-                    [{log.time}]
-                  </span>{" "}
-                  <span className="font-semibold">
-                    {log.level.toUpperCase()}
-                  </span>
-                  : {log.message}
+
+          {logTab === "logs" ? (
+            <div
+              ref={logsContainerRef}
+              className="bg-[var(--bg-deep)] border border-[var(--border-color)] rounded-lg p-4 h-80 overflow-y-auto font-mono text-xs"
+            >
+              {logs.length === 0 ? (
+                <div className="text-center py-8 text-[var(--text-tertiary)]">
+                  暂无日志
                 </div>
-              ))
-            )}
-            <div ref={logsEndRef} />
-          </div>
+              ) : (
+                logs.map((log, i) => (
+                  <div
+                    key={i}
+                    className={cn(
+                      "py-1",
+                      log.level === "error" && "text-red-400",
+                      log.level === "success" && "text-green-400",
+                      log.level === "warning" && "text-yellow-400",
+                      log.level === "info" && "text-[var(--text-secondary)]",
+                    )}
+                  >
+                    <span className="text-[var(--text-tertiary)]">
+                      [{log.time}]
+                    </span>{" "}
+                    <span className="font-semibold">
+                      {log.level.toUpperCase()}
+                    </span>
+                    : {log.message}
+                  </div>
+                ))
+              )}
+              <div ref={logsEndRef} />
+            </div>
+          ) : (
+            <div className="bg-[var(--bg-deep)] border border-[var(--border-color)] rounded-lg p-4 h-80 overflow-y-auto">
+              {failedStocks.length === 0 ? (
+                <div className="text-center py-8 text-[var(--text-tertiary)] text-sm">
+                  暂无失败记录
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {failedStocks.map((item) => (
+                    <div
+                      key={`${item.syncType}:${item.code}`}
+                      className="flex items-center justify-between p-3 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg hover:border-red-500/30 transition-colors"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium text-[var(--text-primary)]">
+                            {item.code}
+                          </span>
+                          <span className="text-sm text-[var(--text-secondary)]">
+                            {item.name}
+                          </span>
+                          <span className="text-xs px-1.5 py-0.5 bg-red-500/10 text-red-400 rounded">
+                            {item.syncType === "kline" ? "K线" : item.syncType}
+                          </span>
+                        </div>
+                        <div className="text-xs text-red-400 mt-1">
+                          {item.reason}
+                        </div>
+                        <div className="text-xs text-[var(--text-tertiary)] mt-1">
+                          {new Date(item.time).toLocaleString("zh-CN", {
+                            hour12: false,
+                          })}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => retryFailedStocks([item.code])}
+                        className="ml-3 px-3 py-1.5 text-xs bg-blue-500/10 border border-blue-500/30 text-blue-400 rounded hover:bg-blue-500/20 transition-colors flex items-center gap-1"
+                      >
+                        <RefreshCw size={12} />
+                        重试
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -1072,15 +1407,17 @@ function SyncDataCard({
           onClick={onSync}
           disabled={syncing}
           className={cn(
-            "text-[10px] px-1.5 py-0.5 rounded transition-colors",
+            "text-[10px] px-1.5 py-0.5 rounded transition-colors flex items-center gap-1",
             tokens.bg,
             tokens.border,
             "border",
             tokens.text,
             "hover:opacity-80 disabled:opacity-40",
+            syncing ? "cursor-not-allowed" : "cursor-pointer",
           )}
         >
-          同步
+          <RefreshCw size={10} className={syncing ? "animate-spin" : ""} />
+          {syncing ? "同步中" : "同步"}
         </button>
       </div>
       {count !== undefined ? (

@@ -14,11 +14,12 @@ from routers import (
     concept_board,
     theme,
     portfolio,
+    sw_industry,
 )
 import akshare as ak
 from fastapi import HTTPException
 from db import init_db
-from datetime import datetime, time as dtime
+from datetime import datetime, time as dtime, timedelta
 import threading
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -45,6 +46,7 @@ app.include_router(news_flash.router, prefix="/api/flash", tags=["快讯"])
 app.include_router(concept_board.router, prefix="/api/board", tags=["概念板块"])
 app.include_router(theme.router, prefix="/api/theme", tags=["主题板块"])
 app.include_router(portfolio.router, prefix="/api/portfolio", tags=["持仓管理"])
+app.include_router(sw_industry.router, prefix="/api/sw-industry", tags=["申万行业"])
 
 _scheduler = BackgroundScheduler(timezone="Asia/Shanghai")
 
@@ -112,7 +114,6 @@ def startup():
 
     threading.Thread(target=_warmup_caches, daemon=True).start()
 
-    # 每日全量同步（盘后17:30）
     _scheduler.add_job(
         industry.sync_all_data,
         trigger="cron",
@@ -122,37 +123,13 @@ def startup():
         replace_existing=True,
     )
 
-    # 交易时段高频同步（9:00-15:00每10分钟）
-    _scheduler.add_job(
-        industry._sync_all_quotes,
-        trigger="cron",
-        hour="9-14",
-        minute="*/10",
-        id="trading_hours_sync",
-        replace_existing=True,
-    )
-
-    _scheduler.add_job(
-        global_market.sync_global_indices,
-        trigger="interval",
-        minutes=3,
-        id="global_market_sync",
-        replace_existing=True,
-    )
-
+    _t0 = datetime.now()
     _scheduler.add_job(
         news_flash.sync_news_flash,
         trigger="interval",
         minutes=3,
+        start_date=_t0 + timedelta(seconds=10),
         id="news_flash_sync",
-        replace_existing=True,
-    )
-
-    _scheduler.add_job(
-        concept_board.sync_concept_boards,
-        trigger="interval",
-        minutes=3,
-        id="concept_board_sync",
         replace_existing=True,
     )
 
@@ -165,6 +142,16 @@ def startup():
     )
 
     _scheduler.start()
+
+    # 检查是否在生产环境中启用自动同步
+    # 可以通过环境变量 AUTO_SYNC_ON_STARTUP=false 来禁用
+    import os
+
+    auto_sync = os.getenv("AUTO_SYNC_ON_STARTUP", "true").lower() == "true"
+
+    if not auto_sync:
+        print("[startup] AUTO_SYNC_ON_STARTUP=false, skipping startup sync")
+        return
 
     now = datetime.now().time()
     if now >= dtime(17, 30):
@@ -194,25 +181,45 @@ def health():
 
 
 @app.get("/api/search")
-async def search(q: str = Query("", description="股票代码或名称关键词")):
+async def search(
+    q: str = Query("", description="股票代码或名称关键词"), limit: int = Query(8)
+):
     if not q.strip():
         return {"results": []}
     try:
-        df = ak.stock_zh_a_spot_em()
-        mask = df["名称"].str.contains(q, na=False) | df["代码"].str.contains(
-            q, na=False
-        )
-        results = df[mask].head(10)
-        return {
-            "results": [
-                {
-                    "code": str(r["代码"]),
-                    "name": str(r["名称"]),
-                    "price": float(r.get("最新价", 0)),
-                    "change": float(r.get("涨跌幅", 0)),
-                }
-                for _, r in results.iterrows()
-            ]
-        }
+        from db import SessionLocal, StockMeta, StockQuote
+        from sqlalchemy import or_
+
+        db = SessionLocal()
+        try:
+            rows = (
+                db.query(StockMeta.code, StockMeta.name)
+                .filter(
+                    or_(
+                        StockMeta.code.contains(q.strip()),
+                        StockMeta.name.contains(q.strip()),
+                    )
+                )
+                .limit(limit)
+                .all()
+            )
+            codes = [r.code for r in rows]
+            quotes = {
+                qr.code: qr
+                for qr in db.query(StockQuote).filter(StockQuote.code.in_(codes)).all()
+            }
+            return {
+                "results": [
+                    {
+                        "code": r.code,
+                        "name": r.name,
+                        "price": quotes[r.code].price if r.code in quotes else 0,
+                        "change": quotes[r.code].change if r.code in quotes else 0,
+                    }
+                    for r in rows
+                ]
+            }
+        finally:
+            db.close()
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

@@ -318,8 +318,8 @@ def sync_guba_incremental():
             db.close()
 
         total = len(codes)
-        sched_log("info", f"股吧增量同步开始，共 {total} 只股票")
-        saved_total = 0
+        sched_log("info", f"股吧增量同步开始，共 {total} 只股票", source="scheduler")
+        pending_rows = []
         errors = 0
 
         for idx, code in enumerate(codes):
@@ -328,11 +328,10 @@ def sync_guba_incremental():
                 if not data:
                     continue
                 now = datetime.utcnow().isoformat()
-                all_rows = []
                 for category, posts in data.items():
                     for post in posts:
                         pre_content = post.get("content", "") or ""
-                        all_rows.append(
+                        pending_rows.append(
                             (
                                 code,
                                 post["post_id"],
@@ -349,56 +348,52 @@ def sync_guba_incremental():
                                 now,
                             )
                         )
-                if not all_rows:
-                    continue
-
-                import sqlite3 as _sqlite3, os
-
-                db_path = os.path.join(os.path.dirname(__file__), "..", "stock_data.db")
-                conn = _sqlite3.connect(os.path.normpath(db_path), timeout=30)
-                conn.execute("PRAGMA journal_mode=WAL")
-                conn.execute("PRAGMA busy_timeout=30000")
-                for i in range(0, len(all_rows), 100):
-                    batch = all_rows[i : i + 100]
-                    try:
-                        conn.executemany(
-                            """INSERT INTO guba_post
-                               (code, post_id, title, author, read_count, comment_count,
-                                post_time, post_date, url, category, content, content_fetched, updated_at)
-                               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
-                               ON CONFLICT(code, post_id) DO UPDATE SET
-                                 read_count=excluded.read_count,
-                                 comment_count=excluded.comment_count,
-                                 post_time=excluded.post_time,
-                                 post_date=excluded.post_date,
-                                 content=excluded.content,
-                                 content_fetched=excluded.content_fetched,
-                                 updated_at=excluded.updated_at""",
-                            batch,
-                        )
-                        conn.commit()
-                        saved_total += len(batch)
-                    except Exception as e:
-                        print(f"[guba_incremental] batch error for {code}: {e}")
-                conn.close()
-
-                if (idx + 1) % 50 == 0:
-                    sched_log(
-                        "info",
-                        f"股吧增量同步进度 {idx + 1}/{total}，已写入 {saved_total} 条",
-                    )
-
             except Exception as e:
                 errors += 1
                 print(f"[guba_incremental] error for {code}: {e}")
             time.sleep(0.3)
 
+        saved_total = 0
+        if pending_rows:
+            import sqlite3 as _sqlite3, os
+
+            db_path = os.path.join(os.path.dirname(__file__), "..", "stock_data.db")
+            conn = _sqlite3.connect(os.path.normpath(db_path), timeout=30)
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA busy_timeout=30000")
+            try:
+                for i in range(0, len(pending_rows), 500):
+                    batch = pending_rows[i : i + 500]
+                    conn.executemany(
+                        """INSERT INTO guba_post
+                           (code, post_id, title, author, read_count, comment_count,
+                            post_time, post_date, url, category, content, content_fetched, updated_at)
+                           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                           ON CONFLICT(code, post_id) DO UPDATE SET
+                             read_count=excluded.read_count,
+                             comment_count=excluded.comment_count,
+                             post_time=excluded.post_time,
+                             post_date=excluded.post_date,
+                             content=excluded.content,
+                             content_fetched=excluded.content_fetched,
+                             updated_at=excluded.updated_at""",
+                        batch,
+                    )
+                    conn.commit()
+                    saved_total += len(batch)
+            except Exception as e:
+                print(f"[guba_incremental] final write error: {e}")
+            finally:
+                conn.close()
+
         _guba_last_sync = datetime.utcnow().isoformat()
         sched_log(
-            "success", f"股吧增量同步完成，写入 {saved_total} 条，错误 {errors} 只"
+            "success",
+            f"股吧增量同步完成，写入 {saved_total} 条，错误 {errors} 只",
+            source="scheduler",
         )
     except Exception as e:
-        sched_log("error", f"股吧增量同步异常: {e}")
+        sched_log("error", f"股吧增量同步异常: {e}", source="scheduler")
     finally:
         with _incremental_lock:
             _incremental_running = False

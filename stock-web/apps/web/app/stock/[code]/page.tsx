@@ -43,25 +43,6 @@ interface NewsItem {
   pubTime: string;
 }
 
-interface GubaItem {
-  post_id: string;
-  title: string;
-  author: string;
-  time: string;
-  post_date: string;
-  reads: string;
-  replies: string;
-  url: string;
-  category: string;
-}
-
-interface GubaPageData {
-  items: GubaItem[];
-  total: number;
-  total_pages: number;
-  syncing: boolean;
-}
-
 interface StockSearchResult {
   code: string;
   name: string;
@@ -169,14 +150,7 @@ function removeFromRecentlyViewed(code: string) {
 const API = "http://localhost:8000";
 const INDICATORS = ["VOL", "MACD", "KDJ", "BOLL", "RSI", "DMI", "CCI", "W&R"];
 const PERIODS = ["日K", "周K", "月K"];
-const BOTTOM_TABS = ["全部", "公告", "研报", "资讯", "财务", "AI分析"];
-
-const TAB_CATEGORY_MAP: Record<string, string> = {
-  全部: "all",
-  公告: "announcement",
-  研报: "research",
-  资讯: "news",
-};
+const BOTTOM_TABS = ["财务", "AI分析"];
 
 const PERIOD_MAP: Record<string, string> = {
   日K: "daily",
@@ -260,33 +234,20 @@ export default function StockDetailPage() {
     generateMockData(code),
   );
   const [news, setNews] = useState<NewsItem[]>([]);
-  const [gubaItems, setGubaItems] = useState<GubaItem[]>([]);
-  const [gubaMeta, setGubaMeta] = useState({
-    total: 0,
-    total_pages: 1,
-    syncing: false,
-  });
-  const [gubaCurrentPage, setGubaCurrentPage] = useState(1);
-  const [gubaLoadingMore, setGubaLoadingMore] = useState(false);
-  const gubaListRef = useRef<HTMLDivElement>(null);
   const [activeIndicators, setActiveIndicators] = useState([
     "VOL",
     "MACD",
     "KDJ",
   ]);
   const [activePeriod, setActivePeriod] = useState("日K");
-  const [activeTab, setActiveTab] = useState("全部");
+  const [activeTab, setActiveTab] = useState("财务");
   const [isStarred, setIsStarred] = useState(false);
   const [watchlist, setWatchlist] = useState<
     Array<{ code: string; name: string }>
   >([]);
-  const [selectedPost, setSelectedPost] = useState<GubaItem | null>(null);
-  const [postContent, setPostContent] = useState<string | null>(null);
-  const [postLoading, setPostLoading] = useState(false);
   const [bottomHeight, setBottomHeight] = useState(180);
   const [isResizing, setIsResizing] = useState(false);
   const [quoteLoading, setQuoteLoading] = useState(true);
-  const [gubaLoading, setGubaLoading] = useState(true);
   const [fundamental, setFundamental] = useState<FundamentalData | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<StockSearchResult[]>([]);
@@ -354,71 +315,6 @@ export default function StockDetailPage() {
       })
       .catch(() => {});
   }, [code]);
-
-  useEffect(() => {
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const isFirstPage = gubaCurrentPage === 1;
-
-    const fetchGuba = (pg: number) => {
-      if (isFirstPage) {
-        setGubaLoading(true);
-      } else {
-        setGubaLoadingMore(true);
-      }
-      const category = TAB_CATEGORY_MAP[activeTab] ?? "all";
-      fetch(
-        `http://localhost:8000/api/guba/${code}?category=${category}&page=${pg}&page_size=20`,
-      )
-        .then((r) => r.json())
-        .then((data) => {
-          setGubaMeta({
-            total: data.total ?? 0,
-            total_pages: data.total_pages ?? 1,
-            syncing: data.syncing ?? false,
-          });
-          if (isFirstPage) {
-            setGubaItems(data.items ?? []);
-          } else {
-            setGubaItems((prev) => [...prev, ...(data.items ?? [])]);
-          }
-          if (data.syncing) {
-            timer = setTimeout(() => fetchGuba(pg), 3000);
-          }
-        })
-        .catch(() => {})
-        .finally(() => {
-          setGubaLoading(false);
-          setGubaLoadingMore(false);
-        });
-    };
-
-    fetchGuba(gubaCurrentPage);
-    return () => {
-      if (timer) clearTimeout(timer);
-    };
-  }, [code, activeTab, gubaCurrentPage]);
-
-  const handleLoadMore = useCallback(() => {
-    if (
-      gubaLoadingMore ||
-      gubaLoading ||
-      gubaCurrentPage >= gubaMeta.total_pages
-    )
-      return;
-    setGubaCurrentPage((p) => p + 1);
-  }, [gubaLoadingMore, gubaLoading, gubaCurrentPage, gubaMeta.total_pages]);
-
-  useEffect(() => {
-    const el = gubaListRef.current;
-    if (!el) return;
-    const onScroll = () => {
-      if (el.scrollHeight - el.scrollTop - el.clientHeight < 80) {
-        handleLoadMore();
-      }
-    };
-    el.addEventListener("scroll", onScroll);
-    return () => el.removeEventListener("scroll", onScroll);
-  }, [handleLoadMore]);
 
   const toggleIndicator = (ind: string) => {
     setActiveIndicators((prev) =>
@@ -834,13 +730,6 @@ export default function StockDetailPage() {
                 key={tab}
                 onClick={() => {
                   setActiveTab(tab);
-                  setGubaCurrentPage(1);
-                  setGubaItems([]);
-                  if (tab !== "AI分析" && tab !== "财务") {
-                    fetch(`http://localhost:8000/api/guba/sync/${code}`, {
-                      method: "POST",
-                    }).catch(() => {});
-                  }
                 }}
                 className={cn(
                   "px-4 py-2 text-[11px] whitespace-nowrap transition-colors border-b-2",
@@ -852,11 +741,6 @@ export default function StockDetailPage() {
                 {tab}
               </button>
             ))}
-            {gubaMeta.syncing && (
-              <span className="ml-auto mr-3 text-[10px] text-[var(--text-tertiary)] animate-pulse">
-                加载中…
-              </span>
-            )}
           </div>
 
           {/* Tab content */}
@@ -911,110 +795,6 @@ export default function StockDetailPage() {
                         </div>
                       ))}
                   </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {activeTab !== "AI分析" && activeTab !== "财务" && (
-            <div
-              className="flex flex-col"
-              style={{ height: `${bottomHeight}px` }}
-            >
-              <div
-                ref={gubaListRef}
-                className="flex-1 overflow-y-auto bg-[var(--bg-primary)] text-[11px]"
-              >
-                {gubaLoading ? (
-                  <div className="space-y-2 p-3">
-                    {[1, 2, 3, 4, 5].map((i) => (
-                      <div
-                        key={i}
-                        className="h-8 bg-[var(--bg-tertiary)] animate-pulse rounded"
-                      />
-                    ))}
-                  </div>
-                ) : gubaItems.length > 0 ? (
-                  <table className="w-full">
-                    <thead className="sticky top-0 bg-[var(--bg-secondary)] border-b border-[var(--border-color)]">
-                      <tr className="text-[var(--text-tertiary)] text-[10px]">
-                        <th className="px-2 py-1 text-center w-16">阅读</th>
-                        <th className="px-2 py-1 text-center w-16">评论</th>
-                        <th className="px-2 py-1 text-left">标题</th>
-                        <th className="px-2 py-1 text-left w-24">作者</th>
-                        <th className="px-2 py-1 text-center w-20">时间</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {gubaItems.map((item, i) => (
-                        <tr
-                          key={`${item.post_id}-${i}`}
-                          className="border-b border-[var(--border-color)] hover:bg-[var(--bg-hover)] transition-colors"
-                        >
-                          <td className="px-2 py-1.5 text-center text-[var(--text-tertiary)]">
-                            {item.reads}
-                          </td>
-                          <td className="px-2 py-1.5 text-center text-[var(--text-tertiary)]">
-                            {item.replies}
-                          </td>
-                          <td className="px-2 py-1.5">
-                            <button
-                              onClick={() => {
-                                setSelectedPost(item);
-                                setPostContent(null);
-                                setPostLoading(true);
-                                fetch(
-                                  `http://localhost:8000/api/guba/post/${item.post_id}`,
-                                )
-                                  .then((r) => r.json())
-                                  .then((d) => {
-                                    setPostContent(d.content || "");
-                                    setPostLoading(false);
-                                  })
-                                  .catch(() => {
-                                    setPostContent("");
-                                    setPostLoading(false);
-                                  });
-                              }}
-                              className="text-left text-[var(--text-secondary)] hover:text-[#f5a623] line-clamp-1 w-full text-[11px]"
-                            >
-                              {item.title}
-                            </button>
-                          </td>
-                          <td className="px-2 py-1.5 text-[var(--text-tertiary)] truncate">
-                            {item.author}
-                          </td>
-                          <td className="px-2 py-1.5 text-center text-[var(--text-tertiary)] text-[10px]">
-                            {item.time}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                ) : (
-                  <div className="text-center text-[var(--text-tertiary)] py-6">
-                    {gubaMeta.syncing ? "正在抓取数据…" : "暂无数据"}
-                  </div>
-                )}
-
-                {/* 底部加载更多状态 */}
-                {gubaItems.length > 0 && (
-                  <div className="py-2 text-center text-[10px] text-[var(--text-tertiary)]">
-                    {gubaLoadingMore ? (
-                      <span className="animate-pulse">加载中…</span>
-                    ) : gubaCurrentPage >= gubaMeta.total_pages ? (
-                      <span>共 {gubaMeta.total} 条，已全部加载</span>
-                    ) : null}
-                  </div>
-                )}
-              </div>
-
-              {/* 总条数 */}
-              {gubaMeta.total > 0 && (
-                <div className="px-3 py-1 border-t border-[var(--border-color)] bg-[var(--bg-secondary)] shrink-0">
-                  <span className="text-[10px] text-[var(--text-tertiary)]">
-                    共 {gubaMeta.total} 条
-                  </span>
                 </div>
               )}
             </div>
@@ -1114,74 +894,6 @@ export default function StockDetailPage() {
           )}
         </div>
       </div>
-
-      {/* Post detail modal */}
-      {selectedPost && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
-          onClick={() => setSelectedPost(null)}
-        >
-          <div
-            className="relative w-[660px] max-w-[92vw] max-h-[82vh] flex flex-col rounded-xl border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-2xl overflow-hidden"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-[var(--border-color)] bg-[var(--bg-secondary)]">
-              <div className="flex-1 min-w-0">
-                <div className="text-[13px] font-semibold text-[var(--text-primary)] leading-snug">
-                  {selectedPost.title}
-                </div>
-                <div className="flex items-center gap-3 mt-1.5 text-[11px] text-[var(--text-tertiary)]">
-                  <span>{selectedPost.author}</span>
-                  <span>{selectedPost.time}</span>
-                  <span>阅读 {selectedPost.reads}</span>
-                  <span>评论 {selectedPost.replies}</span>
-                  <span className="px-1.5 py-0.5 rounded text-[10px] border border-[var(--border-color)]">
-                    {selectedPost.category === "announcement"
-                      ? "公告"
-                      : selectedPost.category === "research"
-                        ? "研报"
-                        : selectedPost.category === "news"
-                          ? "资讯"
-                          : "全部"}
-                  </span>
-                </div>
-              </div>
-              <button
-                onClick={() => setSelectedPost(null)}
-                className="shrink-0 p-1.5 rounded-lg hover:bg-[var(--bg-hover)] text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors"
-              >
-                <X size={16} />
-              </button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto px-5 py-4 text-[12px] text-[var(--text-secondary)] leading-relaxed">
-              {postLoading ? (
-                <div className="text-center text-[var(--text-tertiary)] py-8 animate-pulse">
-                  正在加载内容…
-                </div>
-              ) : postContent ? (
-                <div className="whitespace-pre-wrap">{postContent}</div>
-              ) : (
-                <div className="text-center text-[var(--text-tertiary)] py-8">
-                  暂无正文内容
-                </div>
-              )}
-            </div>
-
-            <div className="px-5 py-3 border-t border-[var(--border-color)] bg-[var(--bg-secondary)] flex justify-end">
-              <a
-                href={selectedPost.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#f5a623]/10 hover:bg-[#f5a623]/20 border border-[#f5a623]/40 text-[#f5a623] text-[12px] font-medium transition-colors"
-              >
-                <ExternalLink size={13} />
-                查看原文
-              </a>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

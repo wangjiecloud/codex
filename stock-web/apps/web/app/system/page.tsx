@@ -21,14 +21,12 @@ interface SystemStats {
   totalStocks: number;
   totalData: number;
   dataByType?: {
-    guba: number;
     quote: number;
     fundamental: number;
     stock_info: number;
     kline: number;
   };
   stocksByDataType?: {
-    guba: number;
     quote: number;
     fundamental: number;
     stock_info: number;
@@ -45,7 +43,6 @@ interface SystemStats {
     count: number;
     updatedAt: string;
   }>;
-  gubaLastSync?: string | null;
   quoteLastSync?: string | null;
   fundamentalLastSync?: string | null;
   klineLastSync?: string | null;
@@ -201,8 +198,6 @@ export default function SystemMonitorPage() {
       sw_industry: "申万板块行情",
       stock_info: "基本信息",
       fundamental: "财务数据",
-      guba: "股吧数据",
-      guba_all: "全部讨论",
       done: "完成",
     };
     return phaseNames[phase] || phase;
@@ -336,30 +331,21 @@ export default function SystemMonitorPage() {
   };
 
   const triggerBatchSync = async (
-    syncType: "guba" | "quote" | "stock_info" | "fundamental" | "kline",
+    syncType: "quote" | "stock_info" | "fundamental" | "kline",
   ) => {
-    if (syncRunning) {
-      addLog("warning", "已有同步任务正在运行，请稍后再试");
-      return;
-    }
-
     setSyncRunning(true);
     setCurrentSyncType(syncType);
-    const typeNames = {
-      guba: "股吧数据",
+    const typeNames: Record<string, string> = {
       kline: "K线数据",
       quote: "实时行情",
       stock_info: "基本信息",
       fundamental: "财务数据",
     };
-    const typeName = typeNames[syncType];
+    const typeName = typeNames[syncType] || syncType;
 
     try {
       let endpoint = "";
       switch (syncType) {
-        case "guba":
-          endpoint = "/api/guba/sync/batch";
-          break;
         case "kline":
           endpoint = "/api/sync/klines";
           break;
@@ -464,19 +450,26 @@ export default function SystemMonitorPage() {
   };
 
   const triggerFullRefresh = async () => {
-    if (syncRunning) {
-      addLog("warning", "已有同步任务正在运行，请稍后再试");
+    if (currentSyncType === "full") {
+      addLog("warning", "全量同步已在运行中");
       return;
     }
 
+    if (syncRunning) {
+      addLog("warning", "检测到其他同步任务，正在停止...");
+      await stopAllSync();
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+
     setSyncRunning(true);
+    setCurrentSyncType("full");
     addLog(
       "info",
-      "开始一键全量刷新：行情+申万板块 → 基本信息 → 财务数据 → 股吧数据 → 快讯",
+      "开始一键全量刷新：行情+申万板块 → 基本信息 → 财务数据 → 快讯",
     );
 
     try {
-      addLog("info", "[1/5] 同步实时行情 + 申万板块行情 + K线数据...");
+      addLog("info", "[1/4] 同步实时行情 + 申万板块行情 + K线数据...");
       const quoteResponse = await fetch("http://localhost:8000/api/sync/all", {
         method: "POST",
       });
@@ -488,7 +481,7 @@ export default function SystemMonitorPage() {
         }
       }
 
-      addLog("info", "[2/5] 同步股票基本信息...");
+      addLog("info", "[2/4] 同步股票基本信息...");
       const infoResponse = await fetch(
         "http://localhost:8000/api/sync/stock_info",
         { method: "POST" },
@@ -501,7 +494,7 @@ export default function SystemMonitorPage() {
         }
       }
 
-      addLog("info", "[3/5] 同步财务数据...");
+      addLog("info", "[3/4] 同步财务数据...");
       const fundamentalResponse = await fetch(
         "http://localhost:8000/api/sync/fundamental",
         { method: "POST" },
@@ -514,20 +507,7 @@ export default function SystemMonitorPage() {
         }
       }
 
-      addLog("info", "[4/5] 同步股吧数据（公告/研报/资讯）...");
-      const gubaResponse = await fetch(
-        "http://localhost:8000/api/guba/sync/batch",
-        { method: "POST" },
-      );
-
-      if (gubaResponse.ok) {
-        const gubaData = await gubaResponse.json();
-        if (gubaData.status === "started") {
-          await waitForSyncComplete("股吧数据");
-        }
-      }
-
-      addLog("info", "[5/5] 同步快讯（6个分类）...");
+      addLog("info", "[4/4] 同步快讯（6个分类）...");
       const flashResponse = await fetch(
         "http://localhost:8000/api/flash/sync",
         {
@@ -543,9 +523,11 @@ export default function SystemMonitorPage() {
 
       addLog("success", "✨ 一键全量刷新完成！所有数据已更新");
       setSyncRunning(false);
+      setCurrentSyncType(null);
     } catch (error) {
       addLog("error", `同步失败: ${error}`);
       setSyncRunning(false);
+      setCurrentSyncType(null);
     } finally {
       fetchStats();
     }
@@ -562,6 +544,7 @@ export default function SystemMonitorPage() {
         addLog("warning", data.message || "停止请求已发送");
         setTimeout(() => {
           setSyncRunning(false);
+          setCurrentSyncType(null);
           setCurrentSyncInfo(null);
           fetchStats();
         }, 2000);
@@ -681,7 +664,6 @@ export default function SystemMonitorPage() {
           klines: "K线数据",
           stock_info: "基本信息",
           fundamental: "财务数据",
-          guba: "股吧数据",
         };
 
         const phaseName = phaseNames[data.phase] || data.phase;
@@ -768,17 +750,17 @@ export default function SystemMonitorPage() {
           <div className="flex items-center gap-3">
             <button
               onClick={triggerFullRefresh}
-              disabled={syncRunning}
+              disabled={currentSyncType === "full"}
               className={cn(
                 "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all",
-                syncRunning
+                currentSyncType === "full"
                   ? "bg-[var(--bg-tertiary)] text-[var(--text-tertiary)] cursor-not-allowed"
                   : "bg-gradient-to-r from-blue-500 to-purple-500 text-white hover:from-blue-600 hover:to-purple-600 shadow-lg",
               )}
             >
               <RefreshCw
                 size={16}
-                className={syncRunning ? "animate-spin" : ""}
+                className={currentSyncType === "full" ? "animate-spin" : ""}
               />
               一键刷新全部
             </button>
@@ -836,7 +818,7 @@ export default function SystemMonitorPage() {
           <StatCard
             icon={<CheckCircle size={20} />}
             label="数据类型"
-            value={5}
+            value={4}
             color="orange"
           />
         </div>
@@ -851,10 +833,6 @@ export default function SystemMonitorPage() {
                   数据覆盖情况
                 </div>
                 <div className="text-xs text-[var(--text-secondary)] space-y-1">
-                  <div>
-                    • 股吧数据（公告/研报/资讯）：{stats.stocksByDataType.guba}/
-                    {stats.totalStocks} 只股票
-                  </div>
                   <div>
                     • 实时行情数据：{stats.stocksByDataType.quote}/
                     {stats.totalStocks} 只股票
@@ -1031,17 +1009,17 @@ export default function SystemMonitorPage() {
             <div className="flex gap-2">
               <button
                 onClick={triggerFullRefresh}
-                disabled={syncRunning}
+                disabled={currentSyncType === "full"}
                 className={cn(
                   "flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-all",
-                  syncRunning
+                  currentSyncType === "full"
                     ? "bg-[var(--bg-tertiary)] text-[var(--text-tertiary)] cursor-not-allowed"
                     : "bg-gradient-to-r from-blue-500 to-purple-500 text-white hover:from-blue-600 hover:to-purple-600 shadow-md",
                 )}
               >
                 <RefreshCw
                   size={12}
-                  className={syncRunning ? "animate-spin" : ""}
+                  className={currentSyncType === "full" ? "animate-spin" : ""}
                 />
                 同步全部
               </button>
@@ -1091,17 +1069,6 @@ export default function SystemMonitorPage() {
                 stocks: stats.stocksByDataType?.fundamental,
                 syncType: "fundamental" as const,
                 lastSync: stats.fundamentalLastSync,
-              },
-              {
-                key: "guba",
-                label: "股吧数据",
-                sub: "公告/研报/资讯",
-                icon: <Database size={20} />,
-                color: "blue",
-                count: stats.dataByType?.guba,
-                stocks: stats.stocksByDataType?.guba,
-                syncType: "guba" as const,
-                lastSync: stats.gubaLastSync,
               },
               {
                 key: "kline",

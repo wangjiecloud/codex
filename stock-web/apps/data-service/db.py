@@ -114,27 +114,6 @@ class StockNews(Base):
     __table_args__ = (UniqueConstraint("code", "url"),)
 
 
-class GubaPost(Base):
-    __tablename__ = "guba_post"
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    code = Column(String(20), index=True)
-    post_id = Column(String(50))
-    title = Column(Text)
-    author = Column(String(100))
-    author_url = Column(Text, default="")
-    read_count = Column(Integer, default=0)
-    comment_count = Column(Integer, default=0)
-    post_time = Column(String(30))
-    post_date = Column(String(20), index=True, default="")
-    post_type = Column(String(10), default="0")
-    url = Column(Text)
-    category = Column(String(20), index=True)
-    content = Column(Text, default="")
-    content_fetched = Column(Integer, default=0)
-    updated_at = Column(DateTime, default=datetime.utcnow)
-    __table_args__ = (UniqueConstraint("code", "post_id"),)
-
-
 class IndustryNode(Base):
     __tablename__ = "industry_node"
     industry_id = Column(String(30), primary_key=True)

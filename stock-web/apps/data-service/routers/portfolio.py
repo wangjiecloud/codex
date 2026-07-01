@@ -50,6 +50,38 @@ def _trade_to_dict(t: PortfolioTrade) -> dict:
     }
 
 
+def _recalculate_holding(holding: PortfolioHolding, db: Session) -> None:
+    trades = (
+        db.query(PortfolioTrade)
+        .filter(PortfolioTrade.holding_id == holding.id)
+        .order_by(PortfolioTrade.trade_date, PortfolioTrade.created_at)
+        .all()
+    )
+
+    if not trades:
+        return
+
+    total_shares = 0
+    total_cost = 0.0
+
+    for trade in trades:
+        if trade.trade_type == "buy":
+            if trade.price > 0:
+                total_cost += trade.price * trade.shares
+            total_shares += trade.shares
+        elif trade.trade_type == "sell" and total_shares > 0:
+            total_cost -= trade.price * trade.shares
+            total_shares -= trade.shares
+            if total_shares <= 0:
+                total_cost = 0.0
+
+    holding.shares = max(0, total_shares)
+    holding.cost_price = (
+        round(total_cost / total_shares, 4) if total_shares > 0 else 0.0
+    )
+    holding.updated_at = datetime.utcnow()
+
+
 @router.get("")
 async def list_holdings(db: Session = Depends(get_db)):
     holdings = db.query(PortfolioHolding).order_by(PortfolioHolding.created_at).all()
@@ -95,8 +127,12 @@ async def delete_holding(holding_id: str, db: Session = Depends(get_db)):
 
 @router.post("/{holding_id}/trades")
 async def add_trade(holding_id: str, body: TradeIn, db: Session = Depends(get_db)):
-    if not db.query(PortfolioHolding).filter(PortfolioHolding.id == holding_id).first():
+    holding = (
+        db.query(PortfolioHolding).filter(PortfolioHolding.id == holding_id).first()
+    )
+    if not holding:
         raise HTTPException(status_code=404, detail="Holding not found")
+
     row = PortfolioTrade(
         id=body.id,
         holding_id=holding_id,
@@ -107,12 +143,29 @@ async def add_trade(holding_id: str, body: TradeIn, db: Session = Depends(get_db
         note=body.note or "",
     )
     db.add(row)
+    db.flush()
+
+    _recalculate_holding(holding, db)
     db.commit()
-    return {"ok": True}
+
+    return {
+        "ok": True,
+        "holding": {
+            "id": holding.id,
+            "costPrice": holding.cost_price,
+            "shares": holding.shares,
+        },
+    }
 
 
 @router.delete("/{holding_id}/trades/{trade_id}")
 async def delete_trade(holding_id: str, trade_id: str, db: Session = Depends(get_db)):
+    holding = (
+        db.query(PortfolioHolding).filter(PortfolioHolding.id == holding_id).first()
+    )
+    if not holding:
+        raise HTTPException(status_code=404, detail="Holding not found")
+
     deleted = (
         db.query(PortfolioTrade)
         .filter(
@@ -121,7 +174,19 @@ async def delete_trade(holding_id: str, trade_id: str, db: Session = Depends(get
         )
         .delete()
     )
-    db.commit()
+
     if not deleted:
         raise HTTPException(status_code=404, detail="Trade not found")
-    return {"ok": True}
+
+    db.flush()
+    _recalculate_holding(holding, db)
+    db.commit()
+
+    return {
+        "ok": True,
+        "holding": {
+            "id": holding.id,
+            "costPrice": holding.cost_price,
+            "shares": holding.shares,
+        },
+    }

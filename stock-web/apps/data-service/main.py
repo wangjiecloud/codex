@@ -6,7 +6,6 @@ from routers import (
     fundamental,
     news,
     industry,
-    guba,
     sync,
     system,
     global_market,
@@ -15,6 +14,7 @@ from routers import (
     theme,
     portfolio,
     sw_industry,
+    cleanup,
 )
 import akshare as ak
 from fastapi import HTTPException
@@ -38,7 +38,6 @@ app.include_router(kline.router, prefix="/api/kline", tags=["K线"])
 app.include_router(fundamental.router, prefix="/api/fundamental", tags=["基本面"])
 app.include_router(news.router, prefix="/api/news", tags=["新闻"])
 app.include_router(industry.router, prefix="/api/industry", tags=["产业链"])
-app.include_router(guba.router, prefix="/api/guba", tags=["股吧资讯"])
 app.include_router(sync.router, prefix="/api/sync", tags=["数据同步"])
 app.include_router(system.router, prefix="/api/system", tags=["系统监控"])
 app.include_router(global_market.router, prefix="/api/global", tags=["全球市场"])
@@ -47,6 +46,7 @@ app.include_router(concept_board.router, prefix="/api/board", tags=["概念板�
 app.include_router(theme.router, prefix="/api/theme", tags=["主题板块"])
 app.include_router(portfolio.router, prefix="/api/portfolio", tags=["持仓管理"])
 app.include_router(sw_industry.router, prefix="/api/sw-industry", tags=["申万行业"])
+app.include_router(cleanup.router, prefix="/api/cleanup", tags=["数据清理"])
 
 _scheduler = BackgroundScheduler(timezone="Asia/Shanghai")
 
@@ -133,11 +133,13 @@ def startup():
         replace_existing=True,
     )
 
+    # 每天凌晨3点执行数据清理任务
     _scheduler.add_job(
-        guba.sync_guba_incremental,
-        trigger="interval",
-        minutes=20,
-        id="guba_incremental_sync",
+        cleanup.run_cleanup,
+        trigger="cron",
+        hour=3,
+        minute=0,
+        id="daily_cleanup",
         replace_existing=True,
     )
 

@@ -100,7 +100,7 @@ async function apiDeleteHolding(id: string) {
 }
 
 async function apiAddTrade(holdingId: string, t: TradeRecord) {
-  await fetch(`${API}/${holdingId}/trades`, {
+  const response = await fetch(`${API}/${holdingId}/trades`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -113,10 +113,16 @@ async function apiAddTrade(holdingId: string, t: TradeRecord) {
       note: t.note,
     }),
   });
+  const data = await response.json();
+  return data.holding;
 }
 
 async function apiDeleteTrade(holdingId: string, tradeId: string) {
-  await fetch(`${API}/${holdingId}/trades/${tradeId}`, { method: "DELETE" });
+  const response = await fetch(`${API}/${holdingId}/trades/${tradeId}`, {
+    method: "DELETE",
+  });
+  const data = await response.json();
+  return data.holding;
 }
 
 function formatMoney(n: number): string {
@@ -1058,17 +1064,36 @@ export function PortfolioPanel() {
     apiDeleteHolding(id).catch(() => {});
   };
 
-  const handleAddTrade = (trade: TradeRecord) => {
+  const handleAddTrade = async (trade: TradeRecord) => {
     if (!addingTradeFor) return;
+
     setHoldings((prev) =>
       prev.map((s) =>
         s.id === addingTradeFor.id ? { ...s, trades: [...s.trades, trade] } : s,
       ),
     );
-    apiAddTrade(addingTradeFor.id, trade).catch(() => {});
+
+    try {
+      const updatedHolding = await apiAddTrade(addingTradeFor.id, trade);
+      if (updatedHolding) {
+        setHoldings((prev) =>
+          prev.map((s) =>
+            s.id === addingTradeFor.id
+              ? {
+                  ...s,
+                  costPrice: updatedHolding.costPrice,
+                  shares: updatedHolding.shares,
+                }
+              : s,
+          ),
+        );
+      }
+    } catch (error) {
+      console.error("[portfolio] add trade failed:", error);
+    }
   };
 
-  const handleDeleteTrade = (holdingId: string, tradeId: string) => {
+  const handleDeleteTrade = async (holdingId: string, tradeId: string) => {
     setHoldings((prev) =>
       prev.map((s) =>
         s.id === holdingId
@@ -1076,7 +1101,25 @@ export function PortfolioPanel() {
           : s,
       ),
     );
-    apiDeleteTrade(holdingId, tradeId).catch(() => {});
+
+    try {
+      const updatedHolding = await apiDeleteTrade(holdingId, tradeId);
+      if (updatedHolding) {
+        setHoldings((prev) =>
+          prev.map((s) =>
+            s.id === holdingId
+              ? {
+                  ...s,
+                  costPrice: updatedHolding.costPrice,
+                  shares: updatedHolding.shares,
+                }
+              : s,
+          ),
+        );
+      }
+    } catch (error) {
+      console.error("[portfolio] delete trade failed:", error);
+    }
   };
 
   const blurred = !unlocked;

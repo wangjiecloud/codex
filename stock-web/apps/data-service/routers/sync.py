@@ -112,9 +112,9 @@ def _run_full_sync():
             finished_at="",
         )
 
-    sched_log("info", f"[1/5] 开始同步实时行情，共 {len(codes)} 只股票")
+    sched_log("info", f"[1/4] 开始同步实时行情，共 {len(codes)} 只股票")
     _sync_all_quotes()
-    sched_log("success", f"[1/5] 实时行情同步完成")
+    sched_log("success", f"[1/4] 实时行情同步完成")
 
     if _stop_requested.is_set():
         sched_log("warning", "同步已被用户停止")
@@ -129,12 +129,12 @@ def _run_full_sync():
     with _lock:
         _status.update(phase="sw_industry", done=0, current="", total=1)
 
-    sched_log("info", "[2/5] 开始同步申万行业板块行情...")
+    sched_log("info", "[2/4] 开始同步申万行业板块行情...")
     try:
         count = sync_sw_industries()
-        sched_log("success", f"[2/5] 申万行业板块同步完成，共 {count} 个板块")
+        sched_log("success", f"[2/4] 申万行业板块同步完成，共 {count} 个板块")
     except Exception as e:
-        sched_log("error", f"[2/5] 申万行业板块同步失败: {e}")
+        sched_log("error", f"[2/4] 申万行业板块同步失败: {e}")
 
     if _stop_requested.is_set():
         sched_log("warning", "同步已被用户停止")
@@ -152,7 +152,7 @@ def _run_full_sync():
         _status.update(phase="klines", done=0, total=len(kline_codes))
 
     sched_log(
-        "info", f"[3/5] 开始同步 K 线数据，共 {len(kline_codes)} 只股票（无数据股优先）"
+        "info", f"[3/4] 开始同步 K 线数据，共 {len(kline_codes)} 只股票（无数据股优先）"
     )
     consecutive_timeouts = 0
     for i, code in enumerate(kline_codes):
@@ -202,9 +202,9 @@ def _run_full_sync():
 
         _time.sleep(0.1)
         if (i + 1) % 500 == 0:
-            sched_log("info", f"[3/5] K线同步进度: {i + 1}/{len(kline_codes)}")
+            sched_log("info", f"[3/4] K线同步进度: {i + 1}/{len(kline_codes)}")
 
-    sched_log("success", f"[3/5] K线数据同步完成，共 {len(kline_codes)} 只股票")
+    sched_log("success", f"[3/4] K线数据同步完成，共 {len(kline_codes)} 只股票")
 
     if _stop_requested.is_set():
         sched_log("warning", "同步已被用户停止")
@@ -222,7 +222,7 @@ def _run_full_sync():
 
     sched_log(
         "info",
-        f"[4/5] 开始同步财务数据，共 {len(fundamental_codes)} 只股票（无数据股优先）",
+        f"[4/4] 开始同步财务数据，共 {len(fundamental_codes)} 只股票（无数据股优先）",
     )
     from routers.industry import _sync_fundamental
 
@@ -249,10 +249,10 @@ def _run_full_sync():
         _time.sleep(0.1)
         if (i + 1) % 500 == 0:
             sched_log(
-                "info", f"[4/5] 财务数据同步进度: {i + 1}/{len(fundamental_codes)}"
+                "info", f"[4/4] 财务数据同步进度: {i + 1}/{len(fundamental_codes)}"
             )
 
-    sched_log("success", f"[4/5] 财务数据同步完成，共 {len(fundamental_codes)} 只股票")
+    sched_log("success", f"[4/4] 财务数据同步完成，共 {len(fundamental_codes)} 只股票")
 
     if _stop_requested.is_set():
         sched_log("warning", "同步已被用户停止")
@@ -263,38 +263,6 @@ def _run_full_sync():
                 finished_at=datetime.utcnow().isoformat(),
             )
         return
-
-    with _lock:
-        _status.update(phase="guba", done=0, total=len(codes))
-
-    sched_log("info", f"[5/5] 开始同步股吧数据，共 {len(codes)} 只股票")
-    from routers.guba import _sync_guba_posts
-
-    for i, code in enumerate(codes):
-        if _stop_requested.is_set():
-            sched_log("warning", "同步已被用户停止")
-            with _lock:
-                _status.update(
-                    running=False,
-                    phase="stopped",
-                    finished_at=datetime.utcnow().isoformat(),
-                )
-            return
-
-        with _lock:
-            _status["current"] = code
-            _status["done"] = i
-
-        try:
-            _sync_guba_posts(code)
-        except Exception as e:
-            print(f"[full_sync] guba {code} failed: {e}")
-
-        _time.sleep(0.2)
-        if (i + 1) % 100 == 0:
-            sched_log("info", f"[5/5] 股吧数据同步进度: {i + 1}/{len(codes)}")
-
-    sched_log("success", f"[5/5] 股吧数据同步完成，共 {len(codes)} 只股票")
 
     with _lock:
         _status.update(

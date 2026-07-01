@@ -491,11 +491,25 @@ def fetch_stock_info(code: str) -> Optional[Dict]:
             return None
 
         info_dict = {}
+
+        if len(df.columns) < 2:
+            print(
+                f"[scraper] fetch_stock_info warning for {code}: unexpected column count {len(df.columns)}"
+            )
+            return None
+
+        col_names = df.columns.tolist()
+        key_col = col_names[0] if len(col_names) > 0 else "item"
+        val_col = col_names[1] if len(col_names) > 1 else "value"
+
         for _, row in df.iterrows():
-            key = str(row.get("item", "")).strip()
-            value = str(row.get("value", "")).strip()
-            if key:
-                info_dict[key] = value
+            try:
+                key = str(row.iloc[0] if len(row) > 0 else "").strip()
+                value = str(row.iloc[1] if len(row) > 1 else "").strip()
+                if key:
+                    info_dict[key] = value
+            except Exception:
+                continue
 
         return {
             "code": code,
@@ -523,18 +537,25 @@ def fetch_stock_fundamental(code: str) -> Optional[Dict]:
         if df is None or df.empty:
             return None
 
-        latest = df.iloc[0].to_dict()
+        latest = df.iloc[0]
+        latest_dict = {}
+        for col in df.columns:
+            try:
+                latest_dict[col] = latest[col]
+            except Exception:
+                latest_dict[col] = ""
+
         return {
             "code": code,
-            "report_date": str(latest.get("报告期", "")),
-            "basic_eps": str(latest.get("基本每股收益", "")),
-            "total_operating_revenue": str(latest.get("营业总收入", "")),
-            "net_profit": str(latest.get("净利润", "")),
-            "total_assets": str(latest.get("总资产", "")),
-            "total_liabilities": str(latest.get("总负债", "")),
-            "net_assets": str(latest.get("净资产", "")),
-            "roe": str(latest.get("净资产收益率", "")),
-            "raw_data": {k: str(v) for k, v in latest.items()},
+            "report_date": str(latest_dict.get("报告期", "")),
+            "basic_eps": str(latest_dict.get("基本每股收益", "")),
+            "total_operating_revenue": str(latest_dict.get("营业总收入", "")),
+            "net_profit": str(latest_dict.get("净利润", "")),
+            "total_assets": str(latest_dict.get("总资产", "")),
+            "total_liabilities": str(latest_dict.get("总负债", "")),
+            "net_assets": str(latest_dict.get("净资产", "")),
+            "roe": str(latest_dict.get("净资产收益率", "")),
+            "raw_data": {k: str(v) for k, v in latest_dict.items()},
         }
     except Exception as e:
         print(f"[scraper] fetch_stock_fundamental error for {code}: {e}")

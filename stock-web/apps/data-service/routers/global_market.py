@@ -108,59 +108,70 @@ def sync_global_indices() -> int:
             return 0
 
         db = SessionLocal()
-        try:
-            count = 0
-            for _, row in df.iterrows():
-                code = str(row.get("代码", "")).strip()
-                if not code:
+        retry_count = 3
+        for db_attempt in range(retry_count):
+            try:
+                count = 0
+                for _, row in df.iterrows():
+                    code = str(row.get("代码", "")).strip()
+                    if not code:
+                        continue
+                    region = _REGION_MAP.get(code, "other")
+                    stmt = sqlite_insert(GlobalMarketIndex).values(
+                        code=code,
+                        name=str(row.get("名称", "")),
+                        region=region,
+                        price=round(_safe_float(row.get("最新价")), 4),
+                        change_amt=round(_safe_float(row.get("涨跌额")), 4),
+                        change_pct=round(_safe_float(row.get("涨跌幅")), 4),
+                        open=round(_safe_float(row.get("开盘价")), 4),
+                        high=round(_safe_float(row.get("最高价")), 4),
+                        low=round(_safe_float(row.get("最低价")), 4),
+                        prev_close=round(_safe_float(row.get("昨收价")), 4),
+                        market_time=str(row.get("最新行情时间", "")),
+                        updated_at=datetime.utcnow(),
+                    )
+                    stmt = stmt.on_conflict_do_update(
+                        index_elements=["code"],
+                        set_={
+                            "name": stmt.excluded.name,
+                            "price": stmt.excluded.price,
+                            "change_amt": stmt.excluded.change_amt,
+                            "change_pct": stmt.excluded.change_pct,
+                            "open": stmt.excluded.open,
+                            "high": stmt.excluded.high,
+                            "low": stmt.excluded.low,
+                            "prev_close": stmt.excluded.prev_close,
+                            "market_time": stmt.excluded.market_time,
+                            "updated_at": stmt.excluded.updated_at,
+                        },
+                    )
+                    db.execute(stmt)
+                    count += 1
+                db.commit()
+                from routers.system import sched_log
+
+                sched_log(
+                    "success",
+                    f"全球市场指数同步完成，共 {count} 条",
+                    source="scheduler",
+                )
+                return count
+            except Exception as e:
+                db.rollback()
+                if (
+                    db_attempt < retry_count - 1
+                    and "database is locked" in str(e).lower()
+                ):
+                    time.sleep(1 + db_attempt * 0.5)
                     continue
-                region = _REGION_MAP.get(code, "other")
-                stmt = sqlite_insert(GlobalMarketIndex).values(
-                    code=code,
-                    name=str(row.get("名称", "")),
-                    region=region,
-                    price=round(_safe_float(row.get("最新价")), 4),
-                    change_amt=round(_safe_float(row.get("涨跌额")), 4),
-                    change_pct=round(_safe_float(row.get("涨跌幅")), 4),
-                    open=round(_safe_float(row.get("开盘价")), 4),
-                    high=round(_safe_float(row.get("最高价")), 4),
-                    low=round(_safe_float(row.get("最低价")), 4),
-                    prev_close=round(_safe_float(row.get("昨收价")), 4),
-                    market_time=str(row.get("最新行情时间", "")),
-                    updated_at=datetime.utcnow(),
-                )
-                stmt = stmt.on_conflict_do_update(
-                    index_elements=["code"],
-                    set_={
-                        "name": stmt.excluded.name,
-                        "price": stmt.excluded.price,
-                        "change_amt": stmt.excluded.change_amt,
-                        "change_pct": stmt.excluded.change_pct,
-                        "open": stmt.excluded.open,
-                        "high": stmt.excluded.high,
-                        "low": stmt.excluded.low,
-                        "prev_close": stmt.excluded.prev_close,
-                        "market_time": stmt.excluded.market_time,
-                        "updated_at": stmt.excluded.updated_at,
-                    },
-                )
-                db.execute(stmt)
-                count += 1
-            db.commit()
-            from routers.system import sched_log
+                from routers.system import sched_log
 
-            sched_log(
-                "success", f"全球市场指数同步完成，共 {count} 条", source="scheduler"
-            )
-            return count
-        except Exception as e:
-            db.rollback()
-            from routers.system import sched_log
-
-            sched_log("error", f"全球市场指数同步DB错误: {e}", source="scheduler")
-            return 0
-        finally:
-            db.close()
+                sched_log("error", f"全球市场指数同步DB错误: {e}", source="scheduler")
+                return 0
+            finally:
+                if db_attempt == retry_count - 1:
+                    db.close()
     except Exception as e:
         from routers.system import sched_log
 

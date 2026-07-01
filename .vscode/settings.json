@@ -24,4 +24,7 @@
     // `args` for an MCP server is significant, so we disable reordering.
     "evenBetterToml.formatter.reorderArrays": false,
     "evenBetterToml.formatter.reorderKeys": true,
+    // Python 解释器配置（股票项目）
+    "python.defaultInterpreterPath": "${workspaceFolder}/stock-web/apps/data-service/.venv/bin/python",
+    "python.terminal.activateEnvironment": true,
 }

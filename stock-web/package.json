@@ -4,6 +4,9 @@
   "scripts": {
     "dev": "pnpm --filter web dev",
     "build": "pnpm --filter web build",
-    "data-service": "cd apps/data-service && uvicorn main:app --reload --port 8000"
+    "data-service": "cd apps/data-service && uvicorn main:app --reload --port 8000",
+    "data-service:bg": "cd apps/data-service && nohup uvicorn main:app --host 0.0.0.0 --port 8000 --reload > backend.log 2>&1 &",
+    "data-service:stop": "lsof -ti :8000 | xargs kill",
+    "data-service:logs": "tail -f apps/data-service/backend.log"
   }
 }

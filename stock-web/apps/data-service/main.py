@@ -79,6 +79,7 @@ def _warmup_caches():
                         "companyCount": r.company_count or 0,
                         "lastAnalyzed": r.last_analyzed,
                         "representatives": json.loads(r.representatives or "[]"),
+                        "tab": r.tab or "ai_infra",
                     }
                     for r in rows
                 ]

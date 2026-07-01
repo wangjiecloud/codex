@@ -115,47 +115,57 @@ def sync_sw_industries() -> int:
             )
 
         db = SessionLocal()
-        try:
-            count = 0
-            for item in rows_to_write:
-                stmt = sqlite_insert(SwIndustry).values(level="二级", **item)
-                stmt = stmt.on_conflict_do_update(
-                    index_elements=["code"],
-                    set_={
-                        "name": stmt.excluded.name,
-                        "prev_close": stmt.excluded.prev_close,
-                        "open": stmt.excluded.open,
-                        "price": stmt.excluded.price,
-                        "high": stmt.excluded.high,
-                        "low": stmt.excluded.low,
-                        "volume": stmt.excluded.volume,
-                        "turnover": stmt.excluded.turnover,
-                        "change_pct": stmt.excluded.change_pct,
-                        "pe_static": stmt.excluded.pe_static,
-                        "pe_ttm": stmt.excluded.pe_ttm,
-                        "pb": stmt.excluded.pb,
-                        "dividend_yield": stmt.excluded.dividend_yield,
-                        "comp_count": stmt.excluded.comp_count,
-                        "updated_at": stmt.excluded.updated_at,
-                    },
+        retry_count = 3
+        for attempt in range(retry_count):
+            try:
+                count = 0
+                for item in rows_to_write:
+                    stmt = sqlite_insert(SwIndustry).values(level="二级", **item)
+                    stmt = stmt.on_conflict_do_update(
+                        index_elements=["code"],
+                        set_={
+                            "name": stmt.excluded.name,
+                            "prev_close": stmt.excluded.prev_close,
+                            "open": stmt.excluded.open,
+                            "price": stmt.excluded.price,
+                            "high": stmt.excluded.high,
+                            "low": stmt.excluded.low,
+                            "volume": stmt.excluded.volume,
+                            "turnover": stmt.excluded.turnover,
+                            "change_pct": stmt.excluded.change_pct,
+                            "pe_static": stmt.excluded.pe_static,
+                            "pe_ttm": stmt.excluded.pe_ttm,
+                            "pb": stmt.excluded.pb,
+                            "dividend_yield": stmt.excluded.dividend_yield,
+                            "comp_count": stmt.excluded.comp_count,
+                            "updated_at": stmt.excluded.updated_at,
+                        },
+                    )
+                    db.execute(stmt)
+                    count += 1
+                db.commit()
+                from routers.system import sched_log
+
+                sched_log(
+                    "success",
+                    f"申万行业同步完成，共 {count} 个板块",
+                    source="scheduler",
                 )
-                db.execute(stmt)
-                count += 1
-            db.commit()
-            from routers.system import sched_log
+                return count
+            except Exception as e:
+                db.rollback()
+                if attempt < retry_count - 1 and "database is locked" in str(e).lower():
+                    import time
 
-            sched_log(
-                "success", f"申万行业同步完成，共 {count} 个板块", source="scheduler"
-            )
-            return count
-        except Exception as e:
-            db.rollback()
-            from routers.system import sched_log
+                    time.sleep(1 + attempt * 0.5)
+                    continue
+                from routers.system import sched_log
 
-            sched_log("error", f"申万行业同步DB错误: {e}", source="scheduler")
-            return 0
-        finally:
-            db.close()
+                sched_log("error", f"申万行业同步DB错误: {e}", source="scheduler")
+                return 0
+            finally:
+                if attempt == retry_count - 1:
+                    db.close()
     except Exception as e:
         from routers.system import sched_log
 

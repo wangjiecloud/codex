@@ -127,6 +127,39 @@ _sync_running = False
 _quotes_lock = _threading.Lock()
 
 
+def _db_execute_with_retry(db, stmt, max_retries=3):
+    """Execute DB statement with retry on lock errors."""
+    import time
+
+    for attempt in range(max_retries):
+        try:
+            db.execute(stmt)
+            return True
+        except Exception as e:
+            if attempt < max_retries - 1 and "database is locked" in str(e).lower():
+                time.sleep(0.5 + attempt * 0.5)
+                continue
+            raise
+    return False
+
+
+def _db_commit_with_retry(db, max_retries=3):
+    """Commit DB transaction with retry on lock errors."""
+    import time
+
+    for attempt in range(max_retries):
+        try:
+            db.commit()
+            return True
+        except Exception as e:
+            if attempt < max_retries - 1 and "database is locked" in str(e).lower():
+                time.sleep(0.5 + attempt * 0.5)
+                db.rollback()
+                continue
+            raise
+    return False
+
+
 def sync_all_data():
     from routers.system import sched_log
     from routers.sw_industry import sync_sw_industries
@@ -176,31 +209,40 @@ def _sync_all_quotes():
 
     global _sync_running
     _sync_running = True
-    db = SessionLocal()
+
+    all_codes_raw = []
+    quotes = {}
+
+    db_init = SessionLocal()
+    try:
+        all_codes_raw = list(_get_a_shares(db_init))
+        quotes = {
+            r.code: r
+            for r in db_init.query(StockQuote)
+            .filter(StockQuote.code.in_(all_codes_raw))
+            .all()
+        }
+    finally:
+        db_init.close()
+
+    def _quote_priority(code: str) -> int:
+        q = quotes.get(code)
+        if q is None or q.updated_at is None or q.price == 0:
+            return 0
+        return 1
+
+    all_codes = sorted(all_codes_raw, key=_quote_priority)
+    total_codes = len(all_codes)
+    skipped_count = 0
+    count = 0
+
     try:
         bs = get_bs()
         today = date.today().strftime("%Y-%m-%d")
         yesterday = (date.today() - timedelta(days=5)).strftime("%Y-%m-%d")
         fields = "date,code,open,high,low,close,preclose,volume,amount,turn,pctChg,peTTM,pbMRQ"
-        count = 0
-
-        all_codes_raw = list(_get_a_shares(db))
-
-        quotes = {
-            r.code: r
-            for r in db.query(StockQuote)
-            .filter(StockQuote.code.in_(all_codes_raw))
-            .all()
-        }
-
-        def _quote_priority(code: str) -> int:
-            q = quotes.get(code)
-            if q is None or q.updated_at is None or q.price == 0:
-                return 0
-            return 1
-
-        all_codes = sorted(all_codes_raw, key=_quote_priority)
-        total_codes = len(all_codes)
+        batch_statements = []
+        BATCH_SIZE = 50
 
         for idx, raw_code in enumerate(all_codes):
             from routers.sync import _stop_requested
@@ -208,6 +250,17 @@ def _sync_all_quotes():
             if _stop_requested.is_set():
                 sched_log("warning", "行情同步已被用户停止")
                 break
+
+            # Skip if stock already has today's quote data
+            q = quotes.get(raw_code)
+            if q and q.updated_at:
+                quote_date = q.updated_at.date()
+                if quote_date >= date.today():
+                    skipped_count += 1
+                    with _lock:
+                        _status["current"] = raw_code
+                        _status["done"] = idx + 1
+                    continue
 
             with _lock:
                 _status["current"] = raw_code
@@ -304,24 +357,54 @@ def _sync_all_quotes():
                     "updated_at": stmt.excluded.updated_at,
                 },
             )
-            db.execute(stmt)
-            count += 1
-            if count % 50 == 0:
-                db.commit()
-                print(
-                    f"[sync_quotes] progress: {idx + 1}/{total_codes} ({count} saved)"
-                )
 
-        db.commit()
+            batch_statements.append(stmt)
+            count += 1
+
+            if len(batch_statements) >= BATCH_SIZE:
+                db_batch = SessionLocal()
+                try:
+                    for s in batch_statements:
+                        _db_execute_with_retry(db_batch, s)
+                    _db_commit_with_retry(db_batch)
+                    print(
+                        f"[sync_quotes] progress: {idx + 1}/{total_codes} ({count} saved)"
+                    )
+                except Exception as e:
+                    print(f"[sync_quotes] batch commit error: {e}")
+                    try:
+                        db_batch.rollback()
+                    except Exception:
+                        pass
+                finally:
+                    db_batch.close()
+                batch_statements = []
+
+        if batch_statements:
+            db_batch = SessionLocal()
+            try:
+                for s in batch_statements:
+                    _db_execute_with_retry(db_batch, s)
+                _db_commit_with_retry(db_batch)
+            except Exception as e:
+                print(f"[sync_quotes] final batch error: {e}")
+                try:
+                    db_batch.rollback()
+                except Exception:
+                    pass
+            finally:
+                db_batch.close()
 
         with _lock:
             _status["done"] = total_codes
 
         from routers.system import sched_log
 
-        sched_log("success", f"实时行情同步完成，更新 {count}/{total_codes} 只股票")
+        sched_log(
+            "success",
+            f"实时行情同步完成，更新 {count}/{total_codes} 只股票（跳过 {skipped_count} 只已同步）",
+        )
     except Exception as e:
-        db.rollback()
         from routers.system import sched_log
 
         sched_log("error", f"实时行情同步失败: {e}")
@@ -330,7 +413,6 @@ def _sync_all_quotes():
         traceback.print_exc()
         reset_bs()
     finally:
-        db.close()
         _sync_running = False
         _quotes_lock.release()
 
@@ -388,132 +470,154 @@ def _sync_klines(code: str, period: str = "daily"):
         return
 
     db = SessionLocal()
-    try:
-        for r in rows:
-            stmt = sqlite_insert(StockKline).values(
-                code=code,
-                period=period,
-                trade_date=r[0],
-                open=round(_safe_float(r[2]), 4),
-                high=round(_safe_float(r[3]), 4),
-                low=round(_safe_float(r[4]), 4),
-                close=round(_safe_float(r[5]), 4),
-                volume=int(_safe_float(r[6])),
-                turnover=_safe_float(r[7]),
-                change_pct=round(_safe_float(r[9]), 4),
-                updated_at=datetime.utcnow(),
-            )
-            stmt = stmt.on_conflict_do_update(
-                index_elements=["code", "period", "trade_date"],
-                set_={
-                    "open": stmt.excluded.open,
-                    "high": stmt.excluded.high,
-                    "low": stmt.excluded.low,
-                    "close": stmt.excluded.close,
-                    "volume": stmt.excluded.volume,
-                    "turnover": stmt.excluded.turnover,
-                    "change_pct": stmt.excluded.change_pct,
-                    "updated_at": stmt.excluded.updated_at,
-                },
-            )
-            db.execute(stmt)
-        db.commit()
-        print(f"[sync_klines] {code} done, {len(rows)} bars saved")
-    except Exception as e:
-        db.rollback()
-        print(f"[sync_klines] {code} db error: {e}")
-    finally:
-        db.close()
+    retry_count = 3
+    for db_attempt in range(retry_count):
+        try:
+            for r in rows:
+                stmt = sqlite_insert(StockKline).values(
+                    code=code,
+                    period=period,
+                    trade_date=r[0],
+                    open=round(_safe_float(r[2]), 4),
+                    high=round(_safe_float(r[3]), 4),
+                    low=round(_safe_float(r[4]), 4),
+                    close=round(_safe_float(r[5]), 4),
+                    volume=int(_safe_float(r[6])),
+                    turnover=_safe_float(r[7]),
+                    change_pct=round(_safe_float(r[9]), 4),
+                    updated_at=datetime.utcnow(),
+                )
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=["code", "period", "trade_date"],
+                    set_={
+                        "open": stmt.excluded.open,
+                        "high": stmt.excluded.high,
+                        "low": stmt.excluded.low,
+                        "close": stmt.excluded.close,
+                        "volume": stmt.excluded.volume,
+                        "turnover": stmt.excluded.turnover,
+                        "change_pct": stmt.excluded.change_pct,
+                        "updated_at": stmt.excluded.updated_at,
+                    },
+                )
+                db.execute(stmt)
+            db.commit()
+            print(f"[sync_klines] {code} done, {len(rows)} bars saved")
+            break
+        except Exception as e:
+            db.rollback()
+            if db_attempt < retry_count - 1 and "database is locked" in str(e).lower():
+                import time
+
+                time.sleep(1 + db_attempt * 0.5)
+                continue
+            print(f"[sync_klines] {code} db error: {e}")
+        finally:
+            if db_attempt == retry_count - 1:
+                db.close()
 
 
 def _sync_fundamental(code: str):
     db = SessionLocal()
-    try:
-        bs = get_bs()
-        bs_code = _to_bs_code(code)
-        rs_profit = bs.query_profit_data(code=bs_code, year=2024, quarter=4)
-        profit_row = None
-        while rs_profit.error_code == "0" and rs_profit.next():
-            profit_row = rs_profit.get_row_data()
+    retry_count = 3
+    for db_attempt in range(retry_count):
+        try:
+            bs = get_bs()
+            bs_code = _to_bs_code(code)
+            rs_profit = bs.query_profit_data(code=bs_code, year=2024, quarter=4)
+            profit_row = None
+            while rs_profit.error_code == "0" and rs_profit.next():
+                profit_row = rs_profit.get_row_data()
 
-        rs_growth = bs.query_growth_data(code=bs_code, year=2024, quarter=4)
-        growth_row = None
-        while rs_growth.error_code == "0" and rs_growth.next():
-            growth_row = rs_growth.get_row_data()
+            rs_growth = bs.query_growth_data(code=bs_code, year=2024, quarter=4)
+            growth_row = None
+            while rs_growth.error_code == "0" and rs_growth.next():
+                growth_row = rs_growth.get_row_data()
 
-        rs_balance = bs.query_balance_data(code=bs_code, year=2024, quarter=4)
-        balance_row = None
-        while rs_balance.error_code == "0" and rs_balance.next():
-            balance_row = rs_balance.get_row_data()
+            rs_balance = bs.query_balance_data(code=bs_code, year=2024, quarter=4)
+            balance_row = None
+            while rs_balance.error_code == "0" and rs_balance.next():
+                balance_row = rs_balance.get_row_data()
 
-        if not profit_row:
-            return
+            if not profit_row:
+                return
 
-        raw = json.dumps(
-            {
-                "profit": profit_row,
-                "growth": growth_row,
-                "balance": balance_row,
-            },
-            ensure_ascii=False,
-        )
+            raw = json.dumps(
+                {
+                    "profit": profit_row,
+                    "growth": growth_row,
+                    "balance": balance_row,
+                },
+                ensure_ascii=False,
+            )
 
-        eps = _safe_float(profit_row[6]) if len(profit_row) > 6 else None
-        roe = _safe_float(profit_row[2]) if len(profit_row) > 2 else None
-        gross_margin = _safe_float(profit_row[4]) if len(profit_row) > 4 else None
-        net_profit = _safe_float(profit_row[5]) if len(profit_row) > 5 else None
-        revenue_yoy = (
-            _safe_float(growth_row[6]) if growth_row and len(growth_row) > 6 else None
-        )
-        net_profit_yoy = (
-            _safe_float(growth_row[4]) if growth_row and len(growth_row) > 4 else None
-        )
-        debt_ratio = (
-            _safe_float(balance_row[6])
-            if balance_row and len(balance_row) > 6
-            else None
-        )
-        report_date = profit_row[0] if profit_row else ""
+            eps = _safe_float(profit_row[6]) if len(profit_row) > 6 else None
+            roe = _safe_float(profit_row[2]) if len(profit_row) > 2 else None
+            gross_margin = _safe_float(profit_row[4]) if len(profit_row) > 4 else None
+            net_profit = _safe_float(profit_row[5]) if len(profit_row) > 5 else None
+            revenue_yoy = (
+                _safe_float(growth_row[6])
+                if growth_row and len(growth_row) > 6
+                else None
+            )
+            net_profit_yoy = (
+                _safe_float(growth_row[4])
+                if growth_row and len(growth_row) > 4
+                else None
+            )
+            debt_ratio = (
+                _safe_float(balance_row[6])
+                if balance_row and len(balance_row) > 6
+                else None
+            )
+            report_date = profit_row[0] if profit_row else ""
 
-        stmt = sqlite_insert(StockFundamental).values(
-            code=code,
-            report_date=report_date,
-            eps=eps,
-            roe=roe,
-            revenue=None,
-            revenue_yoy=revenue_yoy,
-            net_profit=net_profit,
-            net_profit_yoy=net_profit_yoy,
-            gross_margin=gross_margin,
-            debt_ratio=debt_ratio,
-            raw_json=raw,
-            updated_at=datetime.utcnow(),
-        )
-        stmt = stmt.on_conflict_do_update(
-            index_elements=["code"],
-            set_={
-                "report_date": stmt.excluded.report_date,
-                "eps": stmt.excluded.eps,
-                "roe": stmt.excluded.roe,
-                "revenue": stmt.excluded.revenue,
-                "revenue_yoy": stmt.excluded.revenue_yoy,
-                "net_profit": stmt.excluded.net_profit,
-                "net_profit_yoy": stmt.excluded.net_profit_yoy,
-                "gross_margin": stmt.excluded.gross_margin,
-                "debt_ratio": stmt.excluded.debt_ratio,
-                "raw_json": stmt.excluded.raw_json,
-                "updated_at": stmt.excluded.updated_at,
-            },
-        )
-        db.execute(stmt)
-        db.commit()
-        print(f"[sync_fundamental] {code} done")
-    except Exception as e:
-        db.rollback()
-        print(f"[sync_fundamental] {code} error: {e}")
-        reset_bs()
-    finally:
-        db.close()
+            stmt = sqlite_insert(StockFundamental).values(
+                code=code,
+                report_date=report_date,
+                eps=eps,
+                roe=roe,
+                revenue=None,
+                revenue_yoy=revenue_yoy,
+                net_profit=net_profit,
+                net_profit_yoy=net_profit_yoy,
+                gross_margin=gross_margin,
+                debt_ratio=debt_ratio,
+                raw_json=raw,
+                updated_at=datetime.utcnow(),
+            )
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["code"],
+                set_={
+                    "report_date": stmt.excluded.report_date,
+                    "eps": stmt.excluded.eps,
+                    "roe": stmt.excluded.roe,
+                    "revenue": stmt.excluded.revenue,
+                    "revenue_yoy": stmt.excluded.revenue_yoy,
+                    "net_profit": stmt.excluded.net_profit,
+                    "net_profit_yoy": stmt.excluded.net_profit_yoy,
+                    "gross_margin": stmt.excluded.gross_margin,
+                    "debt_ratio": stmt.excluded.debt_ratio,
+                    "raw_json": stmt.excluded.raw_json,
+                    "updated_at": stmt.excluded.updated_at,
+                },
+            )
+            db.execute(stmt)
+            db.commit()
+            print(f"[sync_fundamental] {code} done")
+            break
+        except Exception as e:
+            db.rollback()
+            if db_attempt < retry_count - 1 and "database is locked" in str(e).lower():
+                import time
+
+                time.sleep(1 + db_attempt * 0.5)
+                continue
+            print(f"[sync_fundamental] {code} error: {e}")
+            reset_bs()
+        finally:
+            if db_attempt == retry_count - 1:
+                db.close()
 
 
 def _sync_news(code: str):

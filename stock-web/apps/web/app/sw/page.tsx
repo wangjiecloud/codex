@@ -10,6 +10,7 @@ import {
   Search,
   X,
   BarChart2,
+  Trash2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -161,7 +162,10 @@ function RotationModal({ onClose }: { onClose: () => void }) {
 
   useEffect(() => {
     setLoading(true);
-    fetch(`${API}/api/sw-industry/rotation?days=${days}`)
+    const endpoint = onlyIndustry
+      ? `${API}/api/board/industry-rotation?days=${days}`
+      : `${API}/api/sw-industry/rotation?days=${days}`;
+    fetch(endpoint)
       .then((r) => r.json())
       .then((d) => {
         if (d && Array.isArray(d.boards)) {
@@ -170,7 +174,7 @@ function RotationModal({ onClose }: { onClose: () => void }) {
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [days]);
+  }, [days, onlyIndustry]);
 
   const sortedBoards =
     data && Array.isArray(data.boards)
@@ -414,6 +418,7 @@ export default function SwIndustryPage() {
   const [syncing, setSyncing] = useState(false);
   const [showRotation, setShowRotation] = useState(false);
   const [onlyIndustryBoards, setOnlyIndustryBoards] = useState(false);
+  const [deletingBoard, setDeletingBoard] = useState<string | null>(null);
 
   const [topHeight, setTopHeight] = useState(300);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -465,6 +470,8 @@ export default function SwIndustryPage() {
   const [stockBoards, setStockBoards] = useState<
     { code: string; name: string }[]
   >([]);
+  const [industryBoards, setIndustryBoards] = useState<SwBoard[]>([]);
+  const [boardNameFilter, setBoardNameFilter] = useState("");
   const searchRef = useRef<HTMLDivElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -482,9 +489,26 @@ export default function SwIndustryPage() {
     }
   }, [sortKey, sortOrder]);
 
+  const fetchIndustryBoards = useCallback(async () => {
+    try {
+      const r = await fetch(
+        `${API}/api/board/industry?sort=${sortKey === "changePct" ? "change_pct" : sortKey}&limit=200`,
+      );
+      if (r.ok) {
+        const data = await r.json();
+        setIndustryBoards(data);
+      }
+    } catch (err) {
+      console.error("Failed to fetch industry boards:", err);
+    }
+  }, [sortKey]);
+
   useEffect(() => {
     fetchBoards();
-  }, [fetchBoards]);
+    if (onlyIndustryBoards) {
+      fetchIndustryBoards();
+    }
+  }, [fetchBoards, onlyIndustryBoards, fetchIndustryBoards]);
 
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
@@ -498,6 +522,7 @@ export default function SwIndustryPage() {
 
   const handleStockInput = (val: string) => {
     setStockQuery(val);
+    setBoardNameFilter(val.trim());
     if (debounceRef.current) clearTimeout(debounceRef.current);
     if (!val.trim()) {
       setStockResults([]);
@@ -549,15 +574,17 @@ export default function SwIndustryPage() {
     setStockQuery("");
     setStockResults([]);
     setShowDropdown(false);
+    setBoardNameFilter("");
   };
 
   const fetchConstituents = async (board: SwBoard) => {
     setSelectedBoard(board);
     setConsLoading(true);
     try {
-      const r = await fetch(
-        `${API}/api/sw-industry/constituents/${board.code}`,
-      );
+      const endpoint = onlyIndustryBoards
+        ? `${API}/api/board/industry-constituents/${board.code}`
+        : `${API}/api/sw-industry/constituents/${board.code}`;
+      const r = await fetch(endpoint);
       if (r.ok) {
         const data: SwConstituent[] = await r.json();
         setConstituents(data);
@@ -577,6 +604,37 @@ export default function SwIndustryPage() {
       }, 4000);
     } catch {
       setSyncing(false);
+    }
+  };
+
+  const handleDeleteBoard = async (boardCode: string, boardName: string) => {
+    if (
+      !confirm(
+        `确定要删除板块"${boardName}"吗？\n\n此操作将删除该板块的所有节点数据，不可恢复！`,
+      )
+    ) {
+      return;
+    }
+
+    setDeletingBoard(boardCode);
+    try {
+      const r = await fetch(`${API}/api/board/industry/${boardCode}`, {
+        method: "DELETE",
+      });
+      if (r.ok) {
+        if (selectedBoard?.code === boardCode) {
+          setSelectedBoard(null);
+          setConstituents([]);
+        }
+        fetchIndustryBoards();
+      } else {
+        const data = await r.json();
+        alert(`删除失败: ${data.detail || "未知错误"}`);
+      }
+    } catch (error) {
+      alert("删除失败，请稍后重试");
+    } finally {
+      setDeletingBoard(null);
     }
   };
 
@@ -631,29 +689,18 @@ export default function SwIndustryPage() {
     }
   };
 
-  const INDUSTRY_SW_CODES = new Set([
-    "801081",
-    "801084",
-    "801083",
-    "801102",
-    "801101",
-    "801103",
-    "801712",
-    "801074",
-    "801072",
-    "801733",
-    "801082",
-  ]);
-
-  const filteredBoards =
-    stockBoards.length > 0
-      ? boards.filter(
-          (b) =>
-            stockBoards.some((sb) => sb.code === b.code) &&
-            (!onlyIndustryBoards || INDUSTRY_SW_CODES.has(b.code)),
+  const filteredBoards = onlyIndustryBoards
+    ? boardNameFilter
+      ? industryBoards.filter((b) =>
+          b.name.toLowerCase().includes(boardNameFilter.toLowerCase()),
         )
-      : onlyIndustryBoards
-        ? boards.filter((b) => INDUSTRY_SW_CODES.has(b.code))
+      : industryBoards
+    : stockBoards.length > 0
+      ? boards.filter((b) => stockBoards.some((sb) => sb.code === b.code))
+      : boardNameFilter
+        ? boards.filter((b) =>
+            b.name.toLowerCase().includes(boardNameFilter.toLowerCase()),
+          )
         : boards;
 
   const BOARD_COLS: { key: SortKey; label: string; align?: string }[] = [
@@ -665,6 +712,11 @@ export default function SwIndustryPage() {
     { key: "peTtm", label: "PE(TTM)" },
     { key: "pb", label: "市净率" },
     { key: "compCount", label: "成分数" },
+  ];
+
+  const BOARD_COLS_WITH_ACTION = [
+    ...BOARD_COLS,
+    { key: "action" as SortKey, label: "操作", align: "center" },
   ];
 
   const CON_COLS: { key: ConsSortKey; label: string }[] = [
@@ -709,7 +761,7 @@ export default function SwIndustryPage() {
               onFocus={() => {
                 if (stockResults.length > 0) setShowDropdown(true);
               }}
-              placeholder="搜索股票代码或名称..."
+              placeholder="搜索股票或板块名称..."
               className="w-40 bg-transparent outline-none text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] text-[11px]"
             />
             {selectedStock && (
@@ -813,35 +865,49 @@ export default function SwIndustryPage() {
                 <td className="px-3 py-2 text-[var(--text-tertiary)] font-medium w-6 text-center">
                   #
                 </td>
-                {BOARD_COLS.map((col) => (
-                  <th
-                    key={col.key}
-                    className="px-3 py-2 text-left text-[var(--text-tertiary)] font-medium cursor-pointer hover:text-[var(--text-primary)] whitespace-nowrap select-none"
-                    onClick={() => toggleSort(col.key)}
-                  >
-                    <span className="inline-flex items-center">
-                      {col.label}
-                      <SortIcon
-                        col={col.key}
-                        active={sortKey}
-                        order={sortOrder}
-                      />
-                    </span>
-                  </th>
-                ))}
+                {(onlyIndustryBoards ? BOARD_COLS_WITH_ACTION : BOARD_COLS).map(
+                  (col) => (
+                    <th
+                      key={col.key}
+                      className={cn(
+                        "px-3 py-2 text-left text-[var(--text-tertiary)] font-medium whitespace-nowrap select-none",
+                        col.key === "action"
+                          ? "text-center"
+                          : "cursor-pointer hover:text-[var(--text-primary)]",
+                      )}
+                      onClick={() =>
+                        col.key !== "action" && toggleSort(col.key)
+                      }
+                    >
+                      <span className="inline-flex items-center">
+                        {col.label}
+                        {col.key !== "action" && (
+                          <SortIcon
+                            col={col.key}
+                            active={sortKey}
+                            order={sortOrder}
+                          />
+                        )}
+                      </span>
+                    </th>
+                  ),
+                )}
               </tr>
             </thead>
             <tbody>
               {loading &&
                 Array.from({ length: 10 }).map((_, i) => (
                   <tr key={i}>
-                    {Array.from({ length: BOARD_COLS.length + 1 }).map(
-                      (_, j) => (
-                        <td key={j} className="px-3 py-2">
-                          <div className="h-3 bg-[var(--bg-tertiary)] rounded animate-pulse w-16" />
-                        </td>
-                      ),
-                    )}
+                    {Array.from({
+                      length:
+                        (onlyIndustryBoards
+                          ? BOARD_COLS_WITH_ACTION.length
+                          : BOARD_COLS.length) + 1,
+                    }).map((_, j) => (
+                      <td key={j} className="px-3 py-2">
+                        <div className="h-3 bg-[var(--bg-tertiary)] rounded animate-pulse w-16" />
+                      </td>
+                    ))}
                   </tr>
                 ))}
               {!loading &&
@@ -907,6 +973,26 @@ export default function SwIndustryPage() {
                       <td className="px-3 py-1.5 text-[var(--text-secondary)] text-center">
                         {b.compCount || "--"}
                       </td>
+                      {onlyIndustryBoards && (
+                        <td className="px-3 py-1.5 text-center">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteBoard(b.code, b.name);
+                            }}
+                            disabled={deletingBoard === b.code}
+                            className={cn(
+                              "p-1 rounded hover:bg-red-500/10 transition-colors",
+                              deletingBoard === b.code
+                                ? "opacity-50 cursor-not-allowed"
+                                : "text-[var(--text-tertiary)] hover:text-red-500",
+                            )}
+                            title="删除板块"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </td>
+                      )}
                     </tr>
                   );
                 })}

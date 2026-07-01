@@ -420,27 +420,17 @@ const INDUSTRY_GUIDE: Record<
       'PCB是电子设备的"神经系统底板"，所有芯片、电容、接口都焊接在它上面。AI服务器用的PCB层数多达40层以上，制作难度极高。',
     layers: [
       {
-        label: "L0 原材料/耗材/设备",
-        what: "生产玻纤布、铜箔、树脂、钻针、激光设备等PCB制造原料",
-        why: "铜箔厚度和粗糙度直接影响高频信号损耗，AI服务器对此要求极严苛",
+        label: "L0 原材料/覆铜板/耗材",
+        what: "生产玻纤布、铜箔、树脂、覆铜板(CCL)、钻针、激光设备等PCB制造原料",
+        why: "覆铜板是PCB的基材，介电常数和铜箔质量直接影响高频信号传输性能",
       },
       {
-        label: "L1 覆铜板（CCL）",
-        what: '将玻纤布+铜箔+树脂压合成覆铜板，相当于PCB的"毛坯板"',
-        why: "CCL的介电常数决定信号传播速度，高速AI服务器需要低介电常数材料",
-      },
-      {
-        label: "L2 PCB制造/IC载板",
+        label: "L1 PCB制造/IC载板",
         what: "在CCL上通过曝光→蚀刻→钻孔→电镀工艺制作多层电路",
         why: "线路越精细，布线密度越高，同等面积能承载的芯片和功能越多",
       },
       {
-        label: "L3 组装/测试",
-        what: "将PCB与GPU芯片、内存、连接器焊接组装成完整服务器主板",
-        why: "焊接质量和组装良率决定最终AI服务器的稳定性和性能",
-      },
-      {
-        label: "L4 终端客户",
+        label: "L2 终端客户",
         what: "英伟达/华为等将主板集成到AI服务器机柜交付数据中心",
         why: "PCB是整个AI算力基础设施的物理载体，每台GB200包含数十块复杂PCB",
       },
@@ -678,22 +668,22 @@ const INDUSTRY_GUIDE: Record<
       "玻璃基板是下一代半导体先进封装的关键材料，相比传统有机基板尺寸更大、翘曲更低、布线更精细，有望成为AI芯片封装的革命性材料。",
     layers: [
       {
-        label: "上游原料/设备",
+        label: "L0 上游原料/设备",
         what: "高纯石英砂、特种玻璃原料、玻璃熔化设备等基础材料",
         why: "半导体封装玻璃基板对表面平整度要求达到纳米级，原料纯度至关重要",
       },
       {
-        label: "玻璃基板制造",
+        label: "L1 玻璃基板制造",
         what: "熔化→成型→研磨→抛光→切割制成高精度玻璃基板",
         why: "玻璃基板的热膨胀系数与硅芯片接近，可大幅降低封装应力和翘曲",
       },
       {
-        label: "下游封装/面板",
+        label: "L2 下游封装/面板",
         what: "在玻璃基板上制作线路层，封装GPU等芯片；或用于OLED/LCD面板",
         why: "玻璃基板封装可实现比ABF有机基板更细的线路，支持更多GPU芯片集成",
       },
       {
-        label: "终端应用",
+        label: "L3 终端应用",
         what: "AI芯片、智能手机屏幕、平板电脑等消费电子终端应用",
         why: "英特尔已宣布2026年量产玻璃基板封装芯片，英伟达等正在评估导入计划",
       },
@@ -894,14 +884,14 @@ function ProcessFlowView({
 
   return (
     <div
-      className="flex-1 flex flex-col bg-[var(--bg-primary)] overflow-hidden"
+      className="flex-1 flex flex-col bg-[var(--bg-primary)]"
       style={{ fontFamily: "monospace" }}
     >
-      <div className="flex items-center gap-3 px-5 py-2.5 border-b border-[var(--border-color)] bg-[var(--bg-primary)] flex-shrink-0">
+      <div className="flex items-center gap-3 px-5 py-0.5 border-b border-[var(--border-color)] bg-[var(--bg-primary)] flex-shrink-0 sticky top-0 z-10">
         <span className="text-xs text-[var(--text-tertiary)]">
           3D加工流程图 · 点击节点查看 A 股龙头企业 · Ctrl+滚轮缩放
         </span>
-        <div className="ml-auto flex items-center gap-4">
+        <div className="flex items-center gap-4 ml-3">
           {industryId && INDUSTRY_GUIDE[industryId] && (
             <button
               onClick={() => setShowGuide(true)}
@@ -1269,19 +1259,15 @@ function ProcessFlowView({
         })()}
 
       <div ref={containerRef} className="flex-1 relative overflow-hidden">
-        <div
-          className="w-full h-full overflow-y-auto overflow-x-auto"
-          style={{ perspective: "1200px" }}
-        >
+        <div className="w-full h-full overflow-y-auto overflow-x-auto">
           <div
             style={{
-              transformStyle: "preserve-3d",
-              transform: `scale(${zoom}) rotateX(8deg)`,
+              transform: `scale(${zoom})`,
               transformOrigin: "50% 0%",
-              paddingTop: 32,
+              paddingTop: 60,
               paddingBottom: 48,
-              paddingLeft: 16,
-              minWidth: "max-content",
+              paddingLeft: 24,
+              paddingRight: 24,
               width: "100%",
             }}
           >
@@ -1426,7 +1412,6 @@ function ProcessFlowView({
                       padding: "12px 16px",
                       position: "relative",
                       boxShadow: `0 4px 24px ${lc.accent}18`,
-                      minWidth: `${layer.nodes.length * 160 + 80}px`,
                     }}
                   >
                     <div
@@ -1448,12 +1433,12 @@ function ProcessFlowView({
 
                     <div
                       style={{
-                        display: "flex",
-                        flexWrap: "wrap",
+                        display: "grid",
+                        gridTemplateColumns:
+                          "repeat(auto-fit, minmax(140px, 1fr))",
                         gap: 12,
                         marginTop: 8,
-                        minWidth: "max-content",
-                        alignItems: "flex-start",
+                        width: "100%",
                       }}
                     >
                       {(() => {
@@ -5634,7 +5619,7 @@ export default function IndustryCanvasPage() {
   return (
     <div className="flex flex-col h-full">
       <div
-        className="flex items-center gap-3 px-6 py-3 border-b flex-shrink-0"
+        className="flex items-center gap-3 px-6 py-0.5 border-b flex-shrink-0 sticky top-0 z-20"
         style={{
           background: "var(--bg-secondary)",
           borderColor: "var(--border-color)",

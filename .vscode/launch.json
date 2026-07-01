@@ -17,6 +17,28 @@
       "name": "Attach to running codex CLI",
       "pid": "${command:pickProcess}",
       "sourceLanguages": ["rust"]
+    },
+    {
+      "name": "Python 后台服务",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": [
+        "main:app",
+        "--reload",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000"
+      ],
+      "cwd": "${workspaceFolder}/stock-web/apps/data-service",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "python": "${workspaceFolder}/stock-web/apps/data-service/.venv/bin/python",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/stock-web/apps/data-service"
+      },
+      "preLaunchTask": "停止8000端口进程"
     }
   ]
 }

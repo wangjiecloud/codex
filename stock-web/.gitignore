@@ -1,0 +1,27 @@
+# 数据库文件（过大，不提交）
+*.db
+*.db-shm
+*.db-wal
+
+# Node.js
+node_modules/
+.next/
+dist/
+build/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# 日志
+*.log
+sync_output.log
+
+# 环境变量
+.env
+.env.local
+.env.*.local

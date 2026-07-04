@@ -272,6 +272,97 @@ class SwIndustryConstituent(Base):
     __table_args__ = (UniqueConstraint("board_code", "stock_code"),)
 
 
+class ThemeNews(Base):
+    """板块/主题新闻条目，来自同花顺各热门主题的新闻列表"""
+
+    __tablename__ = "theme_news"
+    id = Column(String(80), primary_key=True)   # f"{theme_id}_{item_id}"
+    theme_id = Column(String(50), index=True)
+    theme_name = Column(String(100), default="")
+    title = Column(Text, default="")
+    source = Column(String(50), default="")
+    pub_time = Column(String(30), index=True)    # 原始 Unix 时间戳转成字符串
+    url = Column(Text, default="")
+    updated_at = Column(DateTime, default=datetime.utcnow)
+
+
+class FundFlowSnapshot(Base):
+    """板块主力资金流向每日快照（同花顺概念/行业）"""
+
+    __tablename__ = "fund_flow_snapshot"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    trade_date = Column(String(10), index=True)   # YYYY-MM-DD
+    board_type = Column(String(10))               # concept | industry
+    name = Column(String(100))
+    index_val = Column(Float, default=0.0)
+    change_pct = Column(Float, default=0.0)
+    inflow = Column(Float, default=0.0)
+    outflow = Column(Float, default=0.0)
+    netflow = Column(Float, default=0.0)
+    comp_count = Column(Integer, default=0)
+    top_stock = Column(String(50), default="")
+    top_stock_change_pct = Column(Float, default=0.0)
+    top_stock_price = Column(Float, default=0.0)
+    updated_at = Column(DateTime, default=datetime.utcnow)
+    __table_args__ = (UniqueConstraint("trade_date", "board_type", "name"),)
+
+
+class StockGuba(Base):
+    """股吧资讯与公告，来自东方财富股吧"""
+
+    __tablename__ = "stock_guba"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    code = Column(String(10), index=True)
+    post_type = Column(String(10), index=True)  # "news" 资讯 | "notice" 公告
+    title = Column(Text, default="")
+    url = Column(Text, default="")
+    author = Column(String(100), default="")
+    read_count = Column(Integer, default=0)
+    reply_count = Column(Integer, default=0)
+    pub_time = Column(String(30), index=True)
+    updated_at = Column(DateTime, default=datetime.utcnow)
+    __table_args__ = (UniqueConstraint("code", "post_type", "url"),)
+
+
+class StockRelation(Base):
+    """股票共现关联关系（来自股吧帖子正文分析）"""
+
+    __tablename__ = "stock_relation"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    code_a = Column(String(10), index=True)   # 主体股票（被分析的股票）
+    code_b = Column(String(10), index=True)   # 被关联股票
+    count = Column(Integer, default=0)        # 共现次数
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    __table_args__ = (UniqueConstraint("code_a", "code_b"),)
+
+
+class StockGubaPost(Base):
+    """股吧帖子正文（关联分析用，全量落库）"""
+
+    __tablename__ = "stock_guba_post"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    code = Column(String(10), index=True)         # 所属股票代码
+    post_id = Column(String(30), index=True)      # 帖子 ID
+    title = Column(Text, default="")              # 标题
+    content = Column(Text, default="")            # 正文 HTML
+    pub_time = Column(String(30), index=True)     # 发布时间
+    updated_at = Column(DateTime, default=datetime.utcnow)
+    __table_args__ = (UniqueConstraint("code", "post_id"),)
+
+
+class StockGubaSync(Base):
+    """股吧帖子同步状态（每只股票一条记录，done=True 表示已全量抓取完毕）"""
+
+    __tablename__ = "stock_guba_sync"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    code = Column(String(10), unique=True, index=True)
+    done = Column(Integer, default=0)             # 0=未完成 1=已完成
+    post_count = Column(Integer, default=0)       # 实际抓取帖子数
+    relation_count = Column(Integer, default=0)   # 发现的关联股票数
+    finished_at = Column(DateTime, nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow)
+
+
 def get_db():
     db = SessionLocal()
     try:

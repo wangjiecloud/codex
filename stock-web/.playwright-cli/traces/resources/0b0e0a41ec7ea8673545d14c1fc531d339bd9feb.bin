@@ -1,0 +1,5 @@
+/**/ typeof callback === 'function' && callback({
+    "version": "1.0.0",
+    "releaseDate": "2025-11-24T02:47:52.442Z",
+    "description": "SDK 发布版本"
+});

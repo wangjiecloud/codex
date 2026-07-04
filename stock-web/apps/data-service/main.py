@@ -15,6 +15,9 @@ from routers import (
     portfolio,
     sw_industry,
     cleanup,
+    guba,
+    fund_flow,
+    relation,
 )
 import akshare as ak
 from fastapi import HTTPException
@@ -47,6 +50,9 @@ app.include_router(theme.router, prefix="/api/theme", tags=["主题板块"])
 app.include_router(portfolio.router, prefix="/api/portfolio", tags=["持仓管理"])
 app.include_router(sw_industry.router, prefix="/api/sw-industry", tags=["申万行业"])
 app.include_router(cleanup.router, prefix="/api/cleanup", tags=["数据清理"])
+app.include_router(guba.router, prefix="/api/guba", tags=["股吧资讯"])
+app.include_router(fund_flow.router, prefix="/api/fund-flow", tags=["资金流向"])
+app.include_router(relation.router, prefix="/api/relation", tags=["股票关联"])
 
 _scheduler = BackgroundScheduler(timezone="Asia/Shanghai")
 
@@ -108,9 +114,38 @@ def _warmup_caches():
         print(f"[warmup] error: {e}")
 
 
+def _init_popular_stock_cache_table():
+    """建立人气榜缓存表（如不存在）"""
+    import sqlite3, os
+    db_path = os.path.join(os.path.dirname(__file__), "stock_data.db")
+    try:
+        conn = sqlite3.connect(db_path)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS popular_stock_cache (
+                sort       TEXT    NOT NULL,
+                rank       INTEGER NOT NULL,
+                code       TEXT    NOT NULL,
+                name       TEXT,
+                price      REAL,
+                pct        REAL,
+                change     REAL,
+                prev_close REAL,
+                his_rc     INTEGER,
+                updated_at TEXT    NOT NULL,
+                PRIMARY KEY (sort, rank)
+            )
+        """)
+        conn.commit()
+        conn.close()
+        print("[startup] popular_stock_cache table ready")
+    except Exception as e:
+        print(f"[startup] popular_stock_cache table error: {e}")
+
+
 @app.on_event("startup")
 def startup():
     init_db()
+    _init_popular_stock_cache_table()
     industry.seed_company_chains()
 
     threading.Thread(target=_warmup_caches, daemon=True).start()
@@ -141,6 +176,36 @@ def startup():
         hour=3,
         minute=0,
         id="daily_cleanup",
+        replace_existing=True,
+    )
+
+    # 每15分钟同步板块/主题新闻
+    _scheduler.add_job(
+        theme.sync_theme_news,
+        trigger="interval",
+        minutes=15,
+        start_date=_t0 + timedelta(seconds=30),
+        id="theme_news_sync",
+        replace_existing=True,
+    )
+
+    # 每天17:30同步股吧资讯与公告
+    _scheduler.add_job(
+        guba.sync_all_guba,
+        trigger="cron",
+        hour=17,
+        minute=30,
+        id="guba_daily_sync",
+        replace_existing=True,
+    )
+
+    # 每天16:00收盘后快照板块资金流向
+    _scheduler.add_job(
+        fund_flow.take_daily_snapshot,
+        trigger="cron",
+        hour=16,
+        minute=0,
+        id="fund_flow_snapshot",
         replace_existing=True,
     )
 
@@ -185,9 +250,10 @@ def health():
 
 @app.get("/api/search")
 async def search(
-    q: str = Query("", description="股票代码或名称关键词"), limit: int = Query(8)
+    q: str = Query("", description="股票代码或名称关键词"), limit: int = Query(10)
 ):
-    if not q.strip():
+    kw = q.strip()
+    if not kw:
         return {"results": []}
     try:
         from db import SessionLocal, StockMeta, StockQuote
@@ -195,18 +261,42 @@ async def search(
 
         db = SessionLocal()
         try:
+            # 拉取足够多候选，再在 Python 层排序
             rows = (
                 db.query(StockMeta.code, StockMeta.name)
                 .filter(
                     or_(
-                        StockMeta.code.contains(q.strip()),
-                        StockMeta.name.contains(q.strip()),
+                        StockMeta.code.contains(kw),
+                        StockMeta.name.contains(kw),
                     )
                 )
-                .limit(limit)
+                .limit(200)
                 .all()
             )
-            codes = [r.code for r in rows]
+
+            kw_lower = kw.lower()
+
+            def _rank(r):
+                code_lower = r.code.lower()
+                name = r.name
+                # 0: 代码完全匹配
+                if code_lower == kw_lower:
+                    return 0
+                # 1: 代码前缀匹配
+                if code_lower.startswith(kw_lower):
+                    return 1
+                # 2: 代码包含匹配
+                if kw_lower in code_lower:
+                    return 2
+                # 3: 名称前缀匹配
+                if name.startswith(kw):
+                    return 3
+                # 4: 名称包含匹配
+                return 4
+
+            rows_sorted = sorted(rows, key=_rank)[:limit]
+
+            codes = [r.code for r in rows_sorted]
             quotes = {
                 qr.code: qr
                 for qr in db.query(StockQuote).filter(StockQuote.code.in_(codes)).all()
@@ -219,7 +309,7 @@ async def search(
                         "price": quotes[r.code].price if r.code in quotes else 0,
                         "change": quotes[r.code].change if r.code in quotes else 0,
                     }
-                    for r in rows
+                    for r in rows_sorted
                 ]
             }
         finally:

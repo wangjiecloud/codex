@@ -46,6 +46,8 @@ import {
   GlasssubAnimation,
   AiserverAnimation,
   SemieqAnimation,
+  HumanoidAnimation,
+  AerospaceAnimation,
 } from "./IndustryAnimations";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -717,7 +719,7 @@ const INDUSTRY_GUIDE: Record<
     ],
   },
   semieq: {
-    title: "半导体设备产业链供应流程",
+    title: "半导体先进制程产业链",
     intro:
       '半导体设备是芯片制造的"母机"，没有光刻机、刻蚀机就无法制造GPU芯片。AI算力需求爆发直接拉动了先进制程设备的强劲需求。',
     layers: [
@@ -740,6 +742,440 @@ const INDUSTRY_GUIDE: Record<
         label: "L3 终端芯片客户",
         what: "英伟达/AMD等芯片公司通过台积电代工，获得最终AI芯片产品",
         why: "台积电3nm工厂的设备投资超过200亿美元，是全球制造业最密集的投资之一",
+      },
+    ],
+  },
+
+  hm_overview: {
+    title: "人形机器人产业链全景概览",
+    intro:
+      "人形机器人是最复杂的机电一体化系统，从精密传动零件到AI大脑，每个环节都需要突破性技术。特斯拉Optimus引爆全球百亿美元市场，国产供应链加速切入。",
+    layers: [
+      {
+        label: "核心零部件层",
+        what: "减速器（谐波/RV）、丝杠（行星滚柱）、无框电机、传感器等精密机械零件",
+        why: "零部件成本占整机60%以上，减速器/丝杠是最核心的卡脖子环节，绑定供应链即锁定份额",
+      },
+      {
+        label: "执行器/传感器层",
+        what: "将零件集成为关节执行器模组，配套六维力、3D视觉、IMU等感知系统",
+        why: "执行器模组是Tier1核心价值所在，三花智控/拓普集团等正从汽车零部件转型切入",
+      },
+      {
+        label: "整机系统层",
+        what: "整机本体集成、骨架结构、灵巧手、腿部总成等系统级组装",
+        why: "整机集成需要机械、电气、软件高度协同，是产业链价值最高的总装环节",
+      },
+      {
+        label: "AI大脑层",
+        what: "具身智能算法、端到端神经网络、边缘AI芯片、仿真训练平台",
+        why: "AI大脑决定机器人能否完成复杂任务，是从工业机器人升级为通用机器人的核心差异",
+      },
+    ],
+  },
+  hm_reducer: {
+    title: "谐波/RV减速器供应链流程",
+    intro:
+      "减速器是机器人关节的核心传动部件，将电机高转速转换为低转速高扭矩输出。人形机器人单台需要12-20个减速器，是成本和技术双重壁垒最高的零部件。",
+    layers: [
+      {
+        label: "L0 原材料/精密加工",
+        what: "特种轴承钢、精密润滑脂、薄壁轴承、柔轮/刚轮毛坯等核心原料",
+        why: "谐波减速器柔轮需承受反复弯曲疲劳，对材料和热处理工艺要求极高",
+      },
+      {
+        label: "L1 减速器产品",
+        what: "谐波减速器（轻量高精度）、RV减速器（高刚性）、行星减速器（低成本）",
+        why: "谐波减速器精度可达弧分级，是机器人手腕/膝关节首选，绿的谐波是国产龙头",
+      },
+      {
+        label: "L2 伺服一体化模组",
+        what: "减速器与电机、编码器集成为一体化模组，简化整机装配",
+        why: "模组化降低整机厂集成难度，是Tier1供应商向高附加值延伸的关键一步",
+      },
+      {
+        label: "L3 整机客户",
+        what: "特斯拉Optimus、宇树科技、国内整机厂直接采购减速器或模组",
+        why: "特斯拉Optimus年产目标百万台，单台20个减速器意味着年需求两千万个",
+      },
+    ],
+  },
+  hm_screw: {
+    title: "丝杠/线性执行器供应链流程",
+    intro:
+      "行星滚柱丝杠是人形机器人腿部线性驱动的核心，相比液压缸更轻更精确，相比普通滚珠丝杠承载能力高10倍。特斯拉Optimus单台需要约14根，是最具爆发力的新兴零部件。",
+    layers: [
+      {
+        label: "L0 材料/精密加工",
+        what: "轴承钢GCr15、精密螺纹磨床、行星滚子、DLC镀膜等核心工序",
+        why: "行星滚柱丝杠螺距精度要求μm级，需要高精度磨床和严格的热处理工艺",
+      },
+      {
+        label: "L1 丝杠产品",
+        what: "行星滚柱丝杠（人形机器人专用）、滚珠丝杠（工业标配）、线性导轨",
+        why: "行星滚柱丝杠是人形机器人专属，精度比工业滚珠丝杠高10倍，贝斯特已送样特斯拉",
+      },
+      {
+        label: "L2 线性执行器",
+        what: "丝杠+电机+传感器集成为线性执行器模组，实现关节推拉运动",
+        why: "执行器集成化是趋势，直接向整机厂供货的Tier1地位附加值最高",
+      },
+      {
+        label: "L3 整机关节应用",
+        what: "腿部膝/踝关节（承重800N）、臂部肘/腕关节（精细操作）",
+        why: "丝杠的精度和寿命直接影响机器人步态稳定性，是整机性能的关键变量",
+      },
+    ],
+  },
+  hm_motor: {
+    title: "电机与伺服驱动供应链流程",
+    intro:
+      "无框力矩电机是人形机器人关节的动力源，无外壳设计节省50%体积，高转矩密度达50Nm/kg。汇川技术/鸣志电器/雷赛智能是国产电机三强，已切入机器人赛道。",
+    layers: [
+      {
+        label: "L0 磁材/硅钢/绕组",
+        what: "N52/N55高性能钕铁硼磁材、高频低损耗硅钢片、高槽满率绕组",
+        why: "磁材性能决定电机转矩密度上限，国产钕铁硼已达国际先进水平",
+      },
+      {
+        label: "L1 电机本体",
+        what: "空心杯电机（手部小关节）、无框力矩电机（主关节）、BLDC无刷电机（腿部）",
+        why: "无框电机直接嵌入关节内腔，无外壳设计是人形机器人紧凑布局的核心",
+      },
+      {
+        label: "L2 驱动控制",
+        what: "FOC伺服驱动器（三环控制）、多轴运动控制器（EtherCAT总线）",
+        why: "FOC磁场定向控制实现力矩精度±0.1Nm，动态响应时间<1ms",
+      },
+      {
+        label: "L3 执行器集成",
+        what: "电机+减速器+传感器集成为关节模组，直接供整机厂使用",
+        why: "汇川技术已进入特斯拉供应链，关节模组化是电机企业最高价值增长点",
+      },
+    ],
+  },
+  hm_sensor: {
+    title: "传感器（力/视觉/IMU）供应链流程",
+    intro:
+      "传感器是人形机器人感知世界的眼睛和皮肤。六维力传感器感知关节受力、3D视觉相机识别物体、IMU维持身体平衡，三类传感器缺一不可，共同构成机器人感知系统。",
+    layers: [
+      {
+        label: "L0 敏感元件",
+        what: "CMOS图像芯片、ToF/LiDAR芯片、MEMS加速度计/陀螺仪、应变计",
+        why: "敏感元件是传感器的核心，MEMS工艺决定灵敏度和可靠性",
+      },
+      {
+        label: "L1 传感器产品",
+        what: "六维力矩传感器（±200N）、3D深度相机（0.3-5m）、IMU惯导模组",
+        why: "六维力传感器是国内最大卡脖子，博杰股份已实现量产，填补国内空白",
+      },
+      {
+        label: "L2 感知融合模组",
+        what: "力+视觉+IMU多模态感知融合，实时处理感知数据驱动控制决策",
+        why: "多模态融合精度远高于单一传感器，是灵巧操作和动态平衡的基础",
+      },
+      {
+        label: "L3 整机集成",
+        what: "特斯拉Optimus全身200+传感器，构成分布式感知神经网络",
+        why: "传感器密度决定机器人对环境的感知精度，是实现通用操作能力的关键",
+      },
+    ],
+  },
+  hm_body: {
+    title: "本体/整机集成供应链流程",
+    intro:
+      "人形机器人整机集成是机械、电气、软件的系统工程，从碳纤维骨架到灵巧手，每个子系统都需要精密设计。国内整机厂正从传统机器人公司和Tier1零件商两路并进。",
+    layers: [
+      {
+        label: "L0 材料/结构件",
+        what: "碳纤维骨架（减重40%）、铝合金精铸件、硅橡胶仿生蒙皮、锂电池组",
+        why: "整机重量控制在60kg以内需要大量使用碳纤维，轻量化是整机设计核心约束",
+      },
+      {
+        label: "L1 核心零部件",
+        what: "关节执行器模组、灵巧手（多指欠驱动）、腿部总成、躯干背包",
+        why: "每个子系统都是独立的机电集成难题，灵巧手的欠驱动设计尤其考验工程能力",
+      },
+      {
+        label: "L2 子系统模组",
+        what: "双臂14关节操作系统、双腿6关节步态系统、躯干电池/控制器集成",
+        why: "子系统模块化便于分工协作，拓普集团/三花智控从汽车Tier1切入机器人模组",
+      },
+      {
+        label: "L3 整机/应用",
+        what: "人形机器人整机（1.7m/60kg/43自由度）、协作机器人、服务机器人",
+        why: "2025年特斯拉Optimus开始量产交付，国内埃斯顿/宇树等跟进量产节奏",
+      },
+    ],
+  },
+  hm_brain: {
+    title: "AI大脑/具身智能供应链流程",
+    intro:
+      "具身智能是从感知到决策到控制的端到端AI系统，让机器人具备通用操作能力。边缘AI芯片提供本地算力，云端大模型提供推理支撑，世界模型实现环境预测。",
+    layers: [
+      {
+        label: "L0 AI芯片/算力",
+        what: "机器人NPU（寒武纪）、高性能SoC（瑞芯微RK3588）、LPDDR5内存",
+        why: "边缘推理芯片功耗需控制在20W以内，同时实现实时目标检测和运动规划",
+      },
+      {
+        label: "L1 感知/理解",
+        what: "多模态视觉模型（CLIP/ViT）、指令理解大语言模型、世界模型",
+        why: "具身大语言模型将自然语言指令转化为机器人操作序列，是通用性的关键",
+      },
+      {
+        label: "L2 决策/规划",
+        what: "端到端强化学习策略、仿真训练平台（Isaac Sim）、运动生成模型",
+        why: "Isaac Sim可生成数亿帧仿真数据训练机器人，大幅降低真实世界数据采集成本",
+      },
+      {
+        label: "L3 运动生成",
+        what: "端到端控制器将感知意图直接映射到28个关节的力矩输出",
+        why: "端到端架构消除人工设计的运动规划模块，实现更自然流畅的机器人运动",
+      },
+    ],
+  },
+  hm_actuator: {
+    title: "关节/执行器模组供应链流程",
+    intro:
+      "关节执行器模组是将减速器、电机、传感器、驱动器集成为即插即用单元的核心组件。三花智控/拓普集团作为汽车Tier1转型切入，汇川/雷赛提供配套控制系统。",
+    layers: [
+      {
+        label: "L0 关键零部件",
+        what: "谐波减速器、无框电机、绝对值编码器、力矩传感器、行星滚柱丝杠",
+        why: "六大关键零部件缺一不可，每个都有独立的技术壁垒和供应商格局",
+      },
+      {
+        label: "L1 执行器单元",
+        what: "旋转执行器（肩/肘/腕/髋/膝/踝）、线性执行器（腿部推杆）、手部执行器",
+        why: "旋转/线性两类执行器覆盖全身所有运动自由度，不同关节载荷和精度差异很大",
+      },
+      {
+        label: "L2 模组集成",
+        what: "伺服驱动单元+执行器集成为关节模组，含完整三环控制和EtherCAT通信",
+        why: "即插即用模组大幅降低整机厂集成难度，是Tier1供应商的核心竞争力",
+      },
+      {
+        label: "L3 整机厂",
+        what: "三花智控/拓普集团向特斯拉Optimus/国内整机厂直接供应关节模组",
+        why: "单台人形机器人需要43个执行器，百万台规模意味着4300万个模组年需求",
+      },
+    ],
+  },
+
+  as_overview: {
+    title: "商业航天产业链全景概览",
+    intro:
+      "商业航天覆盖从运载火箭到卫星制造到应用服务的完整价值链。中国商业航天政策全面放开，低轨星座（G60/GW）规划超1.2万颗，带动产业链千亿级投资。",
+    layers: [
+      {
+        label: "发射/运载层",
+        what: "液体/固体运载火箭、火箭发动机、碳纤维箭体、飞控制导系统",
+        why: "发射成本是商业航天商业化的核心门槛，SpaceX复用火箭将成本降至$2800/kg",
+      },
+      {
+        label: "卫星平台层",
+        what: "卫星结构/热控/姿轨控/供配电/星务计算机等卫星本体平台",
+        why: "低轨星座推动卫星从定制品变为工业品，批量制造使单颗成本从亿元降至百万",
+      },
+      {
+        label: "载荷/通信层",
+        what: "通信载荷、遥感相机、SAR雷达、导航载荷等有效载荷分系统",
+        why: "有效载荷决定卫星功能和商业价值，行波管/相控阵天线是核心卡脖子器件",
+      },
+      {
+        label: "应用/地面层",
+        what: "卫星通信/导航/遥感数据服务、地面测控站、用户终端",
+        why: "应用层是商业航天的最终变现环节，遥感数据服务市场规模超百亿美元/年",
+      },
+    ],
+  },
+  as_rocket: {
+    title: "运载火箭/发动机供应链流程",
+    intro:
+      "运载火箭是卫星进入太空的唯一通道。液体火箭大载荷低成本、固体火箭快速响应，可复用是降本核心趋势。碳纤维/高温合金/航天电子构成三大国产配套主力。",
+    layers: [
+      {
+        label: "L0 原材料/特种材料",
+        what: "T800碳纤维、镍基高温合金（涡轮泵）、钛合金结构件、抗辐射元器件",
+        why: "碳纤维箭体比铝合金轻40%，高温合金在1500℃下仍保持强度，是发动机必需材料",
+      },
+      {
+        label: "L1 关键零部件",
+        what: "液氧甲烷发动机（推力120t）、固体发动机、碳纤维网格壁箭体、飞控计算机",
+        why: "发动机是火箭心脏，比冲决定运载效率；飞控精度决定卫星入轨精度",
+      },
+      {
+        label: "L2 系统集成",
+        what: "液体火箭整箭（LEO>10吨）、固体火箭（快速响应）、可复用一子级",
+        why: "液体火箭可复用降本80%，蓝箭朱雀3/星河动力均已立项可复用型号",
+      },
+      {
+        label: "L3 发射服务",
+        what: "商业发射服务：LEO星座组批发射、小卫星拼单发射、快速响应发射",
+        why: "G60等千颗星座需要大量发射窗口，商业发射服务市场规模百亿级",
+      },
+    ],
+  },
+  as_satellite: {
+    title: "卫星平台/制造供应链流程",
+    intro:
+      "卫星平台是承载有效载荷的基础设施，低轨星座大批量制造推动卫星进入工业化生产时代。中国卫星是国内整星制造龙头，紫光国微/振华科技提供宇航级元器件。",
+    layers: [
+      {
+        label: "L0 关键元器件",
+        what: "抗辐射FPGA/MCU（紫光国微）、砷化镓太阳能电池、锂离子蓄电池、航天连接器",
+        why: "宇航级元器件需通过严苛的辐照/高低温测试，国产化率提升是核心战略目标",
+      },
+      {
+        label: "L1 平台分系统",
+        what: "卫星结构舱（铝蜂窝）、热控系统（热管）、姿轨控（陀螺仪+推进器）、供配电",
+        why: "热控精度ΔT<5℃、姿控精度0.001°决定载荷性能，是平台技术最核心指标",
+      },
+      {
+        label: "L2 卫星总装",
+        what: "各分系统在洁净室进行总装集成测试，完成卫星整星AIT",
+        why: "低轨星座要求卫星批量生产，中国卫星正建设流水线以满足G60等项目需求",
+      },
+      {
+        label: "L3 星座部署",
+        what: "LEO小卫星（100-500kg）、GEO大卫星（3-6t）、大规模星座组网",
+        why: "G60/GW星座规划超1.2万颗，是中国卫星制造业有史以来最大的订单规模",
+      },
+    ],
+  },
+  as_payload: {
+    title: "有效载荷供应链流程",
+    intro:
+      "有效载荷是卫星功能的实现核心，决定卫星能做什么。行波管放大器、相控阵天线、SAR雷达、光学相机各司其职，航天环宇/国光电气/振华风光为国内核心供应商。",
+    layers: [
+      {
+        label: "L0 核心元件",
+        what: "行波管（200W功率放大）、GaN T/R组件、空间光学镜头、红外探测器",
+        why: "行波管是GEO通信卫星核心，国光电气是国内唯一规模化生产行波管的A股公司",
+      },
+      {
+        label: "L1 载荷子系统",
+        what: "通信载荷（转发器+相控阵）、SAR雷达载荷（全天候成像）、光学遥感载荷",
+        why: "每种载荷对应不同卫星功能，相控阵天线支持波束扫描±60°，灵活覆盖",
+      },
+      {
+        label: "L2 载荷总成",
+        what: "载荷与平台接口对接，完成星上综合电子集成，通过热真空测试",
+        why: "载荷是卫星价值的核心，通常占整星成本的30-50%",
+      },
+      {
+        label: "L3 卫星应用",
+        what: "通信卫星（宽带互联网）、遥感卫星（0.5m分辨率）、导航卫星（北斗三号）",
+        why: "载荷性能直接决定卫星商业价值和数据服务定价，分辨率每提升2倍市场扩大10倍",
+      },
+    ],
+  },
+  as_satcom: {
+    title: "卫星通信供应链流程",
+    intro:
+      "卫星通信是为偏远地区、海洋、航空提供宽带接入的唯一手段。GEO高通量+LEO低轨星座双轮驱动，NTN手机直连正重新定义移动通信边界。",
+    layers: [
+      {
+        label: "L0 芯片/部件",
+        what: "卫星调制解调芯片、GaN功率放大器、低噪声放大器、相控阵天线单元",
+        why: "高性能调制解调芯片决定通信容量，GaN PA效率直接影响卫星在轨功耗",
+      },
+      {
+        label: "L1 卫星/地面设备",
+        what: "GEO高通量卫星（100Gbps+）、LEO互联网星座（20ms延迟）、VSAT关口站",
+        why: "GEO单星容量高、覆盖广，LEO延迟低，两种路线互补满足不同场景需求",
+      },
+      {
+        label: "L2 网络运营",
+        what: "卫星通信网络运营（中国卫通）、VSAT终端接入服务、NTN手机直连",
+        why: "3GPP R17 NTN标准支持手机直连卫星，将卫星通信从专业市场延伸到消费市场",
+      },
+      {
+        label: "L3 行业应用",
+        what: "海事通信（船舶宽带）、航空宽带（机载Wi-Fi）、偏远农村宽带接入",
+        why: "全球仍有40亿人缺乏可靠互联网接入，卫星通信是覆盖数字鸿沟的核心解决方案",
+      },
+    ],
+  },
+  as_satnav: {
+    title: "卫星导航/北斗供应链流程",
+    intro:
+      "北斗三号已完成全球组网，35颗卫星提供全球2.5m/亚太1.5m定位精度。RTK差分技术实现厘米级精度，正全面渗透自动驾驶、精准农业、工程测量等行业。",
+    layers: [
+      {
+        label: "L0 芯片/基础",
+        what: "北斗基带芯片（多系统多频）、射频前端芯片、高精度时钟（铷原子钟）",
+        why: "北斗芯片年销量超1亿颗，北斗星通/铖昌科技是国内核心芯片供应商",
+      },
+      {
+        label: "L1 模组/板卡",
+        what: "GNSS模组（北斗/GPS双系统）、高精度RTK板卡（厘米级）、组合导航系统",
+        why: "RTK板卡是高精度定位的核心，华测导航/中海达年销超10万套",
+      },
+      {
+        label: "L2 终端产品",
+        what: "车载导航终端、RTK测量仪、农机自驾控制器、船载AIS/GNSS终端",
+        why: "终端多样化是北斗商业化的体现，农机自驾控制器偏差<2.5cm是精准农业核心",
+      },
+      {
+        label: "L3 行业应用",
+        what: "L3+自动驾驶定位、精准农业（5000万亩）、测量测绘、智慧城市授时",
+        why: "北斗授时服务精度10ns，已成为全国电力/金融/通信基础设施的时间基准",
+      },
+    ],
+  },
+  as_remote: {
+    title: "遥感/对地观测供应链流程",
+    intro:
+      "遥感卫星是数字地球的眼睛，0.5m分辨率光学卫星+全天候SAR卫星+AI解译平台构成完整感知体系。中科星图/四维图新从数据到AI服务布局完整产业链。",
+    layers: [
+      {
+        label: "L0 传感器/载荷",
+        what: "高分光学相机（0.5m分辨率）、SAR合成孔径雷达、高光谱传感器、星上AI芯片",
+        why: "载荷分辨率决定遥感数据商业价值，SAR全天候成像弥补光学卫星的天气限制",
+      },
+      {
+        label: "L1 遥感卫星",
+        what: "光学遥感星座（全球每日一拍）、SAR星座（夜间/云雨覆盖区成像）",
+        why: "多颗卫星组网才能实现全球高频次覆盖，单颗卫星重访周期长达数天",
+      },
+      {
+        label: "L2 数据处理",
+        what: "辐射定标/几何校正/正射处理→AI目标检测/变化检测/语义分割",
+        why: "AI解译效率是人工的100倍，中科星图GEOVIS平台日处理TB级影像",
+      },
+      {
+        label: "L3 行业应用",
+        what: "精准农业（作物长势监测）、灾害应急（快速评估）、城市规划（变化监测）",
+        why: "遥感数据服务年市场规模超$100亿，是商业航天应用层增速最快的细分市场",
+      },
+    ],
+  },
+  as_ground: {
+    title: "地面站/测控系统供应链流程",
+    intro:
+      "地面测控系统是卫星在轨运行的神经中枢，负责全生命周期的遥测/遥控/跟踪。千颗级低轨星座的兴起对测控网络提出百倍需求增长，商业测控服务正成为新兴市场。",
+    layers: [
+      {
+        label: "L0 核心设备",
+        what: "相控阵雷达（T/R组件）、高功率放大器（TWT/SSPA）、测控调制解调器",
+        why: "相控阵雷达电扫描速度快，可同时跟踪多颗卫星，是低轨星座测控的必选方案",
+      },
+      {
+        label: "L1 地面站系统",
+        what: "测控站（遥测/遥控/跟踪一体化）、信关站（通信卫星上行）、数据处理中心",
+        why: "四创电子/七一二提供全套测控设备，单站可同时跟踪8颗LEO卫星",
+      },
+      {
+        label: "L2 测控网络",
+        what: "国内3站（北京/喀什/三亚）+海外2站组成全弧段测控网，全球覆盖>90%",
+        why: "全弧段测控保证每颗卫星每圈次都能获得测控数据和控制指令上注",
+      },
+      {
+        label: "L3 卫星运营",
+        what: "在轨运营（姿轨控/寿命管理）、数据分发服务、商业测控SaaS服务",
+        why: "G60等千颗星座推动测控需求百倍增长，商业测控服务是千亿级蓝海市场",
       },
     ],
   },
@@ -1064,6 +1500,18 @@ function ProcessFlowView({
                 )}
                 {industryId === "semieq" && (
                   <SemieqAnimation isLight={isLight} />
+                )}
+                {industryId.startsWith("hm_") && (
+                  <HumanoidAnimation
+                    isLight={isLight}
+                    industryId={industryId}
+                  />
+                )}
+                {industryId.startsWith("as_") && (
+                  <AerospaceAnimation
+                    isLight={isLight}
+                    industryId={industryId}
+                  />
                 )}
 
                 <div
@@ -1896,7 +2344,7 @@ const OVERVIEW_INDUSTRIES = [
   },
   {
     id: "semieq",
-    label: "半导体设备",
+    label: "半导体先进制程",
     icon: "⚙️",
     color: "#6366f1",
     reps: ["北方华创", "中微公司", "华海清科"],
@@ -5626,7 +6074,14 @@ export default function IndustryCanvasPage() {
         }}
       >
         <button
-          onClick={() => router.push("/industry")}
+          onClick={() => {
+            const tab = industryId.startsWith("hm_")
+              ? "humanoid"
+              : industryId.startsWith("as_")
+                ? "aerospace"
+                : "ai_infra";
+            router.push(`/industry?tab=${tab}`);
+          }}
           className="flex items-center gap-1.5 text-sm transition-colors hover:text-[var(--text-primary)]"
           style={{ color: "var(--text-secondary)" }}
         >
@@ -5676,88 +6131,7 @@ export default function IndustryCanvasPage() {
           </>
         )}
 
-        <div className="ml-auto flex items-center gap-2">
-          <div className="relative">
-            <div className="relative">
-              <Search
-                className="absolute left-2.5 top-1/2 -translate-y-1/2"
-                style={{ color: "var(--text-secondary)" }}
-                size={14}
-              />
-              <input
-                ref={searchInputRef}
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && searchResults.length > 0) {
-                    handleSearchSelect(searchResults[0]);
-                  } else if (e.key === "Escape") {
-                    setSearchQuery("");
-                    setShowSearchDropdown(false);
-                  }
-                }}
-                onFocus={() => {
-                  if (searchResults.length > 0) setShowSearchDropdown(true);
-                }}
-                placeholder="搜索股票名称或代码..."
-                className="w-64 pl-8 pr-8 py-1.5 border rounded-md text-sm focus:outline-none focus:border-[#3b5bdb]"
-                style={{
-                  background: "var(--bg-primary)",
-                  borderColor: "var(--border-color)",
-                  color: "var(--text-primary)",
-                }}
-              />
-              {searchQuery && (
-                <button
-                  onClick={() => {
-                    setSearchQuery("");
-                    setShowSearchDropdown(false);
-                  }}
-                  className="absolute right-2 top-1/2 -translate-y-1/2"
-                  style={{ color: "var(--text-secondary)" }}
-                >
-                  <X size={14} />
-                </button>
-              )}
-            </div>
-
-            {showSearchDropdown && searchResults.length > 0 && (
-              <div
-                className="absolute top-full mt-1 w-full border rounded-md shadow-xl z-50 max-h-80 overflow-y-auto"
-                style={{
-                  background: "var(--bg-secondary)",
-                  borderColor: "var(--border-color)",
-                }}
-              >
-                {searchResults.map((result, idx) => (
-                  <button
-                    key={`${result.nodeId}-${result.code}`}
-                    onClick={() => handleSearchSelect(result)}
-                    className={cn(
-                      "w-full flex items-center justify-between px-3 py-2 text-left transition-colors",
-                      idx === 0 && "rounded-t-md",
-                      idx === searchResults.length - 1 && "rounded-b-md",
-                    )}
-                  >
-                    <span
-                      className="text-sm"
-                      style={{ color: "var(--text-primary)" }}
-                    >
-                      {result.name}
-                    </span>
-                    <span
-                      className="text-xs"
-                      style={{ color: "var(--text-secondary)" }}
-                    >
-                      {result.code}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
+        <div className="flex items-center gap-2">
           {industryId !== "overview" && (
             <div
               className="flex border rounded-lg p-0.5"
@@ -5848,7 +6222,88 @@ export default function IndustryCanvasPage() {
             </div>
           )}
 
-          <button className="flex items-center gap-2 bg-[#f5a623]/10 hover:bg-[#f5a623]/20 text-[#f5a623] border border-[#f5a623]/30 px-3 py-1.5 rounded-lg text-xs transition-colors ml-1">
+          <div className="relative ml-auto">
+            <div className="relative">
+              <Search
+                className="absolute left-2.5 top-1/2 -translate-y-1/2"
+                style={{ color: "var(--text-secondary)" }}
+                size={14}
+              />
+              <input
+                ref={searchInputRef}
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && searchResults.length > 0) {
+                    handleSearchSelect(searchResults[0]);
+                  } else if (e.key === "Escape") {
+                    setSearchQuery("");
+                    setShowSearchDropdown(false);
+                  }
+                }}
+                onFocus={() => {
+                  if (searchResults.length > 0) setShowSearchDropdown(true);
+                }}
+                placeholder="搜索股票名称或代码..."
+                className="w-64 pl-8 pr-8 py-1.5 border rounded-md text-sm focus:outline-none focus:border-[#3b5bdb]"
+                style={{
+                  background: "var(--bg-primary)",
+                  borderColor: "var(--border-color)",
+                  color: "var(--text-primary)",
+                }}
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => {
+                    setSearchQuery("");
+                    setShowSearchDropdown(false);
+                  }}
+                  className="absolute right-2 top-1/2 -translate-y-1/2"
+                  style={{ color: "var(--text-secondary)" }}
+                >
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+
+            {showSearchDropdown && searchResults.length > 0 && (
+              <div
+                className="absolute top-full mt-1 w-full border rounded-md shadow-xl z-50 max-h-80 overflow-y-auto"
+                style={{
+                  background: "var(--bg-secondary)",
+                  borderColor: "var(--border-color)",
+                }}
+              >
+                {searchResults.map((result, idx) => (
+                  <button
+                    key={`${result.nodeId}-${result.code}`}
+                    onClick={() => handleSearchSelect(result)}
+                    className={cn(
+                      "w-full flex items-center justify-between px-3 py-2 text-left transition-colors",
+                      idx === 0 && "rounded-t-md",
+                      idx === searchResults.length - 1 && "rounded-b-md",
+                    )}
+                  >
+                    <span
+                      className="text-sm"
+                      style={{ color: "var(--text-primary)" }}
+                    >
+                      {result.name}
+                    </span>
+                    <span
+                      className="text-xs"
+                      style={{ color: "var(--text-secondary)" }}
+                    >
+                      {result.code}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <button className="flex items-center gap-2 bg-[#f5a623]/10 hover:bg-[#f5a623]/20 text-[#f5a623] border border-[#f5a623]/30 px-3 py-1.5 rounded-lg text-xs transition-colors ml-2">
             <Bot size={13} />
             AI 分析
           </button>

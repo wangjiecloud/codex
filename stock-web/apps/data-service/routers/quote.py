@@ -11,7 +11,7 @@ from bs_session import get_bs, reset_bs
 router = APIRouter()
 
 _quote_refresh_lock: set[str] = set()
-_QUOTE_STALE_HOURS = 24
+_QUOTE_STALE_HOURS = 4  # 当天已同步时，最多缓存4小时
 
 
 @router.get("/search")
@@ -179,7 +179,7 @@ def _fetch_and_cache_quote(code: str) -> dict:
 
 
 @router.get("/{code}")
-async def get_quote(code: str, background_tasks: BackgroundTasks):
+async def get_quote(code: str):
     def _read_cached():
         db = SessionLocal()
         try:
@@ -216,6 +216,12 @@ async def get_quote(code: str, background_tasks: BackgroundTasks):
     def _needs_refresh(r: StockQuote) -> bool:
         if r.price == 0 or r.updated_at is None:
             return True
+        # 用北京时间日期判断：不是今天同步的就强制刷新
+        today_cst = (datetime.utcnow() + timedelta(hours=8)).date()
+        record_date_cst = (r.updated_at + timedelta(hours=8)).date()
+        if record_date_cst < today_cst:
+            return True
+        # 今天的数据，4小时内使用缓存
         age_hours = (datetime.utcnow() - r.updated_at).total_seconds() / 3600
         return age_hours >= _QUOTE_STALE_HOURS
 
@@ -233,14 +239,14 @@ async def get_quote(code: str, background_tasks: BackgroundTasks):
     if row and not _needs_refresh(row):
         return JSONResponse(content=_row_to_dict(row))
 
-    if row and row.price > 0:
-        background_tasks.add_task(_bg_refresh, code)
-        return JSONResponse(
-            content=_row_to_dict(row, "数据可能不是最新，正在更新中...")
-        )
-
-    if row:
-        return JSONResponse(
-            content=_row_to_dict(row, "数据可能不是最新，正在更新中...")
-        )
-    raise HTTPException(status_code=404, detail=f"No quote data for {code}")
+    # 缓存过期或无缓存，同步拉取最新数据
+    try:
+        result = await run_in_threadpool(_fetch_and_cache_quote, code)
+        return JSONResponse(content=result)
+    except HTTPException:
+        raise
+    except Exception:
+        # 拉取失败时降级返回旧缓存
+        if row:
+            return JSONResponse(content=_row_to_dict(row, "数据可能不是最新，获取失败"))
+        raise HTTPException(status_code=404, detail=f"No quote data for {code}")

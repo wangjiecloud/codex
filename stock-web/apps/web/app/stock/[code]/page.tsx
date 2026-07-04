@@ -43,6 +43,15 @@ interface NewsItem {
   pubTime: string;
 }
 
+interface GubaItem {
+  title: string;
+  url: string;
+  author: string;
+  readCount: number;
+  replyCount: number;
+  pubTime: string;
+}
+
 interface StockSearchResult {
   code: string;
   name: string;
@@ -150,7 +159,7 @@ function removeFromRecentlyViewed(code: string) {
 const API = "http://localhost:8000";
 const INDICATORS = ["VOL", "MACD", "KDJ", "BOLL", "RSI", "DMI", "CCI", "W&R"];
 const PERIODS = ["日K", "周K", "月K"];
-const BOTTOM_TABS = ["财务", "AI分析"];
+const BOTTOM_TABS = ["财务", "AI分析", "资讯", "公告"];
 
 const PERIOD_MAP: Record<string, string> = {
   日K: "daily",
@@ -249,10 +258,20 @@ export default function StockDetailPage() {
   const [isResizing, setIsResizing] = useState(false);
   const [quoteLoading, setQuoteLoading] = useState(true);
   const [fundamental, setFundamental] = useState<FundamentalData | null>(null);
+  const [gubaNews, setGubaNews] = useState<GubaItem[]>([]);
+  const [gubaNotice, setGubaNotice] = useState<GubaItem[]>([]);
+  const [gubaLoading, setGubaLoading] = useState(false); // 首次加载（无数据时）
+  const [gubaSyncing, setGubaSyncing] = useState(false); // 后台静默同步中
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<StockSearchResult[]>([]);
   const [showSearchDropdown, setShowSearchDropdown] = useState(false);
+  const [searchDropdownPos, setSearchDropdownPos] = useState({
+    top: 0,
+    left: 0,
+    width: 0,
+  });
   const searchRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -315,6 +334,41 @@ export default function StockDetailPage() {
       })
       .catch(() => {});
   }, [code]);
+
+  // 当切换到资讯/公告 tab 时：先读库展示已有数据，同时后台静默同步
+  useEffect(() => {
+    if (activeTab !== "资讯" && activeTab !== "公告") return;
+    const postType = activeTab === "资讯" ? "news" : "notice";
+
+    const loadFromDb = () =>
+      fetch(
+        `http://localhost:8000/api/guba/${code}?post_type=${postType}&count=50`,
+      )
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (data?.items) {
+            if (postType === "news") setGubaNews(data.items as GubaItem[]);
+            else setGubaNotice(data.items as GubaItem[]);
+          }
+          return data?.items ?? [];
+        })
+        .catch(() => [] as GubaItem[]);
+
+    // 先从数据库加载：有数据直接展示，无数据显示 loading
+    loadFromDb().then((items) => {
+      if (items.length === 0) setGubaLoading(true);
+
+      // 后台静默同步（不影响列表展示）
+      setGubaSyncing(true);
+      fetch(`http://localhost:8000/api/guba/sync/${code}`, { method: "POST" })
+        .then(() => loadFromDb())
+        .catch(() => {})
+        .finally(() => {
+          setGubaLoading(false);
+          setGubaSyncing(false);
+        });
+    });
+  }, [code, activeTab]);
 
   const toggleIndicator = (ind: string) => {
     setActiveIndicators((prev) =>
@@ -390,7 +444,7 @@ export default function StockDetailPage() {
     }
     searchDebounceRef.current = setTimeout(async () => {
       try {
-        const url = `${API}/api/search?q=${encodeURIComponent(val)}&limit=8`;
+        const url = `${API}/api/search?q=${encodeURIComponent(val)}&limit=10`;
         console.log("[Stock Search] Fetching:", url);
         const r = await fetch(url);
         console.log("[Stock Search] Response status:", r.status);
@@ -402,6 +456,14 @@ export default function StockDetailPage() {
             "items",
           );
           setSearchResults(data.results ?? []);
+          if ((data.results?.length ?? 0) > 0 && searchInputRef.current) {
+            const rect = searchInputRef.current.getBoundingClientRect();
+            setSearchDropdownPos({
+              top: rect.bottom + 4,
+              left: rect.left,
+              width: 240,
+            });
+          }
           setShowSearchDropdown(true);
         } else {
           console.error("[Stock Search] Error:", r.status, r.statusText);
@@ -449,6 +511,7 @@ export default function StockDetailPage() {
           <div className="flex items-center gap-1 px-2 py-1 rounded border border-[var(--border-color)] bg-[var(--bg-deep)] w-[140px]">
             <Search size={11} className="text-[var(--text-tertiary)]" />
             <input
+              ref={searchInputRef}
               type="text"
               value={searchQuery}
               onChange={(e) => handleSearchInput(e.target.value)}
@@ -469,7 +532,15 @@ export default function StockDetailPage() {
             )}
           </div>
           {showSearchDropdown && searchResults.length > 0 && (
-            <div className="absolute top-full left-0 mt-1 w-[220px] bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded shadow-lg z-50 max-h-[280px] overflow-y-auto">
+            <div
+              style={{
+                position: "fixed",
+                top: searchDropdownPos.top,
+                left: searchDropdownPos.left,
+                width: searchDropdownPos.width,
+              }}
+              className="bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded shadow-lg z-[9999] max-h-[320px] overflow-y-auto"
+            >
               {searchResults.map((stock) => (
                 <button
                   key={stock.code}
@@ -744,6 +815,80 @@ export default function StockDetailPage() {
           </div>
 
           {/* Tab content */}
+          {(activeTab === "资讯" || activeTab === "公告") && (
+            <div
+              className="overflow-y-auto bg-[var(--bg-primary)]"
+              style={{ height: `${bottomHeight}px` }}
+            >
+              {gubaLoading ? (
+                <div className="flex items-center justify-center py-6 text-[var(--text-tertiary)] text-[11px]">
+                  <svg
+                    className="animate-spin mr-2"
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                  >
+                    <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                  </svg>
+                  加载中...
+                </div>
+              ) : (
+                (() => {
+                  const items = activeTab === "资讯" ? gubaNews : gubaNotice;
+                  if (items.length === 0)
+                    return (
+                      <div className="text-center py-6 text-[var(--text-tertiary)] text-[11px]">
+                        {gubaLoading ? "同步中，请稍候..." : "暂无数据"}
+                      </div>
+                    );
+                  return (
+                    <div className="divide-y divide-[var(--border-color)]">
+                      {items.map((item, idx) => (
+                        <a
+                          key={idx}
+                          href={item.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex items-start gap-2 px-3 py-2 hover:bg-[var(--bg-hover)] transition-colors group"
+                        >
+                          <div className="flex-1 min-w-0">
+                            <div className="text-[11px] text-[var(--text-primary)] group-hover:text-[#f5a623] line-clamp-2 leading-relaxed">
+                              {item.title}
+                            </div>
+                            <div className="flex items-center gap-2 mt-0.5 text-[10px] text-[var(--text-tertiary)]">
+                              <span>{item.author || "匿名"}</span>
+                              {item.readCount > 0 && (
+                                <span>
+                                  阅读{" "}
+                                  {item.readCount >= 10000
+                                    ? (item.readCount / 10000).toFixed(1) + "万"
+                                    : item.readCount}
+                                </span>
+                              )}
+                              {item.replyCount > 0 && (
+                                <span>评论 {item.replyCount}</span>
+                              )}
+                              <span className="ml-auto">
+                                {item.pubTime?.slice(0, 16) || ""}
+                              </span>
+                            </div>
+                          </div>
+                          <ExternalLink
+                            size={10}
+                            className="text-[var(--text-tertiary)] shrink-0 mt-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                          />
+                        </a>
+                      ))}
+                    </div>
+                  );
+                })()
+              )}
+            </div>
+          )}
+
           {activeTab === "财务" && (
             <div
               className="overflow-y-auto bg-[var(--bg-primary)] p-3"
@@ -807,6 +952,68 @@ export default function StockDetailPage() {
             <div className="flex-1 overflow-hidden">
               <AgentPanel code={code} stockName={displayName} />
             </div>
+          ) : activeTab === "资讯" || activeTab === "公告" ? (
+            <>
+              {/* Guba sync panel */}
+              <div className="px-2 py-2 border-b border-[var(--border-color)]">
+                <div className="text-[10px] text-[var(--text-tertiary)] mb-2">
+                  {activeTab === "资讯" ? "媒体资讯" : "公司公告"}
+                </div>
+                {gubaSyncing && (
+                  <div className="text-[10px] text-[#f5a623] mb-1.5 flex items-center gap-1">
+                    <svg
+                      className="animate-spin"
+                      width="10"
+                      height="10"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                    >
+                      <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                    </svg>
+                    正在同步最新数据...
+                  </div>
+                )}
+                <button
+                  onClick={() => {
+                    const postType = activeTab === "资讯" ? "news" : "notice";
+                    setGubaSyncing(true);
+                    fetch(`http://localhost:8000/api/guba/sync/${code}`, {
+                      method: "POST",
+                    })
+                      .then(() =>
+                        fetch(
+                          `http://localhost:8000/api/guba/${code}?post_type=${postType}&count=50`,
+                        ),
+                      )
+                      .then((r) => (r.ok ? r.json() : null))
+                      .then((data) => {
+                        if (data?.items) {
+                          if (postType === "news")
+                            setGubaNews(data.items as GubaItem[]);
+                          else setGubaNotice(data.items as GubaItem[]);
+                        }
+                      })
+                      .catch(() => {})
+                      .finally(() => setGubaSyncing(false));
+                  }}
+                  disabled={gubaSyncing}
+                  className="w-full py-1.5 text-[11px] bg-[#f5a623]/10 hover:bg-[#f5a623]/20 border border-[#f5a623]/30 text-[#f5a623] rounded transition-colors disabled:opacity-40"
+                >
+                  {gubaSyncing ? "同步中..." : "重新同步"}
+                </button>
+              </div>
+              <div className="p-2 text-[10px] text-[var(--text-tertiary)] leading-relaxed">
+                <p>
+                  {activeTab === "资讯"
+                    ? "来源：东方财富股吧资讯"
+                    : "来源：东方财富官方公告"}
+                </p>
+                <p className="mt-1">切换 tab 自动同步</p>
+                <p className="mt-1">每日 17:30 自动更新</p>
+              </div>
+            </>
           ) : (
             <>
               {/* Order book */}

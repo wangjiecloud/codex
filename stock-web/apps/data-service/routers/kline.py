@@ -30,7 +30,14 @@ def _fetch_and_cache_klines(code: str, period: str, count: int) -> list:
     try:
         bsapi = get_bs()
         bs_code = _to_bs_code(code)
-        start = (date.today() - timedelta(days=max(count * 2, 400))).strftime(
+        # 按周期决定回溯窗口：日K 400天，周K 3年，月K 10年
+        if period == "weekly":
+            lookback_days = max(count * 7 + 30, 3 * 365)
+        elif period == "monthly":
+            lookback_days = max(count * 31 + 60, 10 * 365)
+        else:
+            lookback_days = max(count * 2, 400)
+        start = (date.today() - timedelta(days=lookback_days)).strftime(
             "%Y-%m-%d"
         )
         end = date.today().strftime("%Y-%m-%d")
@@ -101,8 +108,15 @@ def _fetch_and_cache_klines(code: str, period: str, count: int) -> list:
 async def get_kline(
     code: str,
     period: str = Query(default="daily"),
-    count: int = Query(default=120, ge=10, le=500),
+    count: int = Query(default=120, ge=10, le=1000),
 ):
+    # 按周期决定默认返回条数：日K 120，周K 156（3年），月K 120（10年）
+    if count == 120:
+        if period == "weekly":
+            count = 156
+        elif period == "monthly":
+            count = 120
+
     def _read_cached():
         db = SessionLocal()
         try:
@@ -117,6 +131,11 @@ async def get_kline(
             db.close()
 
     rows = await run_in_threadpool(_read_cached)
+
+    # 缓存为空，或周K/月K缓存数据明显不足时，重新从 baostock 拉取
+    min_expected = {"daily": 60, "weekly": 100, "monthly": 60}.get(period, 60)
+    if len(rows) < min_expected:
+        return await run_in_threadpool(_fetch_and_cache_klines, code, period, count)
 
     bars = [
         {

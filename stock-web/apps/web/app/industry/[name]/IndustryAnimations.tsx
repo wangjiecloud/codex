@@ -5156,3 +5156,5081 @@ export function SemieqAnimation({ isLight }: { isLight: boolean }) {
     />
   );
 }
+
+// ─── Humanoid (人形机器人) ────────────────────────────────────────────────────
+
+const HUMANOID_STEPS = [
+  { id: 0, label: "核心零部件" },
+  { id: 1, label: "执行器总成" },
+  { id: 2, label: "本体集成" },
+  { id: 3, label: "AI具身智能" },
+];
+
+function HumanoidStep({ step }: { step: number }) {
+  const t = (Date.now() / 700) % (Math.PI * 2);
+  const pulse = 0.5 + 0.5 * Math.sin(t);
+
+  if (step === 0) {
+    // 核心零部件：谐波减速器 + 滚柱丝杆 + 六维力传感器
+    return (
+      <>
+        {/* 谐波减速器 */}
+        <ellipse
+          cx="120"
+          cy="60"
+          rx="42"
+          ry="38"
+          fill="#1e293b"
+          stroke="#f59e0b"
+          strokeWidth="1.5"
+        />
+        <ellipse
+          cx="120"
+          cy="60"
+          rx="28"
+          ry="24"
+          fill="#0f172a"
+          stroke="#fbbf24"
+          strokeWidth="1"
+        />
+        <ellipse
+          cx="120"
+          cy="60"
+          rx="14"
+          ry="12"
+          fill="#1a1a2e"
+          stroke="#f59e0b"
+          strokeWidth="1.5"
+          opacity={0.7 + 0.3 * pulse}
+        />
+        <text
+          x="120"
+          y="112"
+          textAnchor="middle"
+          fontSize="8.5"
+          fill="#fbbf24"
+          fontWeight="600"
+        >
+          谐波减速器
+        </text>
+        <text x="120" y="124" textAnchor="middle" fontSize="7.5" fill="#94a3b8">
+          精密传动核心
+        </text>
+
+        {/* 滚柱丝杆 */}
+        <rect
+          x="198"
+          y="30"
+          width="100"
+          height="20"
+          rx="10"
+          fill="#1e293b"
+          stroke="#38bdf8"
+          strokeWidth="1.5"
+        />
+        {[0, 1, 2, 3, 4].map((i) => (
+          <circle
+            key={i}
+            cx={215 + i * 17}
+            cy="40"
+            r="6"
+            fill="#0f172a"
+            stroke="#38bdf8"
+            strokeWidth="1"
+            opacity={0.7 + 0.2 * pulse}
+          />
+        ))}
+        <rect
+          x="198"
+          y="55"
+          width="100"
+          height="20"
+          rx="10"
+          fill="#1e293b"
+          stroke="#38bdf8"
+          strokeWidth="1.5"
+        />
+        <text
+          x="248"
+          y="91"
+          textAnchor="middle"
+          fontSize="8.5"
+          fill="#38bdf8"
+          fontWeight="600"
+        >
+          行星滚柱丝杆
+        </text>
+        <text x="248" y="103" textAnchor="middle" fontSize="7.5" fill="#94a3b8">
+          线性执行器
+        </text>
+
+        {/* 六维力传感器 */}
+        <rect
+          x="350"
+          y="28"
+          width="80"
+          height="44"
+          rx="8"
+          fill="#1e293b"
+          stroke="#10b981"
+          strokeWidth="1.5"
+        />
+        <circle
+          cx="390"
+          cy="50"
+          r="14"
+          fill="#0f172a"
+          stroke="#10b981"
+          strokeWidth="1.5"
+          opacity={0.7 + 0.3 * pulse}
+          filter="url(#ia-glow3)"
+        />
+        <text x="240" y="8" textAnchor="middle" fontSize="7" fill="#6366f1">
+          Fx
+        </text>
+        {["Fx", "Fy", "Fz", "Mx", "My", "Mz"].map((l, i) => (
+          <text
+            key={l}
+            x={355 + (i % 3) * 24}
+            y={37 + Math.floor(i / 3) * 12}
+            fontSize="7"
+            fill="#34d399"
+            opacity={0.6 + 0.4 * pulse}
+          >
+            {l}
+          </text>
+        ))}
+        <text
+          x="390"
+          y="86"
+          textAnchor="middle"
+          fontSize="8.5"
+          fill="#10b981"
+          fontWeight="600"
+        >
+          六维力传感器
+        </text>
+        <text x="390" y="98" textAnchor="middle" fontSize="7.5" fill="#94a3b8">
+          力控反馈
+        </text>
+
+        <W
+          title="为什么零部件决定人形机器人成本？"
+          line1="减速器/丝杆/传感器占整机BOM约60%，"
+          line2="国产替代空间巨大，规模量产后成本可降80%。"
+          color="#f59e0b"
+        />
+      </>
+    );
+  }
+  if (step === 1) {
+    // 执行器总成：伺服电机驱动关节
+    const joints = [
+      { x: 80, y: 30, label: "肩关节" },
+      { x: 200, y: 50, label: "肘关节" },
+      { x: 320, y: 50, label: "腕关节" },
+      { x: 420, y: 30, label: "手指" },
+    ];
+    return (
+      <>
+        {/* 手臂轮廓 */}
+        <path
+          d="M80,30 Q140,20 200,50 Q260,80 320,50 Q370,30 420,30"
+          stroke="#334155"
+          strokeWidth="12"
+          fill="none"
+          strokeLinecap="round"
+        />
+        <path
+          d="M80,30 Q140,20 200,50 Q260,80 320,50 Q370,30 420,30"
+          stroke="#1e40af"
+          strokeWidth="8"
+          fill="none"
+          strokeLinecap="round"
+          opacity="0.6"
+        />
+        {/* 关节节点 */}
+        {joints.map((j) => (
+          <g key={j.label}>
+            <circle
+              cx={j.x}
+              cy={j.y}
+              r={14}
+              fill="#1e293b"
+              stroke="#f59e0b"
+              strokeWidth="2"
+            />
+            <circle
+              cx={j.x}
+              cy={j.y}
+              r={8}
+              fill="#0f172a"
+              stroke="#fbbf24"
+              strokeWidth="1.5"
+              opacity={0.7 + 0.3 * pulse}
+            />
+            <text
+              x={j.x}
+              y={j.y + 26}
+              textAnchor="middle"
+              fontSize="8"
+              fill="#94a3b8"
+            >
+              {j.label}
+            </text>
+          </g>
+        ))}
+        {/* 电机符号 */}
+        {joints.slice(0, 3).map((j) => (
+          <g key={`m-${j.label}`}>
+            <rect
+              x={j.x - 10}
+              y={j.y + 32}
+              width={20}
+              height={12}
+              rx="3"
+              fill="#312e81"
+              stroke="#818cf8"
+              strokeWidth="1"
+            />
+            <text
+              x={j.x}
+              y={j.y + 41}
+              textAnchor="middle"
+              fontSize="7"
+              fill="#a5b4fc"
+            >
+              M
+            </text>
+          </g>
+        ))}
+        {/* 扭矩箭头 */}
+        <path
+          d="M195,75 A16,16 0 0,1 215,58"
+          stroke="#f59e0b"
+          strokeWidth="1.5"
+          fill="none"
+          markerEnd="url(#arrow)"
+          opacity={0.6 + 0.4 * pulse}
+        />
+        <text
+          x="240"
+          y="110"
+          textAnchor="middle"
+          fontSize="9"
+          fill="#fbbf24"
+          fontWeight="600"
+        >
+          最大扭矩: 80 N·m / 关节
+        </text>
+        <W
+          title="执行器是人形机器人的肌肉"
+          line1="伺服电机+减速器组成执行器单元，"
+          line2="每台人形机器人需要40+个执行器节点。"
+          color="#f59e0b"
+        />
+      </>
+    );
+  }
+  if (step === 2) {
+    // 本体集成：人形轮廓
+    const bodyColor = "#1e40af";
+    return (
+      <>
+        {/* 头部 */}
+        <circle
+          cx="240"
+          cy="28"
+          r="20"
+          fill="#1e293b"
+          stroke="#38bdf8"
+          strokeWidth="2"
+        />
+        <circle
+          cx="232"
+          cy="24"
+          r="4"
+          fill="#38bdf8"
+          opacity={0.7 + 0.3 * pulse}
+        />
+        <circle
+          cx="248"
+          cy="24"
+          r="4"
+          fill="#38bdf8"
+          opacity={0.7 + 0.3 * pulse}
+        />
+        {/* 躯干 */}
+        <rect
+          x="208"
+          y="52"
+          width="64"
+          height="56"
+          rx="8"
+          fill="#1e293b"
+          stroke="#6366f1"
+          strokeWidth="2"
+        />
+        <rect
+          x="220"
+          y="62"
+          width="40"
+          height="14"
+          rx="4"
+          fill="#0f172a"
+          stroke="#818cf8"
+          strokeWidth="1"
+          opacity={0.8 + 0.2 * pulse}
+        />
+        <text
+          x="240"
+          y="72"
+          textAnchor="middle"
+          fontSize="7"
+          fill="#a5b4fc"
+          fontWeight="600"
+        >
+          AI BRAIN
+        </text>
+        {/* 左臂 */}
+        <rect
+          x="176"
+          y="54"
+          width="28"
+          height="10"
+          rx="5"
+          fill="#1e293b"
+          stroke="#f59e0b"
+          strokeWidth="1.5"
+        />
+        <rect
+          x="168"
+          y="68"
+          width="22"
+          height="32"
+          rx="6"
+          fill="#1e293b"
+          stroke="#f59e0b"
+          strokeWidth="1.5"
+        />
+        {/* 右臂 */}
+        <rect
+          x="276"
+          y="54"
+          width="28"
+          height="10"
+          rx="5"
+          fill="#1e293b"
+          stroke="#f59e0b"
+          strokeWidth="1.5"
+        />
+        <rect
+          x="290"
+          y="68"
+          width="22"
+          height="32"
+          rx="6"
+          fill="#1e293b"
+          stroke="#f59e0b"
+          strokeWidth="1.5"
+        />
+        {/* 腿部 */}
+        <rect
+          x="214"
+          y="112"
+          width="22"
+          height="15"
+          rx="5"
+          fill="#1e293b"
+          stroke="#10b981"
+          strokeWidth="1.5"
+        />
+        <rect
+          x="244"
+          y="112"
+          width="22"
+          height="15"
+          rx="5"
+          fill="#1e293b"
+          stroke="#10b981"
+          strokeWidth="1.5"
+        />
+        <rect
+          x="210"
+          y="128"
+          width="22"
+          height="10"
+          rx="5"
+          fill="#1e293b"
+          stroke="#10b981"
+          strokeWidth="1.5"
+        />
+        <rect
+          x="248"
+          y="128"
+          width="22"
+          height="10"
+          rx="5"
+          fill="#1e293b"
+          stroke="#10b981"
+          strokeWidth="1.5"
+        />
+        {/* 数据流 */}
+        <line
+          x1="240"
+          y1="48"
+          x2="240"
+          y2="52"
+          stroke="#38bdf8"
+          strokeWidth="1.5"
+          opacity={0.7 + 0.3 * pulse}
+        />
+        <text x="340" y="68" textAnchor="start" fontSize="8" fill="#94a3b8">
+          身高: 1.7m
+        </text>
+        <text x="340" y="80" textAnchor="start" fontSize="8" fill="#94a3b8">
+          自重: 60kg
+        </text>
+        <text x="340" y="92" textAnchor="start" fontSize="8" fill="#94a3b8">
+          关节: 43个
+        </text>
+        <text x="340" y="104" textAnchor="start" fontSize="8" fill="#94a3b8">
+          续航: 4h
+        </text>
+        <W
+          title="整机集成是系统工程"
+          line1="机械/电子/软件深度耦合，"
+          line2="自重60kg负载30kg，步速可达3km/h。"
+          color="#6366f1"
+        />
+      </>
+    );
+  }
+  // step 3: AI具身智能
+  const layers = [
+    { label: "感知层", desc: "视觉+触觉+IMU", color: "#38bdf8", y: 15 },
+    { label: "理解层", desc: "多模态大模型", color: "#818cf8", y: 55 },
+    { label: "决策层", desc: "具身智能策略网络", color: "#f59e0b", y: 95 },
+  ];
+  return (
+    <>
+      {layers.map((l, i) => (
+        <g key={l.label}>
+          <rect
+            x="80"
+            y={l.y}
+            width="320"
+            height="28"
+            rx="6"
+            fill="#1e293b"
+            stroke={l.color}
+            strokeWidth="1.5"
+            opacity={0.8 + 0.2 * pulse}
+          />
+          <text
+            x="100"
+            y={l.y + 17}
+            fontSize="9"
+            fill={l.color}
+            fontWeight="700"
+          >
+            {l.label}
+          </text>
+          <text x="200" y={l.y + 17} fontSize="8.5" fill="#94a3b8">
+            {l.desc}
+          </text>
+          {i < layers.length - 1 && (
+            <line
+              x1="240"
+              y1={l.y + 28}
+              x2="240"
+              y2={l.y + 42}
+              stroke={l.color}
+              strokeWidth="1.5"
+              strokeDasharray="4 2"
+              opacity={0.7 + 0.3 * pulse}
+            />
+          )}
+        </g>
+      ))}
+      {/* 执行输出 */}
+      <rect
+        x="80"
+        y="135"
+        width="320"
+        height="28"
+        rx="6"
+        fill="#1e293b"
+        stroke="#10b981"
+        strokeWidth="1.5"
+      />
+      <text
+        x="240"
+        y="152"
+        textAnchor="middle"
+        fontSize="9"
+        fill="#10b981"
+        fontWeight="700"
+      >
+        执行层：40+自由度实时运动控制
+      </text>
+      <W
+        title="具身智能是人形机器人的大脑"
+        line1="端到端强化学习可直接从感知到控制，"
+        line2="OpenAI/特斯拉/华为均在布局具身大模型。"
+        color="#818cf8"
+      />
+    </>
+  );
+}
+
+export function HumanoidAnimation({
+  isLight,
+  industryId,
+}: {
+  isLight: boolean;
+  industryId?: string;
+}) {
+  const id = industryId || "hm_overview";
+
+  if (id === "hm_reducer") {
+    return (
+      <IA
+        isLight={isLight}
+        title="谐波减速器工作原理与产业链"
+        steps={[
+          { id: 0, label: "柔轮形变原理" },
+          { id: 1, label: "谐波传动精度" },
+          { id: 2, label: "国产供应链" },
+        ]}
+        renderStep={(s) => {
+          const t = (Date.now() / 700) % (Math.PI * 2);
+          const pulse = 0.5 + 0.5 * Math.sin(t);
+          if (s === 0)
+            return (
+              <>
+                <ellipse
+                  cx="240"
+                  cy="75"
+                  rx="100"
+                  ry="30"
+                  fill="none"
+                  stroke="#f59e0b"
+                  strokeWidth="2"
+                  strokeDasharray="8 4"
+                />
+                <ellipse
+                  cx="240"
+                  cy="75"
+                  rx={80 + 6 * pulse}
+                  ry={24 + 4 * pulse}
+                  fill="none"
+                  stroke="#fbbf24"
+                  strokeWidth="2.5"
+                  opacity={0.7 + 0.3 * pulse}
+                />
+                <ellipse
+                  cx="240"
+                  cy="75"
+                  rx="45"
+                  ry="14"
+                  fill="#1e293b"
+                  stroke="#6366f1"
+                  strokeWidth="2"
+                />
+                <text
+                  x="240"
+                  y="79"
+                  textAnchor="middle"
+                  fontSize="9"
+                  fill="#818cf8"
+                  fontWeight="700"
+                >
+                  波发生器
+                </text>
+                {[0, 1, 2, 3].map((i) => (
+                  <line
+                    key={i}
+                    x1={140 + i * 33}
+                    y1="45"
+                    x2={140 + i * 33}
+                    y2="105"
+                    stroke="#334155"
+                    strokeWidth="0.6"
+                  />
+                ))}
+                <text
+                  x="240"
+                  y="120"
+                  textAnchor="middle"
+                  fontSize="8.5"
+                  fill="#f59e0b"
+                  fontWeight="600"
+                >
+                  柔轮在波发生器驱动下产生弹性形变
+                </text>
+                <W
+                  title="谐波减速器减速比可达30-320:1"
+                  line1="利用柔轮弹性形变实现大减速比，"
+                  line2="精度0.5角秒，回差&lt;1角分，人形机器人核心。"
+                  color="#f59e0b"
+                />
+              </>
+            );
+          if (s === 1)
+            return (
+              <>
+                {[0, 1, 2].map((i) => (
+                  <g key={i}>
+                    <rect
+                      x={80 + i * 130}
+                      y="30"
+                      width="100"
+                      height="70"
+                      rx="8"
+                      fill="#1e293b"
+                      stroke={["#f59e0b", "#6366f1", "#10b981"][i]}
+                      strokeWidth="1.5"
+                    />
+                    <text
+                      x={130 + i * 130}
+                      y="55"
+                      textAnchor="middle"
+                      fontSize="10"
+                      fill={["#fbbf24", "#818cf8", "#34d399"][i]}
+                      fontWeight="700"
+                    >
+                      {["谐波", "RV", "行星"][i]}
+                    </text>
+                    <text
+                      x={130 + i * 130}
+                      y="70"
+                      textAnchor="middle"
+                      fontSize="8"
+                      fill="#94a3b8"
+                    >
+                      精度: {["±1'", "±3'", "±5'"][i]}
+                    </text>
+                    <text
+                      x={130 + i * 130}
+                      y="83"
+                      textAnchor="middle"
+                      fontSize="8"
+                      fill="#94a3b8"
+                    >
+                      重量: {["轻", "重", "中"][i]}
+                    </text>
+                    <text
+                      x={130 + i * 130}
+                      y="96"
+                      textAnchor="middle"
+                      fontSize="8"
+                      fill="#94a3b8"
+                    >
+                      成本: {["高", "高", "低"][i]}
+                    </text>
+                  </g>
+                ))}
+                <text
+                  x="240"
+                  y="120"
+                  textAnchor="middle"
+                  fontSize="8.5"
+                  fill="#94a3b8"
+                >
+                  三类减速器对比：谐波最适合人形机器人小关节
+                </text>
+                <W
+                  title="国产替代空间巨大"
+                  line1="日本占全球谐波减速器60%+份额，"
+                  line2="绿的谐波已打破垄断，丰立智能快速追赶。"
+                  color="#f59e0b"
+                />
+              </>
+            );
+          return (
+            <>
+              {[
+                { x: 100, y: 30, n: "绿的谐波", t: "688017", c: "#f59e0b" },
+                { x: 300, y: 30, n: "双环传动", t: "002472", c: "#6366f1" },
+                { x: 100, y: 95, n: "丰立智能", t: "301368", c: "#10b981" },
+                { x: 300, y: 95, n: "新时达", t: "002527", c: "#38bdf8" },
+              ].map((nd) => (
+                <g key={nd.n}>
+                  <rect
+                    x={nd.x}
+                    y={nd.y}
+                    width="130"
+                    height="48"
+                    rx="8"
+                    fill="#1e293b"
+                    stroke={nd.c}
+                    strokeWidth="1.5"
+                    opacity={0.8 + 0.2 * pulse}
+                  />
+                  <text
+                    x={nd.x + 65}
+                    y={nd.y + 20}
+                    textAnchor="middle"
+                    fontSize="9"
+                    fill={nd.c}
+                    fontWeight="700"
+                  >
+                    {nd.n}
+                  </text>
+                  <text
+                    x={nd.x + 65}
+                    y={nd.y + 35}
+                    textAnchor="middle"
+                    fontSize="8"
+                    fill="#64748b"
+                  >
+                    {nd.t}
+                  </text>
+                </g>
+              ))}
+              <text
+                x="240"
+                y="158"
+                textAnchor="middle"
+                fontSize="9"
+                fill="#fbbf24"
+                fontWeight="600"
+              >
+                国产减速器市场规模：2025年预计超50亿元
+              </text>
+              <W
+                title="人形机器人每台需12-20个减速器"
+                line1="按百万台/年测算，国产减速器年需求百亿级，"
+                line2="绿的谐波/双环传动/丰立智能是核心标的。"
+                color="#f59e0b"
+              />
+            </>
+          );
+        }}
+      />
+    );
+  }
+
+  if (id === "hm_screw") {
+    return (
+      <IA
+        isLight={isLight}
+        title="行星滚柱丝杆工作原理"
+        steps={[
+          { id: 0, label: "螺旋传动原理" },
+          { id: 1, label: "滚柱受力分析" },
+          { id: 2, label: "线性执行应用" },
+        ]}
+        renderStep={(s) => {
+          const t = (Date.now() / 600) % (Math.PI * 2);
+          const pulse = 0.5 + 0.5 * Math.sin(t);
+          if (s === 0)
+            return (
+              <>
+                <rect
+                  x="140"
+                  y="50"
+                  width="200"
+                  height="30"
+                  rx="15"
+                  fill="#1e293b"
+                  stroke="#38bdf8"
+                  strokeWidth="2"
+                />
+                {[0, 1, 2, 3, 4, 5].map((i) => (
+                  <rect
+                    key={i}
+                    x={145 + i * 30}
+                    y="52"
+                    width="22"
+                    height="26"
+                    rx="4"
+                    fill="#0f172a"
+                    stroke="#6366f1"
+                    strokeWidth="1"
+                    opacity={0.6 + 0.3 * pulse}
+                  />
+                ))}
+                <line
+                  x1={240 + 20 * pulse}
+                  y1="80"
+                  x2={240 + 20 * pulse}
+                  y2="110"
+                  stroke="#f59e0b"
+                  strokeWidth="3"
+                  strokeLinecap="round"
+                  opacity={0.8 + 0.2 * pulse}
+                />
+                <polygon
+                  points={`${240 + 20 * pulse - 6},110 ${240 + 20 * pulse + 6},110 ${240 + 20 * pulse},122`}
+                  fill="#f59e0b"
+                  opacity={0.9 + 0.1 * pulse}
+                />
+                <text
+                  x="240"
+                  y="135"
+                  textAnchor="middle"
+                  fontSize="9"
+                  fill="#38bdf8"
+                  fontWeight="600"
+                >
+                  旋转运动→线性运动（导程精度0.001mm）
+                </text>
+                <W
+                  title="行星滚柱丝杆 vs 滚珠丝杆"
+                  line1="行星滚柱丝杆负载能力是滚珠丝杆5倍，"
+                  line2="速度高3倍，寿命长15倍，人形机器人首选。"
+                  color="#38bdf8"
+                />
+              </>
+            );
+          if (s === 1)
+            return (
+              <>
+                <circle
+                  cx="240"
+                  cy="70"
+                  r="40"
+                  fill="none"
+                  stroke="#6366f1"
+                  strokeWidth="2"
+                />
+                {[0, 1, 2, 3, 4, 5, 6, 7, 8].map((i) => {
+                  const angle = (i / 9) * Math.PI * 2;
+                  return (
+                    <circle
+                      key={i}
+                      cx={240 + 32 * Math.cos(angle)}
+                      cy={70 + 32 * Math.sin(angle)}
+                      r="7"
+                      fill="#1e293b"
+                      stroke="#818cf8"
+                      strokeWidth="1.5"
+                      opacity={0.7 + 0.3 * pulse}
+                    />
+                  );
+                })}
+                <circle
+                  cx="240"
+                  cy="70"
+                  r="15"
+                  fill="#0f172a"
+                  stroke="#f59e0b"
+                  strokeWidth="2"
+                />
+                <text
+                  x="240"
+                  y="130"
+                  textAnchor="middle"
+                  fontSize="8.5"
+                  fill="#818cf8"
+                  fontWeight="600"
+                >
+                  9个行星滚子均匀分布，载荷均分
+                </text>
+                <W
+                  title="行星滚子实现大载荷"
+                  line1="9个滚子接触线为点接触，极大提升承载能力，"
+                  line2="适合人形机器人膝/踝关节高冲击场景。"
+                  color="#6366f1"
+                />
+              </>
+            );
+          return (
+            <>
+              {[
+                {
+                  x: 80,
+                  y: 20,
+                  label: "腿部推杆",
+                  desc: "膝关节±120°，推力800N",
+                },
+                {
+                  x: 280,
+                  y: 20,
+                  label: "臂部推杆",
+                  desc: "肘关节伸缩，推力200N",
+                },
+                { x: 80, y: 95, label: "踝关节", desc: "缓冲±20°，刚柔结合" },
+                { x: 280, y: 95, label: "腰部俯仰", desc: "±60°，承重100kg" },
+              ].map((nd) => (
+                <g key={nd.label}>
+                  <rect
+                    x={nd.x}
+                    y={nd.y}
+                    width="160"
+                    height="55"
+                    rx="8"
+                    fill="#1e293b"
+                    stroke="#f59e0b"
+                    strokeWidth="1.5"
+                    opacity={0.8 + 0.2 * pulse}
+                  />
+                  <text
+                    x={nd.x + 80}
+                    y={nd.y + 22}
+                    textAnchor="middle"
+                    fontSize="9"
+                    fill="#fbbf24"
+                    fontWeight="700"
+                  >
+                    {nd.label}
+                  </text>
+                  <text
+                    x={nd.x + 80}
+                    y={nd.y + 38}
+                    textAnchor="middle"
+                    fontSize="8"
+                    fill="#94a3b8"
+                  >
+                    {nd.desc}
+                  </text>
+                </g>
+              ))}
+              <W
+                title="行星滚柱丝杆是人形机器人专属零件"
+                line1="贝斯特已成功送样特斯拉，五洲新春加速布局，"
+                line2="单台机器人需14根丝杆，百万台需求14亿根。"
+                color="#f59e0b"
+              />
+            </>
+          );
+        }}
+      />
+    );
+  }
+
+  if (id === "hm_motor") {
+    return (
+      <IA
+        isLight={isLight}
+        title="无框力矩电机与伺服驱动"
+        steps={[
+          { id: 0, label: "永磁电机原理" },
+          { id: 1, label: "FOC矢量控制" },
+          { id: 2, label: "伺服驱动系统" },
+        ]}
+        renderStep={(s) => {
+          const t = (Date.now() / 500) % (Math.PI * 2);
+          const pulse = 0.5 + 0.5 * Math.sin(t);
+          const angle = (Date.now() / 1000) % (Math.PI * 2);
+          if (s === 0)
+            return (
+              <>
+                <circle
+                  cx="240"
+                  cy="72"
+                  r="55"
+                  fill="none"
+                  stroke="#f59e0b"
+                  strokeWidth="2"
+                />
+                {[0, 1, 2, 3, 4, 5, 6, 7].map((i) => {
+                  const a = (i / 8) * Math.PI * 2;
+                  return (
+                    <rect
+                      key={i}
+                      x={240 + 42 * Math.cos(a) - 8}
+                      y={72 + 42 * Math.sin(a) - 14}
+                      width="16"
+                      height="28"
+                      rx="4"
+                      fill={["#1e3a5f", "#3d1f00"][i % 2]}
+                      stroke={["#38bdf8", "#f59e0b"][i % 2]}
+                      strokeWidth="1.5"
+                      transform={`rotate(${i * 45},${240 + 42 * Math.cos(a)},${72 + 42 * Math.sin(a)})`}
+                    />
+                  );
+                })}
+                <circle
+                  cx="240"
+                  cy="72"
+                  r="24"
+                  fill="#1e293b"
+                  stroke="#6366f1"
+                  strokeWidth="2"
+                />
+                <line
+                  x1="240"
+                  y1="72"
+                  x2={240 + 18 * Math.cos(angle)}
+                  y2={72 + 18 * Math.sin(angle)}
+                  stroke="#818cf8"
+                  strokeWidth="3"
+                  strokeLinecap="round"
+                  opacity={0.9 + 0.1 * pulse}
+                />
+                <text
+                  x="240"
+                  y="143"
+                  textAnchor="middle"
+                  fontSize="9"
+                  fill="#fbbf24"
+                  fontWeight="600"
+                >
+                  无框电机：无外壳，直接嵌入关节
+                </text>
+                <W
+                  title="为什么用无框力矩电机？"
+                  line1="无外壳设计节省50%体积和重量，"
+                  line2="高转矩密度可达50Nm/kg，人形关节专属。"
+                  color="#f59e0b"
+                />
+              </>
+            );
+          if (s === 1)
+            return (
+              <>
+                {["Id=0\n磁通分量", "Iq→转矩\n电流分量"].map((label, i) => (
+                  <g key={i}>
+                    <line
+                      x1="240"
+                      y1="75"
+                      x2={240 + (i === 0 ? 0 : 50)}
+                      y2={75 - (i === 0 ? 50 : 0)}
+                      stroke={["#38bdf8", "#f59e0b"][i]}
+                      strokeWidth="3"
+                      markerEnd="url(#arrow)"
+                      opacity={0.8 + 0.2 * pulse}
+                    />
+                    <text
+                      x={240 + (i === 0 ? 8 : 52)}
+                      y={75 - (i === 0 ? 52 : 8)}
+                      fontSize="8"
+                      fill={["#38bdf8", "#fbbf24"][i]}
+                    >
+                      {label}
+                    </text>
+                  </g>
+                ))}
+                <circle
+                  cx="240"
+                  cy="75"
+                  r="55"
+                  fill="none"
+                  stroke="#334155"
+                  strokeWidth="1"
+                  strokeDasharray="6 3"
+                />
+                <rect
+                  x="80"
+                  y="110"
+                  width="100"
+                  height="24"
+                  rx="6"
+                  fill="#1e293b"
+                  stroke="#6366f1"
+                  strokeWidth="1.5"
+                />
+                <text
+                  x="130"
+                  y="126"
+                  textAnchor="middle"
+                  fontSize="8.5"
+                  fill="#818cf8"
+                  fontWeight="600"
+                >
+                  FOC控制器
+                </text>
+                <rect
+                  x="260"
+                  y="110"
+                  width="100"
+                  height="24"
+                  rx="6"
+                  fill="#1e293b"
+                  stroke="#10b981"
+                  strokeWidth="1.5"
+                />
+                <text
+                  x="310"
+                  y="126"
+                  textAnchor="middle"
+                  fontSize="8.5"
+                  fill="#34d399"
+                  fontWeight="600"
+                >
+                  PWM逆变器
+                </text>
+                <line
+                  x1="180"
+                  y1="122"
+                  x2="260"
+                  y2="122"
+                  stroke="#475569"
+                  strokeWidth="1.5"
+                  markerEnd="url(#arrow)"
+                />
+                <W
+                  title="FOC实现最优转矩控制"
+                  line1="磁场定向控制把交流电机当直流控制，"
+                  line2="动态响应&lt;1ms，力控精度达±0.1Nm。"
+                  color="#6366f1"
+                />
+              </>
+            );
+          return (
+            <>
+              {[
+                {
+                  x: 80,
+                  y: 20,
+                  label: "电流环",
+                  desc: "1ms响应，电流精度±0.5%",
+                  c: "#f59e0b",
+                },
+                {
+                  x: 280,
+                  y: 20,
+                  label: "速度环",
+                  desc: "5ms响应，转速精度±0.1rpm",
+                  c: "#6366f1",
+                },
+                {
+                  x: 80,
+                  y: 90,
+                  label: "位置环",
+                  desc: "10ms响应，角度精度0.01°",
+                  c: "#10b981",
+                },
+                {
+                  x: 280,
+                  y: 90,
+                  label: "力矩环",
+                  desc: "3ms响应，力矩精度±0.1Nm",
+                  c: "#38bdf8",
+                },
+              ].map((nd) => (
+                <g key={nd.label}>
+                  <rect
+                    x={nd.x}
+                    y={nd.y}
+                    width="160"
+                    height="52"
+                    rx="8"
+                    fill="#1e293b"
+                    stroke={nd.c}
+                    strokeWidth="1.5"
+                    opacity={0.8 + 0.2 * pulse}
+                  />
+                  <text
+                    x={nd.x + 80}
+                    y={nd.y + 20}
+                    textAnchor="middle"
+                    fontSize="9.5"
+                    fill={nd.c}
+                    fontWeight="700"
+                  >
+                    {nd.label}
+                  </text>
+                  <text
+                    x={nd.x + 80}
+                    y={nd.y + 36}
+                    textAnchor="middle"
+                    fontSize="7.5"
+                    fill="#64748b"
+                  >
+                    {nd.desc}
+                  </text>
+                </g>
+              ))}
+              <W
+                title="伺服系统是运动控制核心"
+                line1="汇川技术已进入特斯拉供应链，"
+                line2="鸣志电器/雷赛智能国产化加速。"
+                color="#f59e0b"
+              />
+            </>
+          );
+        }}
+      />
+    );
+  }
+
+  if (id === "hm_sensor") {
+    return (
+      <IA
+        isLight={isLight}
+        title="人形机器人传感器体系"
+        steps={[
+          { id: 0, label: "六维力传感器" },
+          { id: 1, label: "3D视觉感知" },
+          { id: 2, label: "多模态融合" },
+        ]}
+        renderStep={(s) => {
+          const t = (Date.now() / 600) % (Math.PI * 2);
+          const pulse = 0.5 + 0.5 * Math.sin(t);
+          if (s === 0)
+            return (
+              <>
+                <rect
+                  x="165"
+                  y="30"
+                  width="150"
+                  height="80"
+                  rx="10"
+                  fill="#1e293b"
+                  stroke="#10b981"
+                  strokeWidth="2"
+                />
+                <circle
+                  cx="240"
+                  cy="70"
+                  r="22"
+                  fill="#0f172a"
+                  stroke="#34d399"
+                  strokeWidth="1.5"
+                  opacity={0.8 + 0.2 * pulse}
+                />
+                {["Fx", "Fy", "Fz", "Mx", "My", "Mz"].map((l, i) => {
+                  const a = (i / 6) * Math.PI * 2;
+                  return (
+                    <text
+                      key={l}
+                      x={240 + 32 * Math.cos(a)}
+                      y={70 + 32 * Math.sin(a)}
+                      textAnchor="middle"
+                      fontSize="8"
+                      fill="#34d399"
+                      fontWeight="600"
+                    >
+                      {l}
+                    </text>
+                  );
+                })}
+                <text
+                  x="240"
+                  y="125"
+                  textAnchor="middle"
+                  fontSize="8.5"
+                  fill="#10b981"
+                  fontWeight="600"
+                >
+                  量程: ±200N / ±20Nm，精度0.1%FS
+                </text>
+                <W
+                  title="六维力传感器实现柔顺操作"
+                  line1="实时感知关节受力6个维度，"
+                  line2="博杰股份已开始量产，填补国内空白。"
+                  color="#10b981"
+                />
+              </>
+            );
+          if (s === 1)
+            return (
+              <>
+                <rect
+                  x="175"
+                  y="20"
+                  width="130"
+                  height="70"
+                  rx="8"
+                  fill="#1e293b"
+                  stroke="#818cf8"
+                  strokeWidth="2"
+                />
+                <circle
+                  cx="215"
+                  cy="55"
+                  r="16"
+                  fill="#0f172a"
+                  stroke="#a78bfa"
+                  strokeWidth="1.5"
+                />
+                <circle
+                  cx="265"
+                  cy="55"
+                  r="16"
+                  fill="#0f172a"
+                  stroke="#a78bfa"
+                  strokeWidth="1.5"
+                />
+                <text
+                  x="215"
+                  y="59"
+                  textAnchor="middle"
+                  fontSize="8"
+                  fill="#a78bfa"
+                >
+                  RGB
+                </text>
+                <text
+                  x="265"
+                  y="59"
+                  textAnchor="middle"
+                  fontSize="8"
+                  fill="#a78bfa"
+                >
+                  深度
+                </text>
+                <path
+                  d="M175,100 L80,130 L400,130 L325,100 Z"
+                  fill="#1e3a5f"
+                  stroke="#6366f1"
+                  strokeWidth="1"
+                  opacity={0.4 + 0.4 * pulse}
+                />
+                <text
+                  x="240"
+                  y="120"
+                  textAnchor="middle"
+                  fontSize="8"
+                  fill="#818cf8"
+                >
+                  识别范围: 0.3-5m，精度±1mm
+                </text>
+                <W
+                  title="3D视觉让机器人看懂世界"
+                  line1="奥比中光ToF/结构光双路线，"
+                  line2="思特威高帧率CMOS支撑实时3D重建。"
+                  color="#818cf8"
+                />
+              </>
+            );
+          return (
+            <>
+              {[
+                { x: 60, label: "六维力", c: "#10b981" },
+                { x: 180, label: "3D视觉", c: "#818cf8" },
+                { x: 300, label: "IMU", c: "#38bdf8" },
+                { x: 400, label: "触觉", c: "#f59e0b" },
+              ].map((nd) => (
+                <g key={nd.label}>
+                  <circle
+                    cx={nd.x + 30}
+                    cy="50"
+                    r="22"
+                    fill="#1e293b"
+                    stroke={nd.c}
+                    strokeWidth="1.5"
+                    opacity={0.8 + 0.2 * pulse}
+                  />
+                  <text
+                    x={nd.x + 30}
+                    y="54"
+                    textAnchor="middle"
+                    fontSize="8"
+                    fill={nd.c}
+                    fontWeight="600"
+                  >
+                    {nd.label}
+                  </text>
+                  <line
+                    x1={nd.x + 30}
+                    y1="72"
+                    x2="240"
+                    y2="100"
+                    stroke={nd.c}
+                    strokeWidth="1"
+                    strokeDasharray="4 3"
+                    opacity={0.5 + 0.4 * pulse}
+                  />
+                </g>
+              ))}
+              <rect
+                x="165"
+                y="100"
+                width="150"
+                height="30"
+                rx="8"
+                fill="#1e293b"
+                stroke="#fbbf24"
+                strokeWidth="2"
+                opacity={0.9 + 0.1 * pulse}
+              />
+              <text
+                x="240"
+                y="119"
+                textAnchor="middle"
+                fontSize="9"
+                fill="#fbbf24"
+                fontWeight="700"
+              >
+                感知融合模组
+              </text>
+              <W
+                title="多模态传感融合是具身智能关键"
+                line1="力+视觉+IMU+触觉四路融合，时延&lt;5ms，"
+                line2="瑞芯微边缘AI芯片实时处理传感数据。"
+                color="#fbbf24"
+              />
+            </>
+          );
+        }}
+      />
+    );
+  }
+
+  if (id === "hm_body") {
+    return (
+      <IA
+        isLight={isLight}
+        title="人形机器人整机集成"
+        steps={[
+          { id: 0, label: "骨架结构" },
+          { id: 1, label: "关节装配" },
+          { id: 2, label: "整机调试" },
+        ]}
+        renderStep={(s) => {
+          const t = (Date.now() / 700) % (Math.PI * 2);
+          const pulse = 0.5 + 0.5 * Math.sin(t);
+          if (s === 0)
+            return (
+              <>
+                <circle
+                  cx="240"
+                  cy="22"
+                  r="15"
+                  fill="#1e293b"
+                  stroke="#38bdf8"
+                  strokeWidth="2"
+                />
+                <rect
+                  x="218"
+                  y="38"
+                  width="44"
+                  height="50"
+                  rx="6"
+                  fill="#1e293b"
+                  stroke="#6366f1"
+                  strokeWidth="2"
+                />
+                <rect
+                  x="180"
+                  y="40"
+                  width="36"
+                  height="6"
+                  rx="3"
+                  fill="#1e293b"
+                  stroke="#f59e0b"
+                  strokeWidth="1.5"
+                />
+                <rect
+                  x="264"
+                  y="40"
+                  width="36"
+                  height="6"
+                  rx="3"
+                  fill="#1e293b"
+                  stroke="#f59e0b"
+                  strokeWidth="1.5"
+                />
+                <rect
+                  x="172"
+                  y="46"
+                  width="18"
+                  height="30"
+                  rx="5"
+                  fill="#1e293b"
+                  stroke="#f59e0b"
+                  strokeWidth="1.5"
+                />
+                <rect
+                  x="290"
+                  y="46"
+                  width="18"
+                  height="30"
+                  rx="5"
+                  fill="#1e293b"
+                  stroke="#f59e0b"
+                  strokeWidth="1.5"
+                />
+                <rect
+                  x="220"
+                  y="88"
+                  width="20"
+                  height="10"
+                  rx="4"
+                  fill="#1e293b"
+                  stroke="#10b981"
+                  strokeWidth="1.5"
+                />
+                <rect
+                  x="244"
+                  y="88"
+                  width="20"
+                  height="10"
+                  rx="4"
+                  fill="#1e293b"
+                  stroke="#10b981"
+                  strokeWidth="1.5"
+                />
+                <rect
+                  x="216"
+                  y="98"
+                  width="20"
+                  height="25"
+                  rx="5"
+                  fill="#1e293b"
+                  stroke="#10b981"
+                  strokeWidth="1.5"
+                />
+                <rect
+                  x="248"
+                  y="98"
+                  width="20"
+                  height="25"
+                  rx="5"
+                  fill="#1e293b"
+                  stroke="#10b981"
+                  strokeWidth="1.5"
+                />
+                <text
+                  x="240"
+                  y="140"
+                  textAnchor="middle"
+                  fontSize="8.5"
+                  fill="#38bdf8"
+                  fontWeight="600"
+                >
+                  碳纤维/铝合金骨架，自重控制60kg内
+                </text>
+                <W
+                  title="轻量化是整机集成核心挑战"
+                  line1="碳纤维密度仅钢的1/4，强度是钢5倍，"
+                  line2="国内碳纤维结构件成本快速下降，量产可期。"
+                  color="#38bdf8"
+                />
+              </>
+            );
+          if (s === 1)
+            return (
+              <>
+                {[
+                  { cx: 240, cy: 25, r: 12, label: "头部", joints: 1 },
+                  { cx: 185, cy: 50, r: 10, label: "肩", joints: 3 },
+                  { cx: 295, cy: 50, r: 10, label: "肩", joints: 3 },
+                  { cx: 165, cy: 75, r: 8, label: "肘", joints: 2 },
+                  { cx: 315, cy: 75, r: 8, label: "肘", joints: 2 },
+                  { cx: 230, cy: 88, r: 9, label: "髋", joints: 3 },
+                  { cx: 250, cy: 88, r: 9, label: "髋", joints: 3 },
+                  { cx: 225, cy: 108, r: 8, label: "膝", joints: 1 },
+                  { cx: 255, cy: 108, r: 8, label: "膝", joints: 1 },
+                ].map((j) => (
+                  <circle
+                    key={j.label + j.cx}
+                    cx={j.cx}
+                    cy={j.cy}
+                    r={j.r}
+                    fill="#1e293b"
+                    stroke="#f59e0b"
+                    strokeWidth="1.5"
+                    opacity={0.7 + 0.3 * pulse}
+                  />
+                ))}
+                <line
+                  x1="240"
+                  y1="37"
+                  x2="240"
+                  y2="88"
+                  stroke="#334155"
+                  strokeWidth="10"
+                  strokeLinecap="round"
+                />
+                <line
+                  x1="185"
+                  y1="55"
+                  x2="295"
+                  y2="55"
+                  stroke="#334155"
+                  strokeWidth="8"
+                  strokeLinecap="round"
+                />
+                <line
+                  x1="185"
+                  y1="55"
+                  x2="165"
+                  y2="80"
+                  stroke="#334155"
+                  strokeWidth="6"
+                  strokeLinecap="round"
+                />
+                <line
+                  x1="295"
+                  y1="55"
+                  x2="315"
+                  y2="80"
+                  stroke="#334155"
+                  strokeWidth="6"
+                  strokeLinecap="round"
+                />
+                <line
+                  x1="230"
+                  y1="88"
+                  x2="225"
+                  y2="115"
+                  stroke="#334155"
+                  strokeWidth="7"
+                  strokeLinecap="round"
+                />
+                <line
+                  x1="250"
+                  y1="88"
+                  x2="255"
+                  y2="115"
+                  stroke="#334155"
+                  strokeWidth="7"
+                  strokeLinecap="round"
+                />
+                <text
+                  x="240"
+                  y="140"
+                  textAnchor="middle"
+                  fontSize="8.5"
+                  fill="#f59e0b"
+                  fontWeight="600"
+                >
+                  全身43个自由度关节，协调运动
+                </text>
+                <W
+                  title="关节是整机集成核心"
+                  line1="拓普集团/三花智控作为Tier1，"
+                  line2="向关节执行器模组延伸，直供特斯拉整机厂。"
+                  color="#f59e0b"
+                />
+              </>
+            );
+          return (
+            <>
+              <circle
+                cx="240"
+                cy="22"
+                r="14"
+                fill="#1e293b"
+                stroke="#38bdf8"
+                strokeWidth="2"
+              />
+              <rect
+                x="216"
+                y="38"
+                width="48"
+                height="52"
+                rx="8"
+                fill="#1e293b"
+                stroke="#6366f1"
+                strokeWidth="2"
+              />
+              <rect
+                x="216"
+                y="46"
+                width="48"
+                height="14"
+                rx="4"
+                fill="#0f172a"
+                stroke="#818cf8"
+                strokeWidth="1"
+                opacity={0.8 + 0.2 * pulse}
+              />
+              <text
+                x="240"
+                y="57"
+                textAnchor="middle"
+                fontSize="7"
+                fill="#a5b4fc"
+                fontWeight="700"
+              >
+                AI 大脑
+              </text>
+              <line
+                x1="240"
+                y1="37"
+                x2="240"
+                y2="38"
+                stroke="#38bdf8"
+                strokeWidth="1.5"
+                opacity={0.7 + 0.3 * pulse}
+              />
+              <rect
+                x="182"
+                y="40"
+                width="30"
+                height="8"
+                rx="4"
+                fill="#1e293b"
+                stroke="#f59e0b"
+                strokeWidth="1.5"
+              />
+              <rect
+                x="172"
+                y="48"
+                width="20"
+                height="32"
+                rx="5"
+                fill="#1e293b"
+                stroke="#f59e0b"
+                strokeWidth="1.5"
+              />
+              <rect
+                x="288"
+                y="40"
+                width="30"
+                height="8"
+                rx="4"
+                fill="#1e293b"
+                stroke="#f59e0b"
+                strokeWidth="1.5"
+              />
+              <rect
+                x="288"
+                y="48"
+                width="20"
+                height="32"
+                rx="5"
+                fill="#1e293b"
+                stroke="#f59e0b"
+                strokeWidth="1.5"
+              />
+              <rect
+                x="220"
+                y="90"
+                width="20"
+                height="10"
+                rx="4"
+                fill="#1e293b"
+                stroke="#10b981"
+                strokeWidth="1.5"
+              />
+              <rect
+                x="244"
+                y="90"
+                width="20"
+                height="10"
+                rx="4"
+                fill="#1e293b"
+                stroke="#10b981"
+                strokeWidth="1.5"
+              />
+              <rect
+                x="216"
+                y="100"
+                width="20"
+                height="28"
+                rx="6"
+                fill="#1e293b"
+                stroke="#10b981"
+                strokeWidth="1.5"
+              />
+              <rect
+                x="248"
+                y="100"
+                width="20"
+                height="28"
+                rx="6"
+                fill="#1e293b"
+                stroke="#10b981"
+                strokeWidth="1.5"
+              />
+              <text x="360" y="50" fontSize="8" fill="#94a3b8">
+                身高: 1.73m
+              </text>
+              <text x="360" y="62" fontSize="8" fill="#94a3b8">
+                体重: 57kg
+              </text>
+              <text x="360" y="74" fontSize="8" fill="#94a3b8">
+                自由度: 43
+              </text>
+              <text x="360" y="86" fontSize="8" fill="#94a3b8">
+                续航: 4h
+              </text>
+              <text x="360" y="98" fontSize="8" fill="#94a3b8">
+                负载: 20kg
+              </text>
+              <W
+                title="2025年是人形机器人量产元年"
+                line1="特斯拉Optimus年产目标5万台，2026年百万级，"
+                line2="埃斯顿/拓普/三花均已进入Tier1供货体系。"
+                color="#6366f1"
+              />
+            </>
+          );
+        }}
+      />
+    );
+  }
+
+  if (id === "hm_brain") {
+    return (
+      <IA
+        isLight={isLight}
+        title="具身智能AI大脑架构"
+        steps={[
+          { id: 0, label: "感知→理解" },
+          { id: 1, label: "规划→决策" },
+          { id: 2, label: "控制→执行" },
+        ]}
+        renderStep={(s) => {
+          const t = (Date.now() / 600) % (Math.PI * 2);
+          const pulse = 0.5 + 0.5 * Math.sin(t);
+          if (s === 0)
+            return (
+              <>
+                {[
+                  { x: 55, label: "RGB-D相机", c: "#818cf8" },
+                  { x: 175, label: "六维力传感", c: "#10b981" },
+                  { x: 295, label: "IMU惯导", c: "#38bdf8" },
+                  { x: 365, label: "触觉阵列", c: "#f59e0b" },
+                ].map((nd) => (
+                  <g key={nd.label}>
+                    <rect
+                      x={nd.x}
+                      y="15"
+                      width="72"
+                      height="32"
+                      rx="6"
+                      fill="#1e293b"
+                      stroke={nd.c}
+                      strokeWidth="1.5"
+                    />
+                    <text
+                      x={nd.x + 36}
+                      y="34"
+                      textAnchor="middle"
+                      fontSize="7.5"
+                      fill={nd.c}
+                    >
+                      {nd.label}
+                    </text>
+                    <line
+                      x1={nd.x + 36}
+                      y1="47"
+                      x2="240"
+                      y2="75"
+                      stroke={nd.c}
+                      strokeWidth="1"
+                      strokeDasharray="4 3"
+                      opacity={0.5 + 0.4 * pulse}
+                    />
+                  </g>
+                ))}
+                <rect
+                  x="155"
+                  y="75"
+                  width="170"
+                  height="34"
+                  rx="8"
+                  fill="#1e293b"
+                  stroke="#fbbf24"
+                  strokeWidth="2"
+                  opacity={0.9 + 0.1 * pulse}
+                />
+                <text
+                  x="240"
+                  y="95"
+                  textAnchor="middle"
+                  fontSize="9"
+                  fill="#fbbf24"
+                  fontWeight="700"
+                >
+                  多模态感知编码器
+                </text>
+                <W
+                  title="感知是AI大脑的输入"
+                  line1="ViT/CLIP编码视觉，力传感提供接触信息，"
+                  line2="寒武纪/北京君正边缘NPU实现实时推理。"
+                  color="#fbbf24"
+                />
+              </>
+            );
+          if (s === 1)
+            return (
+              <>
+                {[
+                  {
+                    y: 15,
+                    label: "具身大语言模型 (LLM)",
+                    desc: "理解指令，拆解任务，推理步骤",
+                    c: "#818cf8",
+                  },
+                  {
+                    y: 60,
+                    label: "世界模型 (World Model)",
+                    desc: "预测环境变化，规避障碍物",
+                    c: "#6366f1",
+                  },
+                  {
+                    y: 105,
+                    label: "运动策略网络 (Policy)",
+                    desc: "端到端生成关节轨迹",
+                    c: "#f59e0b",
+                  },
+                ].map((nd) => (
+                  <g key={nd.label}>
+                    <rect
+                      x="80"
+                      y={nd.y}
+                      width="320"
+                      height="34"
+                      rx="7"
+                      fill="#1e293b"
+                      stroke={nd.c}
+                      strokeWidth="1.5"
+                      opacity={0.8 + 0.2 * pulse}
+                    />
+                    <text
+                      x="240"
+                      y={nd.y + 14}
+                      textAnchor="middle"
+                      fontSize="8.5"
+                      fill={nd.c}
+                      fontWeight="700"
+                    >
+                      {nd.label}
+                    </text>
+                    <text
+                      x="240"
+                      y={nd.y + 27}
+                      textAnchor="middle"
+                      fontSize="7.5"
+                      fill="#64748b"
+                    >
+                      {nd.desc}
+                    </text>
+                  </g>
+                ))}
+                <W
+                  title="具身智能三层架构"
+                  line1="LLM理解指令，世界模型建模环境，"
+                  line2="策略网络生成具体动作，端到端打通。"
+                  color="#6366f1"
+                />
+              </>
+            );
+          return (
+            <>
+              <rect
+                x="80"
+                y="15"
+                width="320"
+                height="28"
+                rx="7"
+                fill="#1e293b"
+                stroke="#818cf8"
+                strokeWidth="1.5"
+              />
+              <text
+                x="240"
+                y="32"
+                textAnchor="middle"
+                fontSize="8.5"
+                fill="#818cf8"
+                fontWeight="700"
+              >
+                策略输出：43维关节角度轨迹（1kHz）
+              </text>
+              {[
+                { x: 80, y: 55, label: "力矩控制器", c: "#f59e0b" },
+                { x: 235, y: 55, label: "位置控制器", c: "#6366f1" },
+                { x: 310, y: 55, label: "速度控制器", c: "#10b981" },
+              ].map((nd) => (
+                <g key={nd.label}>
+                  <rect
+                    x={nd.x}
+                    y={nd.y}
+                    width="120"
+                    height="28"
+                    rx="6"
+                    fill="#1e293b"
+                    stroke={nd.c}
+                    strokeWidth="1.5"
+                    opacity={0.8 + 0.2 * pulse}
+                  />
+                  <text
+                    x={nd.x + 60}
+                    y={nd.y + 17}
+                    textAnchor="middle"
+                    fontSize="8"
+                    fill={nd.c}
+                    fontWeight="600"
+                  >
+                    {nd.label}
+                  </text>
+                  <line
+                    x1={nd.x + 60}
+                    y1={nd.y + 28}
+                    x2="240"
+                    y2="106"
+                    stroke={nd.c}
+                    strokeWidth="1"
+                    strokeDasharray="3 2"
+                    opacity={0.5 + 0.3 * pulse}
+                  />
+                </g>
+              ))}
+              <rect
+                x="155"
+                y="106"
+                width="170"
+                height="26"
+                rx="7"
+                fill="#1e293b"
+                stroke="#f59e0b"
+                strokeWidth="2"
+                opacity={0.9 + 0.1 * pulse}
+              />
+              <text
+                x="240"
+                y="122"
+                textAnchor="middle"
+                fontSize="9"
+                fill="#fbbf24"
+                fontWeight="700"
+              >
+                电机执行器（实时力矩输出）
+              </text>
+              <W
+                title="端到端控制降低系统延迟"
+                line1="从感知到执行全链路延迟&lt;10ms，"
+                line2="柏楚电子运动控制器+汇川伺服协同实现。"
+                color="#f59e0b"
+              />
+            </>
+          );
+        }}
+      />
+    );
+  }
+
+  if (id === "hm_actuator") {
+    return (
+      <IA
+        isLight={isLight}
+        title="关节执行器模组集成"
+        steps={[
+          { id: 0, label: "零部件准备" },
+          { id: 1, label: "模组集成" },
+          { id: 2, label: "整机装配" },
+        ]}
+        renderStep={(s) => {
+          const t = (Date.now() / 700) % (Math.PI * 2);
+          const pulse = 0.5 + 0.5 * Math.sin(t);
+          if (s === 0)
+            return (
+              <>
+                {[
+                  { x: 55, y: 20, label: "无框电机", icon: "⚡", c: "#f59e0b" },
+                  {
+                    x: 195,
+                    y: 20,
+                    label: "谐波减速器",
+                    icon: "⚙️",
+                    c: "#6366f1",
+                  },
+                  {
+                    x: 335,
+                    y: 20,
+                    label: "绝对编码器",
+                    icon: "📡",
+                    c: "#10b981",
+                  },
+                  {
+                    x: 55,
+                    y: 85,
+                    label: "力矩传感器",
+                    icon: "📏",
+                    c: "#38bdf8",
+                  },
+                  {
+                    x: 195,
+                    y: 85,
+                    label: "伺服驱动IC",
+                    icon: "💻",
+                    c: "#818cf8",
+                  },
+                  {
+                    x: 335,
+                    y: 85,
+                    label: "散热结构",
+                    icon: "❄️",
+                    c: "#94a3b8",
+                  },
+                ].map((nd) => (
+                  <g key={nd.label}>
+                    <rect
+                      x={nd.x}
+                      y={nd.y}
+                      width="110"
+                      height="50"
+                      rx="8"
+                      fill="#1e293b"
+                      stroke={nd.c}
+                      strokeWidth="1.5"
+                      opacity={0.8 + 0.2 * pulse}
+                    />
+                    <text x={nd.x + 18} y={nd.y + 22} fontSize="14">
+                      {nd.icon}
+                    </text>
+                    <text
+                      x={nd.x + 55}
+                      y={nd.y + 22}
+                      fontSize="8.5"
+                      fill={nd.c}
+                      fontWeight="700"
+                    >
+                      {nd.label}
+                    </text>
+                  </g>
+                ))}
+                <W
+                  title="关节模组集成6大核心部件"
+                  line1="电机+减速器+编码器+传感器+驱动+散热，"
+                  line2="三花智控/拓普集团Tier1完整模组供货。"
+                  color="#f59e0b"
+                />
+              </>
+            );
+          if (s === 1)
+            return (
+              <>
+                <rect
+                  x="145"
+                  y="20"
+                  width="190"
+                  height="90"
+                  rx="12"
+                  fill="#1e293b"
+                  stroke="#f59e0b"
+                  strokeWidth="2.5"
+                  opacity={0.9 + 0.1 * pulse}
+                />
+                <text
+                  x="240"
+                  y="42"
+                  textAnchor="middle"
+                  fontSize="10"
+                  fill="#fbbf24"
+                  fontWeight="700"
+                >
+                  关节执行器模组
+                </text>
+                {[
+                  { y: 52, label: "电机+减速器", c: "#f59e0b" },
+                  { y: 67, label: "编码器+力传感", c: "#10b981" },
+                  { y: 82, label: "驱动IC+散热", c: "#818cf8" },
+                  { y: 97, label: "EtherCAT接口", c: "#38bdf8" },
+                ].map((nd) => (
+                  <g key={nd.label}>
+                    <rect
+                      x="155"
+                      y={nd.y}
+                      width="170"
+                      height="12"
+                      rx="3"
+                      fill="#0f172a"
+                      stroke={nd.c}
+                      strokeWidth="1"
+                    />
+                    <text
+                      x="240"
+                      y={nd.y + 9}
+                      textAnchor="middle"
+                      fontSize="7.5"
+                      fill={nd.c}
+                    >
+                      {nd.label}
+                    </text>
+                  </g>
+                ))}
+                <text
+                  x="240"
+                  y="128"
+                  textAnchor="middle"
+                  fontSize="8.5"
+                  fill="#fbbf24"
+                  fontWeight="600"
+                >
+                  即插即用，标准接口
+                </text>
+                <W
+                  title="模组化降低整机装配难度"
+                  line1="关节模组标准化后，整机装配时间缩短60%，"
+                  line2="可靠性提升，便于维修更换。"
+                  color="#f59e0b"
+                />
+              </>
+            );
+          return (
+            <>
+              {[
+                {
+                  cx: 240,
+                  cy: 18,
+                  label: "躯干",
+                  joints: ["L肩", "R肩", "腰"],
+                },
+                {
+                  cx: 180,
+                  cy: 45,
+                  label: "左臂",
+                  joints: ["左肩", "左肘", "左腕"],
+                },
+                {
+                  cx: 300,
+                  cy: 45,
+                  label: "右臂",
+                  joints: ["右肩", "右肘", "右腕"],
+                },
+                {
+                  cx: 226,
+                  cy: 90,
+                  label: "左腿",
+                  joints: ["左髋", "左膝", "左踝"],
+                },
+                {
+                  cx: 254,
+                  cy: 90,
+                  label: "右腿",
+                  joints: ["右髋", "右膝", "右踝"],
+                },
+              ].map((p) => (
+                <g key={p.label}>
+                  <circle
+                    cx={p.cx}
+                    cy={p.cy}
+                    r="10"
+                    fill="#1e293b"
+                    stroke="#f59e0b"
+                    strokeWidth="1.5"
+                    opacity={0.8 + 0.2 * pulse}
+                  />
+                  {p.joints.map((j, i) => {
+                    const jx = p.cx - 20 + i * 20;
+                    const jy = p.cy + 20;
+                    return (
+                      <g key={j}>
+                        <circle
+                          cx={jx}
+                          cy={jy}
+                          r="6"
+                          fill="#0f172a"
+                          stroke="#6366f1"
+                          strokeWidth="1.5"
+                          opacity={0.7 + 0.3 * pulse}
+                        />
+                        <line
+                          x1={p.cx}
+                          y1={p.cy + 10}
+                          x2={jx}
+                          y2={jy - 6}
+                          stroke="#334155"
+                          strokeWidth="1"
+                          opacity="0.5"
+                        />
+                      </g>
+                    );
+                  })}
+                </g>
+              ))}
+              <text
+                x="240"
+                y="135"
+                textAnchor="middle"
+                fontSize="8.5"
+                fill="#f59e0b"
+                fontWeight="600"
+              >
+                全身43个执行器模组协同工作
+              </text>
+              <W
+                title="执行器模组是人形机器人量产关键"
+                line1="单台机器人执行器成本约1.5万美元，"
+                line2="规模量产后可降至3000美元，市场超千亿。"
+                color="#6366f1"
+              />
+            </>
+          );
+        }}
+      />
+    );
+  }
+
+  return (
+    <IA
+      isLight={isLight}
+      title="人形机器人产业链全流程"
+      steps={HUMANOID_STEPS}
+      renderStep={(s) => <HumanoidStep step={s} />}
+    />
+  );
+}
+
+// ─── Aerospace (商业航天) ────────────────────────────────────────────────────
+
+const AEROSPACE_STEPS = [
+  { id: 0, label: "火箭发射" },
+  { id: 1, label: "卫星入轨" },
+  { id: 2, label: "星座组网" },
+  { id: 3, label: "卫星应用" },
+];
+
+function AerospaceStep({ step }: { step: number }) {
+  const t = (Date.now() / 600) % (Math.PI * 2);
+  const pulse = 0.5 + 0.5 * Math.sin(t);
+
+  if (step === 0) {
+    // 火箭发射场景
+    return (
+      <>
+        {/* 发射台 */}
+        <rect
+          x="195"
+          y="95"
+          width="90"
+          height="18"
+          rx="3"
+          fill="#334155"
+          stroke="#475569"
+          strokeWidth="1"
+        />
+        <rect
+          x="218"
+          y="30"
+          width="44"
+          height="65"
+          rx="6"
+          fill="#1e293b"
+          stroke="#f59e0b"
+          strokeWidth="2"
+        />
+        {/* 整流罩 */}
+        <path
+          d="M218,30 Q240,10 262,30"
+          fill="#1e293b"
+          stroke="#fbbf24"
+          strokeWidth="1.5"
+        />
+        {/* 发动机喷嘴 */}
+        <path
+          d="M218,95 L210,115 L270,115 L262,95"
+          fill="#1e293b"
+          stroke="#ef4444"
+          strokeWidth="1.5"
+        />
+        {[0, 1, 2].map((i) => (
+          <ellipse
+            key={i}
+            cx={222 + i * 18}
+            cy="110"
+            rx="6"
+            ry="4"
+            fill="#374151"
+            stroke="#ef4444"
+            strokeWidth="1"
+          />
+        ))}
+        {/* 尾焰 */}
+        <path
+          d={`M215,115 Q240,${135 + 10 * pulse},265,115`}
+          fill={`rgba(251,146,60,${0.5 + 0.4 * pulse})`}
+          stroke="none"
+        />
+        <path
+          d={`M222,115 Q240,${145 + 12 * pulse},258,115`}
+          fill={`rgba(239,68,68,${0.4 + 0.5 * pulse})`}
+          stroke="none"
+        />
+        {/* 烟雾 */}
+        {[0, 1, 2, 3].map((i) => (
+          <ellipse
+            key={i}
+            cx={195 + i * 30}
+            cy={125 + i * 4}
+            rx={20 + i * 8}
+            ry="8"
+            fill="#334155"
+            opacity={0.4 - i * 0.08}
+          />
+        ))}
+        {/* 数据标注 */}
+        <text x="80" y="40" fontSize="8" fill="#94a3b8">
+          推力: 3000kN
+        </text>
+        <text x="80" y="52" fontSize="8" fill="#94a3b8">
+          比冲: 350s
+        </text>
+        <text x="80" y="64" fontSize="8" fill="#94a3b8">
+          燃料: 液氧甲烷
+        </text>
+        <text x="360" y="40" fontSize="8" fill="#94a3b8">
+          可回收
+        </text>
+        <text x="360" y="52" fontSize="8" fill="#94a3b8">
+          一级火箭
+        </text>
+        <W
+          title="为什么商业火箭改变了航天经济？"
+          line1="SpaceX猎鹰9可复用，单次发射成本降至$2800/kg，"
+          line2="蓝箭朱雀3/星河动力追随可复用路线。"
+          color="#f59e0b"
+        />
+      </>
+    );
+  }
+  if (step === 1) {
+    // 卫星入轨
+    return (
+      <>
+        {/* 地球 */}
+        <circle
+          cx="240"
+          cy="170"
+          r="80"
+          fill="#0f2037"
+          stroke="#1e3a5f"
+          strokeWidth="1.5"
+        />
+        <circle
+          cx="240"
+          cy="170"
+          r="80"
+          fill="none"
+          stroke="#1e3a5f"
+          strokeWidth="0.5"
+          strokeDasharray="4 2"
+        />
+        {/* 大气层 */}
+        <circle
+          cx="240"
+          cy="170"
+          r="86"
+          fill="none"
+          stroke="#38bdf8"
+          strokeWidth="1.5"
+          opacity="0.3"
+        />
+        {/* 轨道弧线 */}
+        <ellipse
+          cx="240"
+          cy="170"
+          rx="120"
+          ry="40"
+          fill="none"
+          stroke="#6366f1"
+          strokeWidth="1.5"
+          strokeDasharray="8 4"
+          opacity="0.6"
+        />
+        {/* 卫星 */}
+        <g
+          transform={`translate(${120 + 120 * Math.cos(-Math.PI / 4)}, ${170 + 40 * Math.sin(-Math.PI / 4)})`}
+        >
+          <rect
+            x="-12"
+            y="-8"
+            width="24"
+            height="16"
+            rx="3"
+            fill="#1e293b"
+            stroke="#818cf8"
+            strokeWidth="1.5"
+          />
+          <rect
+            x="-24"
+            y="-4"
+            width="10"
+            height="8"
+            rx="2"
+            fill="#fbbf24"
+            opacity={0.8 + 0.2 * pulse}
+          />
+          <rect
+            x="14"
+            y="-4"
+            width="10"
+            height="8"
+            rx="2"
+            fill="#fbbf24"
+            opacity={0.8 + 0.2 * pulse}
+          />
+          <circle
+            cx="0"
+            cy="0"
+            r="4"
+            fill="#0f172a"
+            stroke="#38bdf8"
+            strokeWidth="1"
+          />
+        </g>
+        {/* 信号线 */}
+        <line
+          x1="240"
+          y1="90"
+          x2="240"
+          y2="130"
+          stroke="#38bdf8"
+          strokeWidth="1.5"
+          strokeDasharray="5 3"
+          opacity={0.5 + 0.5 * pulse}
+        />
+        {/* 轨道标注 */}
+        <text x="60" y="90" fontSize="8" fill="#818cf8">
+          LEO: 500km
+        </text>
+        <text x="60" y="102" fontSize="8" fill="#94a3b8">
+          MEO: 2000km
+        </text>
+        <text x="60" y="114" fontSize="8" fill="#94a3b8">
+          GEO: 36000km
+        </text>
+        <W
+          title="低轨卫星(LEO)优势"
+          line1="500km轨道，信号延迟仅20ms vs GEO 600ms，"
+          line2="星链已部署6000+颗，国内千帆/GW星座加速。"
+          color="#818cf8"
+        />
+      </>
+    );
+  }
+  if (step === 2) {
+    // 星座组网
+    const sats = [
+      { cx: 240, cy: 15 },
+      { cx: 360, cy: 50 },
+      { cx: 410, cy: 80 },
+      { cx: 120, cy: 50 },
+      { cx: 70, cy: 80 },
+      { cx: 390, cy: 110 },
+      { cx: 90, cy: 110 },
+    ];
+    return (
+      <>
+        {/* 地球 */}
+        <circle
+          cx="240"
+          cy="90"
+          r="50"
+          fill="#0f2037"
+          stroke="#1e3a5f"
+          strokeWidth="1.5"
+        />
+        {/* 卫星 */}
+        {sats.map((s, i) => (
+          <g key={i}>
+            <circle
+              cx={s.cx}
+              cy={s.cy}
+              r="10"
+              fill="#1e293b"
+              stroke="#818cf8"
+              strokeWidth="1.5"
+              opacity={0.8 + 0.2 * pulse}
+            />
+            <rect
+              x={s.cx - 14}
+              y={s.cy - 3}
+              width="6"
+              height="6"
+              rx="1"
+              fill="#fbbf24"
+              opacity={0.8 + 0.2 * pulse}
+            />
+            <rect
+              x={s.cx + 8}
+              y={s.cy - 3}
+              width="6"
+              height="6"
+              rx="1"
+              fill="#fbbf24"
+              opacity={0.8 + 0.2 * pulse}
+            />
+          </g>
+        ))}
+        {/* 星间链路 */}
+        {[
+          [0, 1],
+          [1, 2],
+          [0, 3],
+          [3, 4],
+          [1, 5],
+          [4, 6],
+          [5, 2],
+          [6, 3],
+        ].map(([a, b], i) => (
+          <line
+            key={i}
+            x1={sats[a].cx}
+            y1={sats[a].cy}
+            x2={sats[b].cx}
+            y2={sats[b].cy}
+            stroke="#38bdf8"
+            strokeWidth="0.8"
+            opacity={0.3 + 0.4 * pulse}
+            strokeDasharray="4 3"
+          />
+        ))}
+        {/* 地面站信号 */}
+        <line
+          x1="240"
+          y1="40"
+          x2="240"
+          y2="86"
+          stroke="#f59e0b"
+          strokeWidth="1.5"
+          strokeDasharray="5 3"
+          opacity={0.6 + 0.4 * pulse}
+        />
+        <text
+          x="240"
+          y="155"
+          textAnchor="middle"
+          fontSize="9"
+          fill="#818cf8"
+          fontWeight="600"
+        >
+          全球覆盖率 &gt; 95%
+        </text>
+        <W
+          title="星座组网实现全球无缝覆盖"
+          line1="LEO卫星单颗覆盖半径约1000km，"
+          line2="300颗可覆盖全球，1000颗可无缝连续覆盖。"
+          color="#38bdf8"
+        />
+      </>
+    );
+  }
+  // step 3: 卫星应用
+  const apps = [
+    {
+      x: 80,
+      y: 20,
+      icon: "🌐",
+      label: "宽带互联网",
+      desc: "偏远地区/海洋/航空覆盖",
+    },
+    { x: 230, y: 20, icon: "🗺️", label: "遥感GIS", desc: "农业/灾害/城市规划" },
+    {
+      x: 370,
+      y: 20,
+      icon: "📍",
+      label: "精密导航",
+      desc: "厘米级定位，自动驾驶",
+    },
+    {
+      x: 150,
+      y: 80,
+      icon: "📡",
+      label: "军事通信",
+      desc: "抗干扰加密卫星通信",
+    },
+    { x: 310, y: 80, icon: "🌤️", label: "气象监测", desc: "全球实时气象数据" },
+  ];
+  return (
+    <>
+      {apps.map((a) => (
+        <g key={a.label}>
+          <rect
+            x={a.x}
+            y={a.y}
+            width="90"
+            height="44"
+            rx="8"
+            fill="#1e293b"
+            stroke="#6366f1"
+            strokeWidth="1.5"
+            opacity={0.85 + 0.15 * pulse}
+          />
+          <text x={a.x + 12} y={a.y + 17} fontSize="14">
+            {a.icon}
+          </text>
+          <text
+            x={a.x + 30}
+            y={a.y + 16}
+            fontSize="8.5"
+            fill="#818cf8"
+            fontWeight="700"
+          >
+            {a.label}
+          </text>
+          <text x={a.x + 8} y={a.y + 32} fontSize="7.5" fill="#94a3b8">
+            {a.desc}
+          </text>
+        </g>
+      ))}
+      <text
+        x="240"
+        y="148"
+        textAnchor="middle"
+        fontSize="9"
+        fill="#fbbf24"
+        fontWeight="600"
+      >
+        2030年全球卫星经济规模预计超 $1万亿
+      </text>
+      <W
+        title="商业航天的商业模式"
+        line1="发射服务+卫星制造+数据服务三层价值链，"
+        line2="遥感数据年市场规模已超 $100亿，高速增长。"
+        color="#6366f1"
+      />
+    </>
+  );
+}
+
+export function AerospaceAnimation({
+  isLight,
+  industryId,
+}: {
+  isLight: boolean;
+  industryId: string;
+}) {
+  // as_overview / 旧 aerospace — 全景4步动画
+  if (industryId === "as_overview" || industryId === "aerospace") {
+    return (
+      <IA
+        isLight={isLight}
+        title="商业航天产业链全流程"
+        steps={AEROSPACE_STEPS}
+        renderStep={(s) => <AerospaceStep step={s} />}
+      />
+    );
+  }
+
+  // as_rocket — 运载火箭/发动机
+  if (industryId === "as_rocket") {
+    return (
+      <IA
+        isLight={isLight}
+        title="运载火箭/发动机供应链"
+        steps={[
+          { id: 0, label: "液体发动机" },
+          { id: 1, label: "碳纤维箭体" },
+          { id: 2, label: "飞控制导" },
+          { id: 3, label: "可复用回收" },
+        ]}
+        renderStep={(s) => {
+          const t = (Date.now() / 600) % (Math.PI * 2);
+          const pulse = 0.5 + 0.5 * Math.sin(t);
+          if (s === 0)
+            return (
+              <>
+                {/* 燃烧室 */}
+                <ellipse
+                  cx="240"
+                  cy="55"
+                  rx="40"
+                  ry="28"
+                  fill="#1e293b"
+                  stroke="#ef4444"
+                  strokeWidth="2"
+                />
+                <ellipse
+                  cx="240"
+                  cy="55"
+                  rx="28"
+                  ry="18"
+                  fill="#0f172a"
+                  stroke="#f97316"
+                  strokeWidth="1.5"
+                  opacity={0.8 + 0.2 * pulse}
+                />
+                <text
+                  x="240"
+                  y="59"
+                  textAnchor="middle"
+                  fontSize="8"
+                  fill="#fb923c"
+                  fontWeight="600"
+                >
+                  燃烧室
+                </text>
+                {/* 涡轮泵 */}
+                <rect
+                  x="100"
+                  y="38"
+                  width="70"
+                  height="36"
+                  rx="8"
+                  fill="#1e3a5f"
+                  stroke="#38bdf8"
+                  strokeWidth="1.5"
+                />
+                <text
+                  x="135"
+                  y="59"
+                  textAnchor="middle"
+                  fontSize="8"
+                  fill="#38bdf8"
+                >
+                  涡轮泵
+                </text>
+                {/* 喷嘴 */}
+                <path
+                  d="M200,83 L185,120 L295,120 L280,83"
+                  fill="#1e293b"
+                  stroke="#f97316"
+                  strokeWidth="1.5"
+                />
+                <path
+                  d={`M220,120 Q240,${135 + 10 * pulse},260,120`}
+                  fill={`rgba(251,146,60,${0.5 + 0.4 * pulse})`}
+                />
+                {/* 连线 */}
+                <line
+                  x1="170"
+                  y1="56"
+                  x2="200"
+                  y2="56"
+                  stroke="#38bdf8"
+                  strokeWidth="1.5"
+                  opacity={0.7 + 0.3 * pulse}
+                  strokeDasharray="4 2"
+                />
+                <text
+                  x="240"
+                  y="145"
+                  textAnchor="middle"
+                  fontSize="9"
+                  fill="#94a3b8"
+                >
+                  液氧甲烷发动机：推力120吨，比冲363s
+                </text>
+                <W
+                  title="为什么用液氧甲烷？"
+                  line1="甲烷密度高、积碳少，可反复点火，"
+                  line2="是可复用火箭发动机首选燃料，SpaceX猛禽同款。"
+                  color="#f97316"
+                />
+              </>
+            );
+          if (s === 1)
+            return (
+              <>
+                {/* 碳纤维网格壁 */}
+                {[0, 1, 2, 3, 4].map((i) => (
+                  <line
+                    key={`h${i}`}
+                    x1="100"
+                    y1={30 + i * 20}
+                    x2="380"
+                    y2={30 + i * 20}
+                    stroke="#6366f1"
+                    strokeWidth="0.8"
+                    opacity="0.5"
+                  />
+                ))}
+                {[0, 1, 2, 3, 4, 5, 6, 7].map((i) => (
+                  <line
+                    key={`v${i}`}
+                    x1={100 + i * 40}
+                    y1="30"
+                    x2={100 + i * 40}
+                    y2="110"
+                    stroke="#818cf8"
+                    strokeWidth="0.8"
+                    opacity="0.5"
+                  />
+                ))}
+                <rect
+                  x="100"
+                  y="30"
+                  width="280"
+                  height="80"
+                  rx="4"
+                  fill="none"
+                  stroke="#6366f1"
+                  strokeWidth="2"
+                />
+                <text
+                  x="240"
+                  y="75"
+                  textAnchor="middle"
+                  fontSize="9"
+                  fill="#818cf8"
+                  fontWeight="600"
+                >
+                  碳纤维网格壁箭体结构
+                </text>
+                <text
+                  x="240"
+                  y="88"
+                  textAnchor="middle"
+                  fontSize="8"
+                  fill="#475569"
+                >
+                  密度1.7g/cm³，比铝轻40%
+                </text>
+                <rect
+                  x="130"
+                  y="118"
+                  width="80"
+                  height="18"
+                  rx="4"
+                  fill="#1e293b"
+                  stroke="#300699"
+                  strokeWidth="1.5"
+                />
+                <text
+                  x="170"
+                  y="130"
+                  textAnchor="middle"
+                  fontSize="8"
+                  fill="#a5b4fc"
+                >
+                  光威复材 T800
+                </text>
+                <rect
+                  x="270"
+                  y="118"
+                  width="80"
+                  height="18"
+                  rx="4"
+                  fill="#1e293b"
+                  stroke="#818cf8"
+                  strokeWidth="1.5"
+                />
+                <text
+                  x="310"
+                  y="130"
+                  textAnchor="middle"
+                  fontSize="8"
+                  fill="#a5b4fc"
+                >
+                  中简科技 ZT7
+                </text>
+                <W
+                  title="碳纤维箭体是国产化关键"
+                  line1="光威复材/中简科技已实现T800级量产，"
+                  line2="碳纤维用量：单枚火箭约1-3吨，千箭需求万吨级。"
+                  color="#818cf8"
+                />
+              </>
+            );
+          if (s === 2)
+            return (
+              <>
+                {[
+                  {
+                    x: 80,
+                    y: 20,
+                    label: "陀螺仪/IMU",
+                    desc: "姿态感知 0.001°/h",
+                    c: "#38bdf8",
+                  },
+                  {
+                    x: 280,
+                    y: 20,
+                    label: "星敏感器",
+                    desc: "高精度姿态基准",
+                    c: "#818cf8",
+                  },
+                  {
+                    x: 80,
+                    y: 90,
+                    label: "箭载计算机",
+                    desc: "制导律解算 μs级",
+                    c: "#f59e0b",
+                  },
+                  {
+                    x: 280,
+                    y: 90,
+                    label: "TVC矢量控制",
+                    desc: "发动机摆动±8°",
+                    c: "#10b981",
+                  },
+                ].map((nd) => (
+                  <g key={nd.label}>
+                    <rect
+                      x={nd.x}
+                      y={nd.y}
+                      width="160"
+                      height="55"
+                      rx="8"
+                      fill="#1e293b"
+                      stroke={nd.c}
+                      strokeWidth="1.5"
+                      opacity={0.8 + 0.2 * pulse}
+                    />
+                    <text
+                      x={nd.x + 80}
+                      y={nd.y + 20}
+                      textAnchor="middle"
+                      fontSize="9"
+                      fill={nd.c}
+                      fontWeight="700"
+                    >
+                      {nd.label}
+                    </text>
+                    <text
+                      x={nd.x + 80}
+                      y={nd.y + 36}
+                      textAnchor="middle"
+                      fontSize="7.5"
+                      fill="#64748b"
+                    >
+                      {nd.desc}
+                    </text>
+                  </g>
+                ))}
+                <W
+                  title="飞控制导是火箭入轨关键"
+                  line1="航天电子提供全套飞控计算机和制导系统，"
+                  line2="三轴稳定控制精度决定卫星入轨精度。"
+                  color="#f59e0b"
+                />
+              </>
+            );
+          return (
+            <>
+              {/* 火箭下降 */}
+              <rect
+                x="215"
+                y={15 + 10 * (1 - pulse)}
+                width="50"
+                height="80"
+                rx="6"
+                fill="#1e293b"
+                stroke="#f59e0b"
+                strokeWidth="2"
+              />
+              <path
+                d={`M215,95 L200,120 L280,120 L265,95`}
+                fill="#1e293b"
+                stroke="#ef4444"
+                strokeWidth="1.5"
+              />
+              <path
+                d={`M228,120 Q240,${130 + 5 * pulse},252,120`}
+                fill={`rgba(251,146,60,${0.4 + 0.5 * pulse})`}
+              />
+              {/* 着陆腿 */}
+              {[-1, 1].map((side) => (
+                <line
+                  key={side}
+                  x1={240 + side * 17}
+                  y1="115"
+                  x2={240 + side * 35}
+                  y2="130"
+                  stroke="#64748b"
+                  strokeWidth="2"
+                />
+              ))}
+              <rect
+                x="205"
+                y="130"
+                width="70"
+                height="6"
+                rx="2"
+                fill="#334155"
+              />
+              <text
+                x="240"
+                y="148"
+                textAnchor="middle"
+                fontSize="9"
+                fill="#f59e0b"
+                fontWeight="600"
+              >
+                一子级垂直回收着陆
+              </text>
+              <W
+                title="可复用将发射成本降至$1000/kg"
+                line1="SpaceX猎鹰9复用100次以上，成本降低90%，"
+                line2="蓝箭朱雀3/星河动力均在研制可复用版本。"
+                color="#f59e0b"
+              />
+            </>
+          );
+        }}
+      />
+    );
+  }
+
+  // as_satellite — 卫星平台/制造
+  if (industryId === "as_satellite") {
+    return (
+      <IA
+        isLight={isLight}
+        title="卫星平台/制造供应链"
+        steps={[
+          { id: 0, label: "卫星结构热控" },
+          { id: 1, label: "姿轨控系统" },
+          { id: 2, label: "供配电系统" },
+          { id: 3, label: "批量制造" },
+        ]}
+        renderStep={(s) => {
+          const t = (Date.now() / 600) % (Math.PI * 2);
+          const pulse = 0.5 + 0.5 * Math.sin(t);
+          if (s === 0)
+            return (
+              <>
+                {/* 卫星蜂窝板 */}
+                {[0, 1, 2].map((row) =>
+                  [0, 1, 2, 3].map((col) => (
+                    <g key={`${row}-${col}`}>
+                      <polygon
+                        points={`${120 + col * 60 + (row % 2) * 30},${25 + row * 30} ${120 + col * 60 + (row % 2) * 30 + 25},${25 + row * 30} ${120 + col * 60 + (row % 2) * 30 + 35},${40 + row * 30} ${120 + col * 60 + (row % 2) * 30 + 25},${55 + row * 30} ${120 + col * 60 + (row % 2) * 30},${55 + row * 30} ${120 + col * 60 + (row % 2) * 30 - 10},${40 + row * 30}`}
+                        fill="#1e293b"
+                        stroke="#6366f1"
+                        strokeWidth="0.8"
+                        opacity="0.85"
+                      />
+                    </g>
+                  )),
+                )}
+                <text
+                  x="240"
+                  y="118"
+                  textAnchor="middle"
+                  fontSize="9"
+                  fill="#818cf8"
+                  fontWeight="600"
+                >
+                  铝蜂窝夹层结构：重量轻/刚性强
+                </text>
+                <text
+                  x="240"
+                  y="131"
+                  textAnchor="middle"
+                  fontSize="8"
+                  fill="#94a3b8"
+                >
+                  热管散热：等温化，ΔT &lt; 5°C
+                </text>
+                <W
+                  title="为什么用蜂窝板？"
+                  line1="铝蜂窝夹层比实心铝轻60%，刚性相当，"
+                  line2="热管将热量均匀传导到散热面，维持器件温度。"
+                  color="#6366f1"
+                />
+              </>
+            );
+          if (s === 1)
+            return (
+              <>
+                {[
+                  {
+                    x: 80,
+                    y: 20,
+                    label: "星敏感器",
+                    desc: "姿态精度0.001°",
+                    c: "#38bdf8",
+                  },
+                  {
+                    x: 280,
+                    y: 20,
+                    label: "陀螺仪",
+                    desc: "角速度测量",
+                    c: "#818cf8",
+                  },
+                  {
+                    x: 80,
+                    y: 90,
+                    label: "磁力矩器",
+                    desc: "低轨道卸载角动量",
+                    c: "#10b981",
+                  },
+                  {
+                    x: 280,
+                    y: 90,
+                    label: "推进器",
+                    desc: "轨道维持/变轨",
+                    c: "#f59e0b",
+                  },
+                ].map((nd) => (
+                  <g key={nd.label}>
+                    <rect
+                      x={nd.x}
+                      y={nd.y}
+                      width="160"
+                      height="55"
+                      rx="8"
+                      fill="#1e293b"
+                      stroke={nd.c}
+                      strokeWidth="1.5"
+                      opacity={0.8 + 0.2 * pulse}
+                    />
+                    <text
+                      x={nd.x + 80}
+                      y={nd.y + 20}
+                      textAnchor="middle"
+                      fontSize="9"
+                      fill={nd.c}
+                      fontWeight="700"
+                    >
+                      {nd.label}
+                    </text>
+                    <text
+                      x={nd.x + 80}
+                      y={nd.y + 36}
+                      textAnchor="middle"
+                      fontSize="7.5"
+                      fill="#64748b"
+                    >
+                      {nd.desc}
+                    </text>
+                  </g>
+                ))}
+                <W
+                  title="姿轨控是卫星精准指向的核心"
+                  line1="三轴稳定精度决定遥感分辨率和通信天线指向，"
+                  line2="航天电子提供全套姿轨控分系统。"
+                  color="#38bdf8"
+                />
+              </>
+            );
+          if (s === 2)
+            return (
+              <>
+                {/* 太阳帆板 */}
+                <rect
+                  x="80"
+                  y="60"
+                  width="120"
+                  height="50"
+                  rx="4"
+                  fill="#1e3a5f"
+                  stroke="#fbbf24"
+                  strokeWidth="1.5"
+                />
+                <rect
+                  x="280"
+                  y="60"
+                  width="120"
+                  height="50"
+                  rx="4"
+                  fill="#1e3a5f"
+                  stroke="#fbbf24"
+                  strokeWidth="1.5"
+                />
+                {[0, 1, 2, 3, 4].map((i) => (
+                  <line
+                    key={i}
+                    x1={85 + i * 22}
+                    y1="62"
+                    x2={85 + i * 22}
+                    y2="108"
+                    stroke="#fbbf24"
+                    strokeWidth="0.8"
+                    opacity="0.6"
+                  />
+                ))}
+                {[0, 1, 2, 3, 4].map((i) => (
+                  <line
+                    key={i}
+                    x1={285 + i * 22}
+                    y1="62"
+                    x2={285 + i * 22}
+                    y2="108"
+                    stroke="#fbbf24"
+                    strokeWidth="0.8"
+                    opacity="0.6"
+                  />
+                ))}
+                <rect
+                  x="200"
+                  y="70"
+                  width="80"
+                  height="36"
+                  rx="6"
+                  fill="#0f172a"
+                  stroke="#6366f1"
+                  strokeWidth="2"
+                />
+                <text
+                  x="240"
+                  y="91"
+                  textAnchor="middle"
+                  fontSize="8"
+                  fill="#818cf8"
+                >
+                  PCDU
+                </text>
+                <line
+                  x1="200"
+                  y1="85"
+                  x2="130"
+                  y2="85"
+                  stroke="#fbbf24"
+                  strokeWidth="2"
+                  opacity={0.7 + 0.3 * pulse}
+                />
+                <line
+                  x1="280"
+                  y1="85"
+                  x2="350"
+                  y2="85"
+                  stroke="#fbbf24"
+                  strokeWidth="2"
+                  opacity={0.7 + 0.3 * pulse}
+                />
+                <text
+                  x="240"
+                  y="128"
+                  textAnchor="middle"
+                  fontSize="9"
+                  fill="#94a3b8"
+                >
+                  砷化镓太阳能电池效率28%，锂电池储能
+                </text>
+                <W
+                  title="供配电是卫星寿命关键"
+                  line1="GaAs太阳电池28%效率，远优于硅电池，"
+                  line2="振华科技/中国卫星提供航天级供配电系统。"
+                  color="#fbbf24"
+                />
+              </>
+            );
+          return (
+            <>
+              {/* 批量卫星制造流水线 */}
+              {[0, 1, 2, 3].map((i) => (
+                <g key={i}>
+                  <rect
+                    x={60 + i * 100}
+                    y={30 + (i % 2) * 20}
+                    width="70"
+                    height="50"
+                    rx="6"
+                    fill="#1e293b"
+                    stroke={["#6366f1", "#f59e0b", "#10b981", "#38bdf8"][i]}
+                    strokeWidth="1.5"
+                    opacity={0.8 + 0.2 * pulse}
+                  />
+                  <rect
+                    x={60 + i * 100 - 20}
+                    y={48 + (i % 2) * 20}
+                    width="10"
+                    height="14"
+                    rx="2"
+                    fill="#fbbf24"
+                    opacity={0.7 + 0.2 * pulse}
+                  />
+                  <rect
+                    x={60 + i * 100 + 70}
+                    y={48 + (i % 2) * 20}
+                    width="10"
+                    height="14"
+                    rx="2"
+                    fill="#fbbf24"
+                    opacity={0.7 + 0.2 * pulse}
+                  />
+                  <text
+                    x={60 + i * 100 + 35}
+                    y={58 + (i % 2) * 20}
+                    textAnchor="middle"
+                    fontSize="8"
+                    fill="#94a3b8"
+                  >
+                    SAT-{i + 1}
+                  </text>
+                </g>
+              ))}
+              <text
+                x="240"
+                y="115"
+                textAnchor="middle"
+                fontSize="9"
+                fill="#818cf8"
+                fontWeight="600"
+              >
+                批量制造：单颗成本从1亿降至百万
+              </text>
+              <W
+                title="低轨星座推动卫星量产革命"
+                line1="G60星链计划1.2万颗，中国卫星正扩产能，"
+                line2="流水线制造将卫星从定制品变成工业品。"
+                color="#818cf8"
+              />
+            </>
+          );
+        }}
+      />
+    );
+  }
+
+  // as_payload — 有效载荷
+  if (industryId === "as_payload") {
+    return (
+      <IA
+        isLight={isLight}
+        title="有效载荷供应链"
+        steps={[
+          { id: 0, label: "行波管放大器" },
+          { id: 1, label: "相控阵天线" },
+          { id: 2, label: "SAR雷达载荷" },
+          { id: 3, label: "光学遥感载荷" },
+        ]}
+        renderStep={(s) => {
+          const t = (Date.now() / 600) % (Math.PI * 2);
+          const pulse = 0.5 + 0.5 * Math.sin(t);
+          if (s === 0)
+            return (
+              <>
+                {/* TWT结构 */}
+                <rect
+                  x="80"
+                  y="55"
+                  width="320"
+                  height="40"
+                  rx="4"
+                  fill="#0f172a"
+                  stroke="#f59e0b"
+                  strokeWidth="1.5"
+                />
+                <ellipse
+                  cx="100"
+                  cy="75"
+                  rx="15"
+                  ry="12"
+                  fill="#1e3a5f"
+                  stroke="#38bdf8"
+                  strokeWidth="1.5"
+                />
+                <text
+                  x="100"
+                  y="79"
+                  textAnchor="middle"
+                  fontSize="7"
+                  fill="#38bdf8"
+                >
+                  阴极
+                </text>
+                <line
+                  x1="115"
+                  y1="75"
+                  x2="365"
+                  y2="75"
+                  stroke="#fbbf24"
+                  strokeWidth="2"
+                  opacity={0.6 + 0.4 * pulse}
+                  strokeDasharray="6 3"
+                />
+                <ellipse
+                  cx="380"
+                  cy="75"
+                  rx="15"
+                  ry="12"
+                  fill="#1e293b"
+                  stroke="#10b981"
+                  strokeWidth="1.5"
+                />
+                <text
+                  x="380"
+                  y="79"
+                  textAnchor="middle"
+                  fontSize="7"
+                  fill="#10b981"
+                >
+                  收集极
+                </text>
+                {[0, 1, 2, 3].map((i) => (
+                  <path
+                    key={i}
+                    d={`M${160 + i * 50},65 Q${185 + i * 50},${70 + 6 * Math.sin(t + i)},${210 + i * 50},65`}
+                    fill="none"
+                    stroke="#818cf8"
+                    strokeWidth="1"
+                    opacity="0.6"
+                  />
+                ))}
+                <text
+                  x="240"
+                  y="115"
+                  textAnchor="middle"
+                  fontSize="9"
+                  fill="#f59e0b"
+                >
+                  行波管：输出功率200W，增益50dB
+                </text>
+                <W
+                  title="行波管是卫星通信功率核心"
+                  line1="TWT将弱信号放大10万倍，是GEO通信卫星必备，"
+                  line2="国光电气是国内唯一规模化生产行波管的A股公司。"
+                  color="#f59e0b"
+                />
+              </>
+            );
+          if (s === 1)
+            return (
+              <>
+                {/* 相控阵阵面 */}
+                {[0, 1, 2, 3, 4].map((row) =>
+                  [0, 1, 2, 3, 4, 5].map((col) => (
+                    <rect
+                      key={`${row}-${col}`}
+                      x={115 + col * 42}
+                      y={25 + row * 18}
+                      width="35"
+                      height="14"
+                      rx="2"
+                      fill="#1e3a5f"
+                      stroke="#38bdf8"
+                      strokeWidth="0.8"
+                      opacity={0.7 + 0.3 * Math.sin(t + row + col)}
+                    />
+                  )),
+                )}
+                {/* 波束 */}
+                <path
+                  d={`M115,115 L${200 + 30 * Math.sin(t)},140 L${280 - 30 * Math.sin(t)},140 L365,115`}
+                  fill="none"
+                  stroke="#6366f1"
+                  strokeWidth="1.5"
+                  opacity={0.5 + 0.4 * pulse}
+                />
+                <text
+                  x="240"
+                  y="155"
+                  textAnchor="middle"
+                  fontSize="9"
+                  fill="#38bdf8"
+                  fontWeight="600"
+                >
+                  T/R组件阵列：波束扫描 ±60°
+                </text>
+                <W
+                  title="相控阵实现灵活波束管理"
+                  line1="无机械转动，电扫描速度微秒级，"
+                  line2="铖昌科技T/R组件已进入卫星批量供货。"
+                  color="#38bdf8"
+                />
+              </>
+            );
+          if (s === 2)
+            return (
+              <>
+                {/* SAR成像示意 */}
+                <rect
+                  x="200"
+                  y="10"
+                  width="80"
+                  height="30"
+                  rx="4"
+                  fill="#1e293b"
+                  stroke="#f59e0b"
+                  strokeWidth="1.5"
+                />
+                <text
+                  x="240"
+                  y="29"
+                  textAnchor="middle"
+                  fontSize="8"
+                  fill="#f59e0b"
+                >
+                  SAR卫星
+                </text>
+                {[0, 1, 2, 3].map((i) => (
+                  <line
+                    key={i}
+                    x1={200 - i * 20}
+                    y1={45 + i * 15}
+                    x2={280 + i * 20}
+                    y2={45 + i * 15}
+                    stroke="#818cf8"
+                    strokeWidth="0.8"
+                    opacity={0.4 + 0.5 * pulse}
+                    strokeDasharray="8 4"
+                  />
+                ))}
+                <rect
+                  x="80"
+                  y="100"
+                  width="320"
+                  height="30"
+                  rx="4"
+                  fill="#14532d"
+                  stroke="#166534"
+                  strokeWidth="1.5"
+                />
+                <text
+                  x="240"
+                  y="119"
+                  textAnchor="middle"
+                  fontSize="8"
+                  fill="#6ee7b7"
+                >
+                  地面目标：1m分辨率，全天时成像
+                </text>
+                <W
+                  title="SAR是全天候遥感唯一选择"
+                  line1="光学遥感受云雨天气限制，SAR微波穿透云层，"
+                  line2="四创电子/航天环宇提供SAR核心射频组件。"
+                  color="#818cf8"
+                />
+              </>
+            );
+          return (
+            <>
+              {/* 光学系统 */}
+              <ellipse
+                cx="240"
+                cy="40"
+                rx="50"
+                ry="20"
+                fill="#0f172a"
+                stroke="#22d3ee"
+                strokeWidth="2"
+              />
+              <ellipse
+                cx="240"
+                cy="40"
+                rx="30"
+                ry="12"
+                fill="#1e293b"
+                stroke="#38bdf8"
+                strokeWidth="1.5"
+              />
+              <ellipse
+                cx="240"
+                cy="40"
+                rx="15"
+                ry="6"
+                fill="#0e7490"
+                opacity={0.6 + 0.4 * pulse}
+              />
+              <line
+                x1="190"
+                y1="60"
+                x2="160"
+                y2="120"
+                stroke="#22d3ee"
+                strokeWidth="1"
+                opacity={0.5 + 0.4 * pulse}
+                strokeDasharray="4 2"
+              />
+              <line
+                x1="290"
+                y1="60"
+                x2="320"
+                y2="120"
+                stroke="#22d3ee"
+                strokeWidth="1"
+                opacity={0.5 + 0.4 * pulse}
+                strokeDasharray="4 2"
+              />
+              <rect
+                x="160"
+                y="120"
+                width="160"
+                height="16"
+                rx="4"
+                fill="#1e3a5f"
+                stroke="#2563eb"
+                strokeWidth="1.5"
+              />
+              <text
+                x="240"
+                y="131"
+                textAnchor="middle"
+                fontSize="7.5"
+                fill="#93c5fd"
+              >
+                焦平面探测器 TDI-CCD
+              </text>
+              <text
+                x="240"
+                y="155"
+                textAnchor="middle"
+                fontSize="9"
+                fill="#22d3ee"
+                fontWeight="600"
+              >
+                0.5m分辨率，幅宽15km
+              </text>
+              <W
+                title="光学遥感分辨率决定应用价值"
+                line1="航天环宇提供遥感相机光学骨架/精密结构，"
+                line2="0.5m分辨率可清晰识别车辆，军/民用需求旺盛。"
+                color="#22d3ee"
+              />
+            </>
+          );
+        }}
+      />
+    );
+  }
+
+  // as_satcom — 卫星通信
+  if (industryId === "as_satcom") {
+    return (
+      <IA
+        isLight={isLight}
+        title="卫星通信系统"
+        steps={[
+          { id: 0, label: "GEO高通量" },
+          { id: 1, label: "LEO星座" },
+          { id: 2, label: "VSAT终端" },
+          { id: 3, label: "NTN手机直连" },
+        ]}
+        renderStep={(s) => {
+          const t = (Date.now() / 600) % (Math.PI * 2);
+          const pulse = 0.5 + 0.5 * Math.sin(t);
+          if (s === 0)
+            return (
+              <>
+                {/* GEO卫星 */}
+                <circle
+                  cx="240"
+                  cy="35"
+                  r="20"
+                  fill="#1e293b"
+                  stroke="#818cf8"
+                  strokeWidth="2"
+                />
+                <rect
+                  x="220"
+                  y="30"
+                  width="14"
+                  height="10"
+                  rx="2"
+                  fill="#fbbf24"
+                  opacity={0.8 + 0.2 * pulse}
+                />
+                <rect
+                  x="246"
+                  y="30"
+                  width="14"
+                  height="10"
+                  rx="2"
+                  fill="#fbbf24"
+                  opacity={0.8 + 0.2 * pulse}
+                />
+                <text
+                  x="240"
+                  y="39"
+                  textAnchor="middle"
+                  fontSize="7"
+                  fill="#818cf8"
+                >
+                  GEO
+                </text>
+                {/* 波束 */}
+                {[0, 1, 2].map((i) => (
+                  <path
+                    key={i}
+                    d={`M${200 + i * 20},55 L${120 + i * 60},110`}
+                    stroke="#6366f1"
+                    strokeWidth="1.5"
+                    opacity={0.5 + 0.4 * pulse}
+                    strokeDasharray="5 3"
+                  />
+                ))}
+                <rect
+                  x="80"
+                  y="110"
+                  width="320"
+                  height="16"
+                  rx="3"
+                  fill="#14532d"
+                  stroke="#166534"
+                  strokeWidth="1"
+                />
+                <text
+                  x="240"
+                  y="121"
+                  textAnchor="middle"
+                  fontSize="7.5"
+                  fill="#6ee7b7"
+                >
+                  地面用户：100Mbps/波束，总容量100Gbps
+                </text>
+                <W
+                  title="GEO高通量卫星覆盖全国"
+                  line1="中国卫通亚太6D容量100Gbps，"
+                  line2={'覆盖全国及"一带一路"海域和航线。'}
+                  color="#818cf8"
+                />
+              </>
+            );
+          if (s === 1)
+            return (
+              <>
+                <circle
+                  cx="240"
+                  cy="120"
+                  r="55"
+                  fill="#0f2037"
+                  stroke="#1e3a5f"
+                  strokeWidth="1.5"
+                />
+                {[0, 1, 2, 3, 4, 5].map((i) => {
+                  const angle = (i / 6) * Math.PI * 2 - Math.PI / 2;
+                  const cx = 240 + 95 * Math.cos(angle);
+                  const cy = 120 + 50 * Math.sin(angle);
+                  return (
+                    <g key={i}>
+                      <rect
+                        x={cx - 12}
+                        y={cy - 6}
+                        width="24"
+                        height="12"
+                        rx="3"
+                        fill="#1e293b"
+                        stroke="#22d3ee"
+                        strokeWidth="1"
+                      />
+                      <text
+                        x={cx}
+                        y={cy + 4}
+                        textAnchor="middle"
+                        fontSize="6.5"
+                        fill="#22d3ee"
+                      >
+                        LEO
+                      </text>
+                      <line
+                        x1={240 + 40 * Math.cos(angle)}
+                        y1={120 + 21 * Math.sin(angle)}
+                        x2={cx - 12 * Math.cos(angle)}
+                        y2={cy - 6 * Math.sin(angle)}
+                        stroke="#6366f1"
+                        strokeWidth="1"
+                        opacity={0.4 + 0.4 * pulse}
+                      />
+                    </g>
+                  );
+                })}
+                <text
+                  x="240"
+                  y="25"
+                  textAnchor="middle"
+                  fontSize="9"
+                  fill="#22d3ee"
+                  fontWeight="600"
+                >
+                  LEO低轨星座：延迟20ms
+                </text>
+                <W
+                  title="LEO星座实现全球无缝宽带"
+                  line1="高度500-1200km，延迟仅20ms（GEO为600ms），"
+                  line2="中国G60/GW星座规划超1.2万颗。"
+                  color="#22d3ee"
+                />
+              </>
+            );
+          if (s === 2)
+            return (
+              <>
+                {[
+                  {
+                    x: 80,
+                    y: 20,
+                    label: "海事VSAT",
+                    desc: "船舶宽带/AIS集成",
+                    c: "#38bdf8",
+                  },
+                  {
+                    x: 280,
+                    y: 20,
+                    label: "航空宽带",
+                    desc: "机载Ka波段终端",
+                    c: "#818cf8",
+                  },
+                  {
+                    x: 80,
+                    y: 90,
+                    label: "车载终端",
+                    desc: "应急通信/远程控制",
+                    c: "#10b981",
+                  },
+                  {
+                    x: 280,
+                    y: 90,
+                    label: "便携终端",
+                    desc: "野外/应急，15kg",
+                    c: "#f59e0b",
+                  },
+                ].map((nd) => (
+                  <g key={nd.label}>
+                    <rect
+                      x={nd.x}
+                      y={nd.y}
+                      width="160"
+                      height="55"
+                      rx="8"
+                      fill="#1e293b"
+                      stroke={nd.c}
+                      strokeWidth="1.5"
+                      opacity={0.8 + 0.2 * pulse}
+                    />
+                    <text
+                      x={nd.x + 80}
+                      y={nd.y + 20}
+                      textAnchor="middle"
+                      fontSize="9"
+                      fill={nd.c}
+                      fontWeight="700"
+                    >
+                      {nd.label}
+                    </text>
+                    <text
+                      x={nd.x + 80}
+                      y={nd.y + 36}
+                      textAnchor="middle"
+                      fontSize="7.5"
+                      fill="#64748b"
+                    >
+                      {nd.desc}
+                    </text>
+                  </g>
+                ))}
+                <W
+                  title="盟升电子深耕VSAT终端市场"
+                  line1="海格通信/盟升电子已覆盖海事/航空/车载全品类，"
+                  line2="VSAT终端市场规模年均增速15%+。"
+                  color="#38bdf8"
+                />
+              </>
+            );
+          return (
+            <>
+              <rect
+                x="160"
+                y="25"
+                width="160"
+                height="60"
+                rx="8"
+                fill="#1e293b"
+                stroke="#f59e0b"
+                strokeWidth="2"
+              />
+              <text
+                x="240"
+                y="50"
+                textAnchor="middle"
+                fontSize="9"
+                fill="#fbbf24"
+                fontWeight="700"
+              >
+                3GPP NTN
+              </text>
+              <text
+                x="240"
+                y="65"
+                textAnchor="middle"
+                fontSize="8"
+                fill="#94a3b8"
+              >
+                非地面网络直连手机
+              </text>
+              <circle
+                cx="130"
+                cy="100"
+                r="20"
+                fill="#1e3a5f"
+                stroke="#6366f1"
+                strokeWidth="1.5"
+              />
+              <text
+                x="130"
+                y="104"
+                textAnchor="middle"
+                fontSize="8"
+                fill="#818cf8"
+              >
+                手机
+              </text>
+              <circle
+                cx="350"
+                cy="100"
+                r="20"
+                fill="#1e3a5f"
+                stroke="#6366f1"
+                strokeWidth="1.5"
+              />
+              <text
+                x="350"
+                y="104"
+                textAnchor="middle"
+                fontSize="8"
+                fill="#818cf8"
+              >
+                手机
+              </text>
+              <line
+                x1="150"
+                y1="95"
+                x2="160"
+                y2="65"
+                stroke="#f59e0b"
+                strokeWidth="1.5"
+                strokeDasharray="5 3"
+                opacity={0.7 + 0.3 * pulse}
+              />
+              <line
+                x1="330"
+                y1="95"
+                x2="320"
+                y2="65"
+                stroke="#f59e0b"
+                strokeWidth="1.5"
+                strokeDasharray="5 3"
+                opacity={0.7 + 0.3 * pulse}
+              />
+              <text
+                x="240"
+                y="145"
+                textAnchor="middle"
+                fontSize="9"
+                fill="#f59e0b"
+                fontWeight="600"
+              >
+                无需地面基站，偏远地区直接接入
+              </text>
+              <W
+                title="NTN重新定义移动通信边界"
+                line1="3GPP R17标准支持NTN，华为/中兴已支持，"
+                line2="七一二/普天科技布局NTN核心设备。"
+                color="#f59e0b"
+              />
+            </>
+          );
+        }}
+      />
+    );
+  }
+
+  // as_satnav — 卫星导航/北斗
+  if (industryId === "as_satnav") {
+    return (
+      <IA
+        isLight={isLight}
+        title="北斗卫星导航系统"
+        steps={[
+          { id: 0, label: "北斗三号组网" },
+          { id: 1, label: "北斗芯片模组" },
+          { id: 2, label: "RTK高精定位" },
+          { id: 3, label: "行业应用" },
+        ]}
+        renderStep={(s) => {
+          const t = (Date.now() / 600) % (Math.PI * 2);
+          const pulse = 0.5 + 0.5 * Math.sin(t);
+          if (s === 0)
+            return (
+              <>
+                <circle
+                  cx="240"
+                  cy="90"
+                  r="50"
+                  fill="#0f2037"
+                  stroke="#1e3a5f"
+                  strokeWidth="1.5"
+                />
+                {/* MEO轨道 */}
+                <ellipse
+                  cx="240"
+                  cy="90"
+                  rx="130"
+                  ry="55"
+                  fill="none"
+                  stroke="#6366f1"
+                  strokeWidth="1"
+                  strokeDasharray="6 3"
+                  opacity="0.5"
+                />
+                {/* IGSO轨道 */}
+                <ellipse
+                  cx="240"
+                  cy="90"
+                  rx="100"
+                  ry="100"
+                  fill="none"
+                  stroke="#818cf8"
+                  strokeWidth="1"
+                  strokeDasharray="4 4"
+                  opacity="0.4"
+                />
+                {[0, 1, 2, 3, 4, 5].map((i) => {
+                  const angle = (i / 6) * Math.PI * 2;
+                  const cx = 240 + 120 * Math.cos(angle);
+                  const cy = 90 + 48 * Math.sin(angle);
+                  return (
+                    <g key={i}>
+                      <circle
+                        cx={cx}
+                        cy={cy}
+                        r="8"
+                        fill="#1e293b"
+                        stroke="#f59e0b"
+                        strokeWidth="1.5"
+                        opacity={0.8 + 0.2 * pulse}
+                      />
+                      <rect
+                        x={cx - 10}
+                        y={cy - 3}
+                        width="5"
+                        height="6"
+                        rx="1"
+                        fill="#fbbf24"
+                        opacity="0.8"
+                      />
+                      <rect
+                        x={cx + 5}
+                        y={cy - 3}
+                        width="5"
+                        height="6"
+                        rx="1"
+                        fill="#fbbf24"
+                        opacity="0.8"
+                      />
+                    </g>
+                  );
+                })}
+                <text
+                  x="240"
+                  y="25"
+                  textAnchor="middle"
+                  fontSize="9"
+                  fill="#f59e0b"
+                  fontWeight="600"
+                >
+                  北斗三号：35颗卫星全球覆盖
+                </text>
+                <W
+                  title="北斗三号已完全替代GPS"
+                  line1="2020年全球组网完成，30+MEO+3GEO+3IGSO，"
+                  line2="全球定位精度2.5m，亚太地区1.5m。"
+                  color="#f59e0b"
+                />
+              </>
+            );
+          if (s === 1)
+            return (
+              <>
+                {[
+                  {
+                    x: 80,
+                    y: 20,
+                    label: "北斗基带芯片",
+                    desc: "多系统/多频点解算",
+                    c: "#38bdf8",
+                  },
+                  {
+                    x: 280,
+                    y: 20,
+                    label: "射频前端芯片",
+                    desc: "低噪声多频接收",
+                    c: "#818cf8",
+                  },
+                  {
+                    x: 80,
+                    y: 90,
+                    label: "GNSS模组",
+                    desc: "北斗GPS双系统",
+                    c: "#10b981",
+                  },
+                  {
+                    x: 280,
+                    y: 90,
+                    label: "高精度板卡",
+                    desc: "RTK 1cm精度",
+                    c: "#f59e0b",
+                  },
+                ].map((nd) => (
+                  <g key={nd.label}>
+                    <rect
+                      x={nd.x}
+                      y={nd.y}
+                      width="160"
+                      height="55"
+                      rx="8"
+                      fill="#1e293b"
+                      stroke={nd.c}
+                      strokeWidth="1.5"
+                      opacity={0.8 + 0.2 * pulse}
+                    />
+                    <text
+                      x={nd.x + 80}
+                      y={nd.y + 20}
+                      textAnchor="middle"
+                      fontSize="9"
+                      fill={nd.c}
+                      fontWeight="700"
+                    >
+                      {nd.label}
+                    </text>
+                    <text
+                      x={nd.x + 80}
+                      y={nd.y + 36}
+                      textAnchor="middle"
+                      fontSize="7.5"
+                      fill="#64748b"
+                    >
+                      {nd.desc}
+                    </text>
+                  </g>
+                ))}
+                <W
+                  title="北斗星通是国内北斗芯片龙头"
+                  line1="北斗芯片年销售已超1亿颗，手机/车载普及，"
+                  line2="铖昌科技/北斗星通布局高性能GNSS芯片。"
+                  color="#38bdf8"
+                />
+              </>
+            );
+          if (s === 2)
+            return (
+              <>
+                {/* RTK基站+流动站 */}
+                <rect
+                  x="100"
+                  y="40"
+                  width="60"
+                  height="60"
+                  rx="6"
+                  fill="#1e3a5f"
+                  stroke="#38bdf8"
+                  strokeWidth="1.5"
+                />
+                <text
+                  x="130"
+                  y="74"
+                  textAnchor="middle"
+                  fontSize="8"
+                  fill="#38bdf8"
+                >
+                  CORS基站
+                </text>
+                <rect
+                  x="320"
+                  y="50"
+                  width="60"
+                  height="50"
+                  rx="6"
+                  fill="#1e293b"
+                  stroke="#f59e0b"
+                  strokeWidth="1.5"
+                />
+                <text
+                  x="350"
+                  y="79"
+                  textAnchor="middle"
+                  fontSize="8"
+                  fill="#f59e0b"
+                >
+                  RTK流动站
+                </text>
+                {/* 差分信号 */}
+                <line
+                  x1="160"
+                  y1="70"
+                  x2="320"
+                  y2="70"
+                  stroke="#10b981"
+                  strokeWidth="1.5"
+                  strokeDasharray="6 3"
+                  opacity={0.6 + 0.4 * pulse}
+                />
+                <text
+                  x="240"
+                  y="65"
+                  textAnchor="middle"
+                  fontSize="8"
+                  fill="#10b981"
+                >
+                  差分改正数
+                </text>
+                {/* 精度标注 */}
+                <text
+                  x="240"
+                  y="115"
+                  textAnchor="middle"
+                  fontSize="9"
+                  fill="#fbbf24"
+                  fontWeight="600"
+                >
+                  RTK定位精度：水平±1cm，垂直±2cm
+                </text>
+                <W
+                  title="RTK是精准农业/测绘的基础"
+                  line1="华测导航/中海达年销RTK设备超10万套，"
+                  line2="精准农机自动驾驶偏差&lt;2.5cm，覆盖5000万亩。"
+                  color="#f59e0b"
+                />
+              </>
+            );
+          return (
+            <>
+              {[
+                {
+                  x: 80,
+                  y: 20,
+                  icon: "🚗",
+                  label: "自动驾驶",
+                  desc: "L3+定位，高精地图",
+                },
+                {
+                  x: 230,
+                  y: 20,
+                  icon: "🌾",
+                  label: "精准农业",
+                  desc: "农机自驾，植保无人机",
+                },
+                {
+                  x: 370,
+                  y: 20,
+                  icon: "🚢",
+                  label: "海事导航",
+                  desc: "船舶AIS+GNSS融合",
+                },
+                {
+                  x: 150,
+                  y: 85,
+                  icon: "📐",
+                  label: "测量测绘",
+                  desc: "RTK+无人机倾斜摄影",
+                },
+                {
+                  x: 300,
+                  y: 85,
+                  icon: "🏗️",
+                  label: "工程建设",
+                  desc: "桩基定位/变形监测",
+                },
+              ].map((a) => (
+                <g key={a.label}>
+                  <rect
+                    x={a.x}
+                    y={a.y}
+                    width="100"
+                    height="50"
+                    rx="8"
+                    fill="#1e293b"
+                    stroke="#6366f1"
+                    strokeWidth="1.5"
+                    opacity={0.85 + 0.15 * pulse}
+                  />
+                  <text x={a.x + 12} y={a.y + 18} fontSize="13">
+                    {a.icon}
+                  </text>
+                  <text
+                    x={a.x + 30}
+                    y={a.y + 17}
+                    fontSize="8.5"
+                    fill="#818cf8"
+                    fontWeight="700"
+                  >
+                    {a.label}
+                  </text>
+                  <text x={a.x + 8} y={a.y + 34} fontSize="7.5" fill="#94a3b8">
+                    {a.desc}
+                  </text>
+                </g>
+              ))}
+              <text
+                x="240"
+                y="155"
+                textAnchor="middle"
+                fontSize="9"
+                fill="#fbbf24"
+                fontWeight="600"
+              >
+                北斗行业应用市场规模超5000亿元
+              </text>
+              <W
+                title="北斗是数字中国的时空基础"
+                line1="北斗时间基准授时精度10ns，"
+                line2="全国交通/电力/金融均已接入北斗授时网络。"
+                color="#6366f1"
+              />
+            </>
+          );
+        }}
+      />
+    );
+  }
+
+  // as_remote — 遥感/对地观测
+  if (industryId === "as_remote") {
+    return (
+      <IA
+        isLight={isLight}
+        title="遥感/对地观测系统"
+        steps={[
+          { id: 0, label: "卫星遥感成像" },
+          { id: 1, label: "AI智能解译" },
+          { id: 2, label: "时空大数据" },
+          { id: 3, label: "行业应用" },
+        ]}
+        renderStep={(s) => {
+          const t = (Date.now() / 600) % (Math.PI * 2);
+          const pulse = 0.5 + 0.5 * Math.sin(t);
+          if (s === 0)
+            return (
+              <>
+                {/* 卫星 */}
+                <rect
+                  x="200"
+                  y="10"
+                  width="80"
+                  height="30"
+                  rx="6"
+                  fill="#1e293b"
+                  stroke="#818cf8"
+                  strokeWidth="2"
+                />
+                <rect
+                  x="182"
+                  y="18"
+                  width="16"
+                  height="14"
+                  rx="3"
+                  fill="#fbbf24"
+                  opacity={0.8 + 0.2 * pulse}
+                />
+                <rect
+                  x="282"
+                  y="18"
+                  width="16"
+                  height="14"
+                  rx="3"
+                  fill="#fbbf24"
+                  opacity={0.8 + 0.2 * pulse}
+                />
+                <text
+                  x="240"
+                  y="29"
+                  textAnchor="middle"
+                  fontSize="8"
+                  fill="#818cf8"
+                >
+                  光学遥感卫星
+                </text>
+                {/* 扫描线 */}
+                {[0, 1, 2].map((i) => (
+                  <line
+                    key={i}
+                    x1={195 - i * 20}
+                    y1={45 + i * 15}
+                    x2={285 + i * 20}
+                    y2={45 + i * 15}
+                    stroke="#22d3ee"
+                    strokeWidth={1 - i * 0.2}
+                    opacity={0.5 + 0.4 * pulse}
+                    strokeDasharray="8 4"
+                  />
+                ))}
+                {/* 地面 */}
+                <rect
+                  x="80"
+                  y="100"
+                  width="320"
+                  height="28"
+                  rx="4"
+                  fill="#14532d"
+                  stroke="#166534"
+                  strokeWidth="1.5"
+                />
+                <text
+                  x="240"
+                  y="118"
+                  textAnchor="middle"
+                  fontSize="9"
+                  fill="#6ee7b7"
+                >
+                  0.5m分辨率，幅宽 15km，重访 &lt;1天
+                </text>
+                <W
+                  title="遥感卫星是地球感知的眼睛"
+                  line1="航天环宇提供卫星精密结构，中国卫星运营遥感星座，"
+                  line2="分辨率每提升2倍，应用场景增加10倍。"
+                  color="#22d3ee"
+                />
+              </>
+            );
+          if (s === 1)
+            return (
+              <>
+                {/* 原始图像 */}
+                <rect
+                  x="50"
+                  y="30"
+                  width="100"
+                  height="80"
+                  rx="4"
+                  fill="#1e3a5f"
+                  stroke="#475569"
+                  strokeWidth="1"
+                />
+                {[0, 1, 2, 3].map((i) => (
+                  <rect
+                    key={i}
+                    x={55 + (i % 2) * 45}
+                    y={35 + Math.floor(i / 2) * 35}
+                    width="40"
+                    height="30"
+                    rx="2"
+                    fill={["#14532d", "#1e3a5f", "#3d1f00", "#1e293b"][i]}
+                    opacity="0.8"
+                  />
+                ))}
+                <text
+                  x="100"
+                  y="122"
+                  textAnchor="middle"
+                  fontSize="7.5"
+                  fill="#475569"
+                >
+                  原始影像
+                </text>
+                {/* 箭头 */}
+                <path
+                  d="M152,70 L188,70"
+                  stroke="#6366f1"
+                  strokeWidth="2"
+                  markerEnd="url(#arr)"
+                />
+                {/* AI处理框 */}
+                <rect
+                  x="190"
+                  y="40"
+                  width="100"
+                  height="60"
+                  rx="6"
+                  fill="#312e81"
+                  stroke="#818cf8"
+                  strokeWidth="2"
+                  opacity={0.8 + 0.2 * pulse}
+                />
+                <text
+                  x="240"
+                  y="68"
+                  textAnchor="middle"
+                  fontSize="9"
+                  fill="#a5b4fc"
+                  fontWeight="600"
+                >
+                  AI解译模型
+                </text>
+                <text
+                  x="240"
+                  y="82"
+                  textAnchor="middle"
+                  fontSize="7.5"
+                  fill="#818cf8"
+                >
+                  YOLOv8/SAM
+                </text>
+                <path
+                  d="M292,70 L328,70"
+                  stroke="#10b981"
+                  strokeWidth="2"
+                  markerEnd="url(#arr)"
+                />
+                {/* 结果 */}
+                <rect
+                  x="330"
+                  y="30"
+                  width="100"
+                  height="80"
+                  rx="4"
+                  fill="#1e3a5f"
+                  stroke="#10b981"
+                  strokeWidth="1"
+                />
+                <text
+                  x="380"
+                  y="75"
+                  textAnchor="middle"
+                  fontSize="7.5"
+                  fill="#34d399"
+                >
+                  变化检测/
+                </text>
+                <text
+                  x="380"
+                  y="87"
+                  textAnchor="middle"
+                  fontSize="7.5"
+                  fill="#34d399"
+                >
+                  目标识别
+                </text>
+                <W
+                  title="AI让遥感从人工走向自动化"
+                  line1="中科星图GEOVIS平台日处理TB级影像，"
+                  line2="AI解译效率是人工的100倍，精度超90%。"
+                  color="#818cf8"
+                />
+              </>
+            );
+          if (s === 2)
+            return (
+              <>
+                {[
+                  {
+                    x: 80,
+                    y: 20,
+                    label: "光学影像",
+                    desc: "0.5m/天级更新",
+                    c: "#22d3ee",
+                  },
+                  {
+                    x: 280,
+                    y: 20,
+                    label: "SAR数据",
+                    desc: "全天候/夜间",
+                    c: "#818cf8",
+                  },
+                  {
+                    x: 80,
+                    y: 90,
+                    label: "高光谱",
+                    desc: "200波段精细分类",
+                    c: "#10b981",
+                  },
+                  {
+                    x: 280,
+                    y: 90,
+                    label: "LiDAR高程",
+                    desc: "厘米级DEM",
+                    c: "#f59e0b",
+                  },
+                ].map((nd) => (
+                  <g key={nd.label}>
+                    <rect
+                      x={nd.x}
+                      y={nd.y}
+                      width="160"
+                      height="55"
+                      rx="8"
+                      fill="#1e293b"
+                      stroke={nd.c}
+                      strokeWidth="1.5"
+                      opacity={0.8 + 0.2 * pulse}
+                    />
+                    <text
+                      x={nd.x + 80}
+                      y={nd.y + 20}
+                      textAnchor="middle"
+                      fontSize="9"
+                      fill={nd.c}
+                      fontWeight="700"
+                    >
+                      {nd.label}
+                    </text>
+                    <text
+                      x={nd.x + 80}
+                      y={nd.y + 36}
+                      textAnchor="middle"
+                      fontSize="7.5"
+                      fill="#64748b"
+                    >
+                      {nd.desc}
+                    </text>
+                  </g>
+                ))}
+                <W
+                  title="多源遥感融合构建数字地球"
+                  line1="中科星图融合光学/SAR/高光谱多源数据，"
+                  line2="数字地球底座支撑国防/应急/城市管理。"
+                  color="#22d3ee"
+                />
+              </>
+            );
+          return (
+            <>
+              {[
+                {
+                  x: 80,
+                  y: 20,
+                  icon: "🌾",
+                  label: "精准农业",
+                  desc: "长势/病虫/产量预估",
+                },
+                {
+                  x: 230,
+                  y: 20,
+                  icon: "🆘",
+                  label: "灾害应急",
+                  desc: "洪涝/地震快速评估",
+                },
+                {
+                  x: 370,
+                  y: 20,
+                  icon: "🏙️",
+                  label: "城市规划",
+                  desc: "变化监测/违建检查",
+                },
+                {
+                  x: 150,
+                  y: 85,
+                  icon: "⛏️",
+                  label: "资源勘探",
+                  desc: "矿产/油气遥感识别",
+                },
+                {
+                  x: 300,
+                  y: 85,
+                  icon: "🌊",
+                  label: "海洋监测",
+                  desc: "船舶/溢油/藻华",
+                },
+              ].map((a) => (
+                <g key={a.label}>
+                  <rect
+                    x={a.x}
+                    y={a.y}
+                    width="100"
+                    height="50"
+                    rx="8"
+                    fill="#1e293b"
+                    stroke="#6366f1"
+                    strokeWidth="1.5"
+                    opacity={0.85 + 0.15 * pulse}
+                  />
+                  <text x={a.x + 12} y={a.y + 18} fontSize="13">
+                    {a.icon}
+                  </text>
+                  <text
+                    x={a.x + 30}
+                    y={a.y + 17}
+                    fontSize="8.5"
+                    fill="#818cf8"
+                    fontWeight="700"
+                  >
+                    {a.label}
+                  </text>
+                  <text x={a.x + 8} y={a.y + 34} fontSize="7.5" fill="#94a3b8">
+                    {a.desc}
+                  </text>
+                </g>
+              ))}
+              <text
+                x="240"
+                y="155"
+                textAnchor="middle"
+                fontSize="9"
+                fill="#fbbf24"
+                fontWeight="600"
+              >
+                遥感数据服务市场 $100亿+/年，高速增长
+              </text>
+              <W
+                title="遥感数据服务是高增长赛道"
+                line1="四维图新/中科星图从数据到AI服务全链布局，"
+                line2="政府/能源/农业/保险多行业需求旺盛。"
+                color="#6366f1"
+              />
+            </>
+          );
+        }}
+      />
+    );
+  }
+
+  // as_ground — 地面站/测控系统
+  if (industryId === "as_ground") {
+    return (
+      <IA
+        isLight={isLight}
+        title="地面站/测控系统"
+        steps={[
+          { id: 0, label: "测控站系统" },
+          { id: 1, label: "卫星控制中心" },
+          { id: 2, label: "全球测控网" },
+          { id: 3, label: "数据服务" },
+        ]}
+        renderStep={(s) => {
+          const t = (Date.now() / 600) % (Math.PI * 2);
+          const pulse = 0.5 + 0.5 * Math.sin(t);
+          if (s === 0)
+            return (
+              <>
+                {/* 大天线 */}
+                <path
+                  d="M200,100 Q240,30 280,100"
+                  fill="none"
+                  stroke="#f59e0b"
+                  strokeWidth="3"
+                />
+                <path
+                  d="M200,100 Q240,40 280,100"
+                  fill="#1e3a5f"
+                  stroke="#2563eb"
+                  strokeWidth="1"
+                  opacity="0.4"
+                />
+                <line
+                  x1="240"
+                  y1="100"
+                  x2="240"
+                  y2="120"
+                  stroke="#64748b"
+                  strokeWidth="3"
+                />
+                <rect
+                  x="220"
+                  y="120"
+                  width="40"
+                  height="12"
+                  rx="3"
+                  fill="#334155"
+                />
+                {/* 信号波 */}
+                {[0, 1, 2].map((i) => (
+                  <path
+                    key={i}
+                    d={`M${170 - i * 15},${85 - i * 10} Q240,${60 - i * 12} ${310 + i * 15},${85 - i * 10}`}
+                    fill="none"
+                    stroke="#38bdf8"
+                    strokeWidth={1 - i * 0.2}
+                    strokeDasharray="6 3"
+                    opacity={0.4 + 0.5 * pulse}
+                  />
+                ))}
+                <text
+                  x="240"
+                  y="148"
+                  textAnchor="middle"
+                  fontSize="9"
+                  fill="#f59e0b"
+                  fontWeight="600"
+                >
+                  9m口径相控阵测控站，S/X/Ka三频
+                </text>
+                <W
+                  title="测控站是卫星在轨的生命线"
+                  line1="四创电子/七一二提供全套测控设备，"
+                  line2="遥测/遥控/跟踪一体化，实时监控卫星状态。"
+                  color="#f59e0b"
+                />
+              </>
+            );
+          if (s === 1)
+            return (
+              <>
+                {[
+                  {
+                    x: 80,
+                    y: 20,
+                    label: "轨道确定",
+                    desc: "精轨计算，μm精度",
+                    c: "#38bdf8",
+                  },
+                  {
+                    x: 280,
+                    y: 20,
+                    label: "姿态控制",
+                    desc: "遥控指令上注",
+                    c: "#818cf8",
+                  },
+                  {
+                    x: 80,
+                    y: 90,
+                    label: "健康监测",
+                    desc: "实时遥测数据分析",
+                    c: "#10b981",
+                  },
+                  {
+                    x: 280,
+                    y: 90,
+                    label: "任务规划",
+                    desc: "成像/通信调度",
+                    c: "#f59e0b",
+                  },
+                ].map((nd) => (
+                  <g key={nd.label}>
+                    <rect
+                      x={nd.x}
+                      y={nd.y}
+                      width="160"
+                      height="55"
+                      rx="8"
+                      fill="#1e293b"
+                      stroke={nd.c}
+                      strokeWidth="1.5"
+                      opacity={0.8 + 0.2 * pulse}
+                    />
+                    <text
+                      x={nd.x + 80}
+                      y={nd.y + 20}
+                      textAnchor="middle"
+                      fontSize="9"
+                      fill={nd.c}
+                      fontWeight="700"
+                    >
+                      {nd.label}
+                    </text>
+                    <text
+                      x={nd.x + 80}
+                      y={nd.y + 36}
+                      textAnchor="middle"
+                      fontSize="7.5"
+                      fill="#64748b"
+                    >
+                      {nd.desc}
+                    </text>
+                  </g>
+                ))}
+                <W
+                  title="MOC是卫星运营的神经中枢"
+                  line1="中国卫星/航天电子运营百颗卫星的测控网，"
+                  line2="自动化MOC系统每天处理百万条遥测数据。"
+                  color="#38bdf8"
+                />
+              </>
+            );
+          if (s === 2)
+            return (
+              <>
+                <circle
+                  cx="240"
+                  cy="85"
+                  r="55"
+                  fill="#0f2037"
+                  stroke="#1e3a5f"
+                  strokeWidth="1.5"
+                />
+                {[
+                  { angle: -60, label: "北京站" },
+                  { angle: 0, label: "喀什站" },
+                  { angle: 60, label: "三亚站" },
+                  { angle: 150, label: "纳米比亚" },
+                  { angle: 210, label: "巴基斯坦" },
+                ].map(({ angle, label }, i) => {
+                  const rad = (angle * Math.PI) / 180;
+                  const cx = 240 + 100 * Math.cos(rad);
+                  const cy = 85 + 55 * Math.sin(rad);
+                  return (
+                    <g key={label}>
+                      <circle
+                        cx={cx}
+                        cy={cy}
+                        r="6"
+                        fill="#1e293b"
+                        stroke="#f59e0b"
+                        strokeWidth="1.5"
+                        opacity={0.8 + 0.2 * pulse}
+                      />
+                      <text
+                        x={cx}
+                        y={cy + 14}
+                        textAnchor="middle"
+                        fontSize="7"
+                        fill="#94a3b8"
+                      >
+                        {label}
+                      </text>
+                      <line
+                        x1={240 + 40 * Math.cos(rad)}
+                        y1={85 + 22 * Math.sin(rad)}
+                        x2={cx - 5 * Math.cos(rad)}
+                        y2={cy - 3 * Math.sin(rad)}
+                        stroke="#818cf8"
+                        strokeWidth="0.8"
+                        opacity={0.3 + 0.4 * pulse}
+                        strokeDasharray="4 3"
+                      />
+                    </g>
+                  );
+                })}
+                <text
+                  x="240"
+                  y="20"
+                  textAnchor="middle"
+                  fontSize="9"
+                  fill="#818cf8"
+                  fontWeight="600"
+                >
+                  全弧段测控：国内3站+海外2站
+                </text>
+                <W
+                  title="全球测控网保障卫星全生命周期"
+                  line1="中国测控网已覆盖三大洋，"
+                  line2={'巴基斯坦/纳米比亚站为"一带一路"海外节点。'}
+                  color="#818cf8"
+                />
+              </>
+            );
+          return (
+            <>
+              {[
+                {
+                  x: 80,
+                  y: 20,
+                  icon: "📡",
+                  label: "测控服务",
+                  desc: "商业卫星运控外包",
+                },
+                {
+                  x: 230,
+                  y: 20,
+                  icon: "📊",
+                  label: "遥测数据",
+                  desc: "卫星健康数据分析",
+                },
+                {
+                  x: 370,
+                  y: 20,
+                  icon: "🛰️",
+                  label: "在轨运营",
+                  desc: "姿轨控/寿命管理",
+                },
+                {
+                  x: 150,
+                  y: 85,
+                  icon: "☁️",
+                  label: "云测控",
+                  desc: "SaaS化测控服务",
+                },
+                {
+                  x: 300,
+                  y: 85,
+                  icon: "🔒",
+                  label: "安全通信",
+                  desc: "量子/加密上行链路",
+                },
+              ].map((a) => (
+                <g key={a.label}>
+                  <rect
+                    x={a.x}
+                    y={a.y}
+                    width="100"
+                    height="50"
+                    rx="8"
+                    fill="#1e293b"
+                    stroke="#6366f1"
+                    strokeWidth="1.5"
+                    opacity={0.85 + 0.15 * pulse}
+                  />
+                  <text x={a.x + 12} y={a.y + 18} fontSize="13">
+                    {a.icon}
+                  </text>
+                  <text
+                    x={a.x + 30}
+                    y={a.y + 17}
+                    fontSize="8.5"
+                    fill="#818cf8"
+                    fontWeight="700"
+                  >
+                    {a.label}
+                  </text>
+                  <text x={a.x + 8} y={a.y + 34} fontSize="7.5" fill="#94a3b8">
+                    {a.desc}
+                  </text>
+                </g>
+              ))}
+              <text
+                x="240"
+                y="155"
+                textAnchor="middle"
+                fontSize="9"
+                fill="#fbbf24"
+                fontWeight="600"
+              >
+                商业测控服务：低轨星座爆发新机遇
+              </text>
+              <W
+                title="商业测控是星座时代新兴市场"
+                line1="G60等千颗星座推动测控需求100倍增长，"
+                line2="四创电子/七一二布局商业测控服务。"
+                color="#6366f1"
+              />
+            </>
+          );
+        }}
+      />
+    );
+  }
+
+  // 默认回退：全景动画
+  return (
+    <IA
+      isLight={isLight}
+      title="商业航天产业链全流程"
+      steps={AEROSPACE_STEPS}
+      renderStep={(s) => <AerospaceStep step={s} />}
+    />
+  );
+}

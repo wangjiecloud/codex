@@ -1,0 +1,26 @@
+<script>
+var custsize = "0";
+var w = "";
+var h = "";
+var imageurl = "//g1.dfcfw.com/g4/202410/20241015120832.png";
+var monitorurl = "https://";
+var adflagshow = "0";
+
+if (custsize=='0')
+{
+	w="890";
+	h="60";
+}
+var html = '<div  style="width:'+w+'px;height:'+h+'px;border:none;padding:0px;margin:0px;overflow:hidden;position:relative;"><a href="//same.eastmoney.com/c?z=eastmoney&la=0&si=1&cg=39&c=1801&ci=481&or=3441&l=17666&bg=17667&b=20248&u=https%3A%2F%2Facttg.eastmoney.com%2Fpub%2Fwebtg_hskh_act_zixun_01_01_01_0" target="_blank"><img src="'+imageurl+'" style="width:'+w+'px;height:'+h+'px;border:none;" /></a>';
+if (adflagshow=="1")
+{
+	html += '<div style=display:block;position:absolute;width:29px;height:16px;line-height:16px;bottom:0;left:0;><img src=//g1.dfcfw.com/g3/201806/20180614172756.png border=0 /></div>'
+}
+if (monitorurl!="")
+{
+	html += '<img src="'+monitorurl+'" width="0" height="0" style="display:none"/>';
+}
+html += "</div>";
+
+document.write(html)
+</script>

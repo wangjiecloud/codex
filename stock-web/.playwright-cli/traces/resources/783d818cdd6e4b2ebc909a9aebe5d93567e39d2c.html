@@ -1,0 +1,26 @@
+<script>
+var custsize = "0";
+var w = "";
+var h = "";
+var imageurl = "//g1.dfcfw.com/g4/202508/20250821174104.png";
+var monitorurl = "https://";
+var adflagshow = "0";
+
+if (custsize=='0')
+{
+	w="1200";
+	h="110";
+}
+var html = '<div  style="width:'+w+'px;height:'+h+'px;border:none;padding:0px;margin:0px;overflow:hidden;position:relative;"><a href="//same.eastmoney.com/c?z=eastmoney&la=0&si=1&cg=39&c=1708&ci=1&or=3841&l=17026&bg=17027&b=19530&u=https%3A%2F%2Fzqhd.18.cn%2Findex.html%3Fad_id%3Dwebtg_hskh_act_gbzwy1tz_01_01_01_0" target="_blank"><img src="'+imageurl+'" style="width:'+w+'px;height:'+h+'px;border:none;" /></a>';
+if (adflagshow=="1")
+{
+	html += '<div style=display:block;position:absolute;width:29px;height:16px;line-height:16px;bottom:0;left:0;><img src=//g1.dfcfw.com/g3/201806/20180614172756.png border=0 /></div>'
+}
+if (monitorurl!="")
+{
+	html += '<img src="'+monitorurl+'" width="0" height="0" style="display:none"/>';
+}
+html += "</div>";
+
+document.write(html)
+</script>

@@ -1,0 +1,16 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e3]:
+    - generic [ref=e4]:
+      - img [ref=e5]
+      - generic [ref=e7]: 身份核实
+    - img [ref=e9]
+    - generic [ref=e13]:
+      - generic [ref=e15]: 拖动下方滑块完成拼图
+      - generic [ref=e128]: 拖动左边滑块完成上方拼图
+  - generic [ref=e134]:
+    - img [ref=e135] [cursor=pointer]
+    - img [ref=e136]
+    - link [ref=e137] [cursor=pointer]:
+      - /url: "#"
+  - iframe [ref=e139]:
+    

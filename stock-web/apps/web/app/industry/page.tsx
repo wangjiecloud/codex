@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   ChevronRight,
   Factory,
@@ -11,6 +11,8 @@ import {
   X,
   Network,
   Building2,
+  Bot,
+  Rocket,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -33,9 +35,14 @@ const ICONS: Record<string, React.ElementType> = {
 
 export default function IndustryPage() {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<"ai_infra" | "company">(
-    "ai_infra",
-  );
+  const searchParams = useSearchParams();
+  const [activeTab, setActiveTab] = useState<
+    "ai_infra" | "company" | "humanoid" | "aerospace"
+  >(() => {
+    const t = searchParams.get("tab");
+    if (t === "humanoid" || t === "aerospace" || t === "company") return t;
+    return "ai_infra";
+  });
   const [industries, setIndustries] = useState<Industry[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -45,6 +52,8 @@ export default function IndustryPage() {
     (i) => (i.tab || "ai_infra") === "ai_infra",
   );
   const companyList = industries.filter((i) => i.tab === "company");
+  const humanoidList = industries.filter((i) => i.tab === "humanoid");
+  const aerospaceList = industries.filter((i) => i.tab === "aerospace");
 
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<
@@ -344,6 +353,38 @@ export default function IndustryPage() {
           <Building2 size={14} />
           企业
         </button>
+        <button
+          onClick={() => setActiveTab("humanoid")}
+          className={cn(
+            "flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-all",
+            activeTab === "humanoid"
+              ? "border-[#f5a623] text-[#f5a623]"
+              : "border-transparent",
+          )}
+          style={{
+            color:
+              activeTab === "humanoid" ? "#f5a623" : "var(--text-secondary)",
+          }}
+        >
+          <Bot size={14} />
+          人形机器人
+        </button>
+        <button
+          onClick={() => setActiveTab("aerospace")}
+          className={cn(
+            "flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-all",
+            activeTab === "aerospace"
+              ? "border-[#f5a623] text-[#f5a623]"
+              : "border-transparent",
+          )}
+          style={{
+            color:
+              activeTab === "aerospace" ? "#f5a623" : "var(--text-secondary)",
+          }}
+        >
+          <Rocket size={14} />
+          商业航天
+        </button>
       </div>
 
       {activeTab === "ai_infra" && (
@@ -500,6 +541,89 @@ export default function IndustryPage() {
               </button>
             </div>
           ))}
+        </div>
+      )}
+
+      {(activeTab === "humanoid" || activeTab === "aerospace") && (
+        <div className="space-y-3">
+          {(activeTab === "humanoid" ? humanoidList : aerospaceList).map(
+            (industry) => {
+              const Icon =
+                ICONS[industry.icon] ||
+                (activeTab === "humanoid" ? Bot : Rocket);
+              return (
+                <div
+                  key={industry.id}
+                  className="border rounded-xl overflow-hidden hover:border-[#f5a623]/30 transition-all group"
+                  style={{
+                    background: "var(--bg-secondary)",
+                    borderColor: "var(--border-color)",
+                  }}
+                >
+                  <button
+                    onClick={() => router.push(`/industry/${industry.id}`)}
+                    className="w-full p-5 text-left"
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-start gap-4 flex-1">
+                        <div className="w-10 h-10 rounded-lg bg-[#f5a623]/10 flex items-center justify-center shrink-0 mt-0.5 text-xl">
+                          {industry.icon}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-3 mb-1">
+                            <h3
+                              className="font-medium"
+                              style={{ color: "var(--text-primary)" }}
+                            >
+                              {industry.name}
+                            </h3>
+                            <span
+                              className="text-xs"
+                              style={{ color: "var(--text-tertiary)" }}
+                            >
+                              产业链企业 {industry.companyCount} 家 · 上次分析{" "}
+                              {industry.lastAnalyzed}
+                            </span>
+                          </div>
+                          <p
+                            className="text-sm leading-relaxed mb-3 line-clamp-2"
+                            style={{ color: "var(--text-secondary)" }}
+                          >
+                            {industry.description}
+                          </p>
+                          <div className="flex items-center gap-2">
+                            <span
+                              className="text-xs"
+                              style={{ color: "var(--text-tertiary)" }}
+                            >
+                              代表企业：
+                            </span>
+                            {industry.representatives.slice(0, 4).map((r) => (
+                              <span
+                                key={r}
+                                className="text-xs px-2 py-0.5 rounded"
+                                style={{
+                                  color: "var(--text-secondary)",
+                                  background: "var(--bg-tertiary)",
+                                }}
+                              >
+                                {r}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                      <ChevronRight
+                        size={18}
+                        className="ml-4 mt-1 transition-colors group-hover:text-[#f5a623]"
+                        style={{ color: "var(--text-tertiary)" }}
+                      />
+                    </div>
+                  </button>
+                </div>
+              );
+            },
+          )}
         </div>
       )}
 

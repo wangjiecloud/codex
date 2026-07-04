@@ -27,4 +27,19 @@
     // Python 解释器配置（股票项目）
     "python.defaultInterpreterPath": "${workspaceFolder}/stock-web/apps/data-service/.venv/bin/python",
     "python.terminal.activateEnvironment": true,
+    // Terminal 配置（修复终端启动问题）
+    "terminal.integrated.enablePersistentSessions": false,
+    "terminal.integrated.persistentSessionReviveProcess": "never",
+    "terminal.integrated.shellIntegration.enabled": false,
+    "terminal.integrated.defaultProfile.osx": "zsh",
+    "terminal.integrated.profiles.osx": {
+        "zsh": {
+            "path": "/bin/zsh",
+            "args": ["-l"]
+        },
+        "bash": {
+            "path": "/bin/bash",
+            "args": ["-l"]
+        }
+    }
 }

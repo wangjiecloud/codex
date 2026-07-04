@@ -10,11 +10,11 @@ export async function GET(
   const { code } = await params;
   const { searchParams } = new URL(req.url);
   const period = searchParams.get("period") || "daily";
-  const limit = searchParams.get("limit") || "200";
+  const count = searchParams.get("count") || searchParams.get("limit") || "200";
 
   try {
     const res = await fetch(
-      `${DATA_SERVICE_URL}/api/kline/${code}?period=${period}&limit=${limit}`,
+      `${DATA_SERVICE_URL}/api/kline/${code}?period=${period}&count=${count}`,
       { next: { revalidate: 60 } },
     );
     if (!res.ok) {

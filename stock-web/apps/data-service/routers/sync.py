@@ -264,6 +264,14 @@ def _run_full_sync():
             )
         return
 
+    # [5/5] 板块新闻同步
+    sched_log("info", "[5/5] 开始同步板块新闻...")
+    try:
+        from routers.theme import sync_theme_news as _sync_theme_news
+        _sync_theme_news()
+    except Exception as e:
+        sched_log("error", f"[5/5] 板块新闻同步失败: {e}")
+
     with _lock:
         _status.update(
             running=False,

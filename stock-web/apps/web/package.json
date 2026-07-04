@@ -10,8 +10,10 @@
   },
   "dependencies": {
     "@stock-web/agents": "file:../../packages/agents",
+    "@types/d3": "^7.4.3",
     "@xyflow/react": "^12.11.0",
     "clsx": "^2.1.1",
+    "d3": "^7.9.0",
     "lightweight-charts": "^5.2.0",
     "lucide-react": "^1.21.0",
     "next": "16.2.9",

@@ -251,11 +251,12 @@ def _sync_all_quotes():
                 sched_log("warning", "行情同步已被用户停止")
                 break
 
-            # Skip if stock already has today's quote data
+            # Skip if stock already has today's quote data (北京时间判断)
             q = quotes.get(raw_code)
             if q and q.updated_at:
-                quote_date = q.updated_at.date()
-                if quote_date >= date.today():
+                today_cst = (datetime.utcnow() + timedelta(hours=8)).date()
+                quote_date_cst = (q.updated_at + timedelta(hours=8)).date()
+                if quote_date_cst >= today_cst:
                     skipped_count += 1
                     with _lock:
                         _status["current"] = raw_code

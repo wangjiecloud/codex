@@ -149,6 +149,297 @@ function SwIndustryMonitor() {
   );
 }
 
+interface ThemeNewsStat {
+  themeId: string;
+  themeName: string;
+  count: number;
+  latestPubTime: string | null;
+  lastSync: string | null;
+}
+
+function ThemeNewsMonitor() {
+  const [total, setTotal] = useState(0);
+  const [syncing, setSyncing] = useState(false);
+  const [lastSync, setLastSync] = useState<string | null>(null);
+  const [themeCount, setThemeCount] = useState(0);
+
+  const fetchStats = async () => {
+    try {
+      const r = await fetch("http://localhost:8000/api/theme/news-stats");
+      if (r.ok) {
+        const data = await r.json();
+        setTotal(data.total || 0);
+        setSyncing(data.syncing || false);
+        setThemeCount((data.themes || []).length);
+        // 取最新同步时间
+        const times = (data.themes || [])
+          .map((t: ThemeNewsStat) => t.lastSync)
+          .filter(Boolean);
+        if (times.length > 0) {
+          const latest = times.sort().reverse()[0];
+          setLastSync(latest);
+        }
+      }
+    } catch {}
+  };
+
+  const handleSync = async () => {
+    setSyncing(true);
+    try {
+      await fetch("http://localhost:8000/api/theme/sync-news", {
+        method: "POST",
+      });
+      setTimeout(fetchStats, 3000);
+      setTimeout(fetchStats, 10000);
+    } catch {
+    } finally {
+      setTimeout(() => setSyncing(false), 2000);
+    }
+  };
+
+  useEffect(() => {
+    fetchStats();
+    const interval = setInterval(fetchStats, 10000);
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <div className="bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-xl p-5">
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-base font-semibold text-[var(--text-primary)] flex items-center gap-2">
+          <Zap size={16} className="text-green-400" />
+          板块新闻
+        </h2>
+        <button
+          onClick={handleSync}
+          disabled={syncing}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-green-500/10 border border-green-500/30 text-green-400 rounded-lg hover:bg-green-500/20 transition-colors disabled:opacity-40"
+        >
+          <RefreshCw size={12} className={syncing ? "animate-spin" : ""} />
+          {syncing ? "同步中..." : "立即同步"}
+        </button>
+      </div>
+      <div className="text-xs text-[var(--text-tertiary)] mb-4">
+        每 15 分钟自动增量同步同花顺热门板块/主题新闻（标题+时间），存入数据库。
+      </div>
+      <div className="flex gap-6">
+        <div className="bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg p-4 flex-1">
+          <div className="text-xs text-[var(--text-tertiary)] mb-1">
+            总新闻条数
+          </div>
+          <div className="text-2xl font-bold text-[var(--text-primary)]">
+            {total > 0 ? total.toLocaleString() : "--"}
+          </div>
+        </div>
+        <div className="bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg p-4 flex-1">
+          <div className="text-xs text-[var(--text-tertiary)] mb-1">
+            已收录板块
+          </div>
+          <div className="text-2xl font-bold text-[var(--text-primary)]">
+            {themeCount > 0 ? themeCount : "--"}
+          </div>
+        </div>
+        <div className="bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg p-4 flex-1">
+          <div className="text-xs text-[var(--text-tertiary)] mb-1">
+            最近同步
+          </div>
+          <div className="text-sm text-[var(--text-secondary)]">
+            {lastSync
+              ? new Date(lastSync)
+                  .toLocaleString("zh-CN", { hour12: false })
+                  .slice(5)
+              : "--"}
+          </div>
+        </div>
+        <div className="bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg p-4 flex-1">
+          <div className="text-xs text-[var(--text-tertiary)] mb-1">
+            同步频率
+          </div>
+          <div className="text-sm text-[var(--text-secondary)]">每 15 分钟</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface GubaStat {
+  newsCount: number;
+  noticeCount: number;
+  stockCount: number;
+  lastSync: string | null;
+  syncing: boolean;
+}
+
+function GubaMonitor() {
+  const [stat, setStat] = useState<GubaStat>({
+    newsCount: 0,
+    noticeCount: 0,
+    stockCount: 0,
+    lastSync: null,
+    syncing: false,
+  });
+  const [syncing, setSyncing] = useState(false);
+  const [syncProgress, setSyncProgress] = useState<{
+    done: number;
+    total: number;
+    current: string;
+  } | null>(null);
+
+  const fetchStats = async () => {
+    try {
+      const r = await fetch("http://localhost:8000/api/guba/stats/summary");
+      if (r.ok) {
+        const data = await r.json();
+        setStat(data);
+        if (data.syncing) setSyncing(true);
+        else setSyncing(false);
+      }
+    } catch {}
+  };
+
+  const fetchSyncProgress = async () => {
+    try {
+      const r = await fetch("http://localhost:8000/api/guba/sync/status");
+      if (r.ok) {
+        const data = await r.json();
+        if (data.running) {
+          setSyncing(true);
+          setSyncProgress({
+            done: data.done ?? 0,
+            total: data.total ?? 0,
+            current: data.current ?? "",
+          });
+        } else {
+          if (syncing) fetchStats(); // 刚完成时刷新统计
+          setSyncing(false);
+          setSyncProgress(null);
+        }
+      }
+    } catch {}
+  };
+
+  const handleSync = async () => {
+    setSyncing(true);
+    setSyncProgress(null);
+    try {
+      await fetch("http://localhost:8000/api/guba/sync", { method: "POST" });
+    } catch {}
+  };
+
+  // 同步中时每2秒轮询进度，平时每10秒刷新统计
+  useEffect(() => {
+    fetchStats();
+    fetchSyncProgress();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (syncing) {
+      const t = setInterval(fetchSyncProgress, 2000);
+      return () => clearInterval(t);
+    } else {
+      const t = setInterval(fetchStats, 10000);
+      return () => clearInterval(t);
+    }
+  }, [syncing]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const progress =
+    syncProgress && syncProgress.total > 0
+      ? Math.round((syncProgress.done / syncProgress.total) * 100)
+      : 0;
+
+  return (
+    <div className="bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-xl p-5">
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-base font-semibold text-[var(--text-primary)] flex items-center gap-2">
+          <Activity size={16} className="text-orange-400" />
+          股吧资讯与公告
+        </h2>
+        <button
+          onClick={handleSync}
+          disabled={syncing}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-orange-500/10 border border-orange-500/30 text-orange-400 rounded-lg hover:bg-orange-500/20 transition-colors disabled:opacity-40"
+        >
+          <RefreshCw size={12} className={syncing ? "animate-spin" : ""} />
+          {syncing ? "同步中..." : "一键同步全部"}
+        </button>
+      </div>
+
+      {/* 同步进度条 */}
+      {syncing && syncProgress && (
+        <div className="mb-4 p-3 bg-orange-500/5 border border-orange-500/20 rounded-lg">
+          <div className="flex items-center justify-between text-xs mb-1.5">
+            <span className="text-orange-400 font-medium">
+              正在同步股吧数据...
+            </span>
+            <span className="text-[var(--text-tertiary)] tabular-nums">
+              {syncProgress.done}/{syncProgress.total} ({progress}%)
+            </span>
+          </div>
+          <div className="w-full bg-[var(--bg-tertiary)] rounded-full h-1.5 overflow-hidden mb-1.5">
+            <div
+              className="h-full bg-gradient-to-r from-orange-500 to-amber-400 transition-all duration-500"
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+          {syncProgress.current && (
+            <div className="text-[10px] text-[var(--text-tertiary)] truncate">
+              当前：{syncProgress.current}
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="text-xs text-[var(--text-tertiary)] mb-4">
+        每日 17:30 自动从东方财富股吧拉取各股票资讯与公告，存入数据库。
+      </div>
+      <div className="flex gap-6">
+        <div className="bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg p-4 flex-1">
+          <div className="text-xs text-[var(--text-tertiary)] mb-1">
+            资讯条数
+          </div>
+          <div className="text-2xl font-bold text-[var(--text-primary)]">
+            {stat.newsCount > 0 ? stat.newsCount.toLocaleString() : "--"}
+          </div>
+        </div>
+        <div className="bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg p-4 flex-1">
+          <div className="text-xs text-[var(--text-tertiary)] mb-1">
+            公告条数
+          </div>
+          <div className="text-2xl font-bold text-[var(--text-primary)]">
+            {stat.noticeCount > 0 ? stat.noticeCount.toLocaleString() : "--"}
+          </div>
+        </div>
+        <div className="bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg p-4 flex-1">
+          <div className="text-xs text-[var(--text-tertiary)] mb-1">
+            已覆盖股票
+          </div>
+          <div className="text-2xl font-bold text-[var(--text-primary)]">
+            {stat.stockCount > 0 ? stat.stockCount : "--"}
+          </div>
+        </div>
+        <div className="bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg p-4 flex-1">
+          <div className="text-xs text-[var(--text-tertiary)] mb-1">
+            最近同步
+          </div>
+          <div className="text-sm text-[var(--text-secondary)]">
+            {stat.lastSync
+              ? new Date(stat.lastSync)
+                  .toLocaleString("zh-CN", { hour12: false })
+                  .slice(5)
+              : "--"}
+          </div>
+        </div>
+        <div className="bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg p-4 flex-1">
+          <div className="text-xs text-[var(--text-tertiary)] mb-1">
+            同步频率
+          </div>
+          <div className="text-sm text-[var(--text-secondary)]">每日 17:30</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function SystemMonitorPage() {
   const [stats, setStats] = useState<SystemStats>({
     totalStocks: 0,
@@ -465,7 +756,7 @@ export default function SystemMonitorPage() {
     setCurrentSyncType("full");
     addLog(
       "info",
-      "开始一键全量刷新：行情+申万板块 → 基本信息 → 财务数据 → 快讯",
+      "开始一键全量刷新：行情+申万板块 → 基本信息 → 财务数据 → 快讯 → 板块新闻",
     );
 
     try {
@@ -519,6 +810,36 @@ export default function SystemMonitorPage() {
         await new Promise((resolve) => setTimeout(resolve, 5000));
         await fetchFlashStats();
         addLog("success", "快讯同步完成");
+      }
+
+      addLog("info", "[5/5] 同步板块新闻...");
+      try {
+        const themeNewsResponse = await fetch(
+          "http://localhost:8000/api/theme/sync-news",
+          { method: "POST" },
+        );
+        if (themeNewsResponse.ok) {
+          addLog("info", "板块新闻同步已启动，后台增量抓取中...");
+          await new Promise((resolve) => setTimeout(resolve, 8000));
+          addLog("success", "板块新闻同步完成");
+        }
+      } catch (e) {
+        addLog("error", `板块新闻同步失败: ${e}`);
+      }
+
+      addLog("info", "[6/6] 同步股吧资讯与公告...");
+      try {
+        const gubaResponse = await fetch(
+          "http://localhost:8000/api/guba/sync",
+          {
+            method: "POST",
+          },
+        );
+        if (gubaResponse.ok) {
+          addLog("info", "股吧资讯同步已启动（后台批量抓取，耗时较长）...");
+        }
+      } catch (e) {
+        addLog("error", `股吧资讯同步失败: ${e}`);
       }
 
       addLog("success", "✨ 一键全量刷新完成！所有数据已更新");
@@ -999,6 +1320,12 @@ export default function SystemMonitorPage() {
 
         {/* SW Industry Monitor */}
         <SwIndustryMonitor />
+
+        {/* Theme News Monitor */}
+        <ThemeNewsMonitor />
+
+        {/* Guba Monitor */}
+        <GubaMonitor />
 
         {/* Sync Control */}
         <div className="bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-xl p-5">

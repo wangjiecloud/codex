@@ -1,0 +1,816 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Midea DevSecOps - 系统管理</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      body {
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+          "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+        background: #f5f6fa;
+        color: #333;
+        font-size: 14px;
+      }
+
+      /* Header */
+      .header {
+        background: #fff;
+        border-bottom: 1px solid #e8e8e8;
+        display: flex;
+        align-items: center;
+        height: 48px;
+        padding: 0 20px;
+        position: sticky;
+        top: 0;
+        z-index: 100;
+      }
+      .logo {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-right: 32px;
+      }
+      .logo svg {
+        width: 28px;
+        height: 28px;
+      }
+      .logo-text {
+        font-size: 16px;
+        font-weight: 600;
+        color: #1a73e8;
+      }
+      .logo-text span {
+        color: #333;
+      }
+      .nav {
+        display: flex;
+        align-items: center;
+        gap: 0;
+        flex: 1;
+      }
+      .nav-item {
+        padding: 0 18px;
+        height: 48px;
+        line-height: 48px;
+        cursor: pointer;
+        font-size: 14px;
+        color: #555;
+        position: relative;
+        transition: color 0.2s;
+      }
+      .nav-item:hover {
+        color: #1a73e8;
+      }
+      .nav-item.active {
+        color: #1a73e8;
+        font-weight: 500;
+      }
+      .nav-item.active::after {
+        content: "";
+        position: absolute;
+        bottom: 0;
+        left: 18px;
+        right: 18px;
+        height: 2px;
+        background: #1a73e8;
+      }
+      .badge {
+        position: absolute;
+        top: 6px;
+        right: 8px;
+        background: #f5222d;
+        color: #fff;
+        font-size: 10px;
+        min-width: 16px;
+        height: 16px;
+        line-height: 16px;
+        text-align: center;
+        border-radius: 8px;
+        padding: 0 4px;
+      }
+      .header-right {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        margin-left: auto;
+      }
+      .header-icon {
+        cursor: pointer;
+        color: #666;
+        font-size: 18px;
+      }
+      .header-icon:hover {
+        color: #1a73e8;
+      }
+      .user-info {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        cursor: pointer;
+      }
+      .avatar {
+        width: 30px;
+        height: 30px;
+        border-radius: 50%;
+        background: #e0e0e0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 14px;
+        color: #666;
+      }
+      .user-name {
+        font-size: 13px;
+        color: #555;
+      }
+
+      /* Toolbar */
+      .toolbar {
+        background: #fff;
+        padding: 16px 24px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        border-bottom: 1px solid #e8e8e8;
+      }
+      .btn {
+        padding: 6px 16px;
+        border-radius: 4px;
+        font-size: 13px;
+        cursor: pointer;
+        border: 1px solid #d9d9d9;
+        background: #fff;
+        color: #333;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        transition: all 0.2s;
+      }
+      .btn:hover {
+        border-color: #1a73e8;
+        color: #1a73e8;
+      }
+      .btn-primary {
+        background: #1a73e8;
+        color: #fff;
+        border-color: #1a73e8;
+      }
+      .btn-primary:hover {
+        background: #1565c0;
+        border-color: #1565c0;
+        color: #fff;
+      }
+      .btn-outline {
+        background: #fff;
+      }
+      .filter-select {
+        padding: 6px 32px 6px 12px;
+        border: 1px solid #d9d9d9;
+        border-radius: 4px;
+        font-size: 13px;
+        color: #999;
+        background: #fff;
+        appearance: none;
+        cursor: pointer;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 5l3 3 3-3' fill='none' stroke='%23999' stroke-width='1.5'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: right 10px center;
+      }
+      .toolbar-right {
+        margin-left: auto;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .link-blue {
+        color: #1a73e8;
+        font-size: 13px;
+        text-decoration: none;
+        cursor: pointer;
+      }
+      .link-blue:hover {
+        text-decoration: underline;
+      }
+      .help-icon {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        border: 1px solid #1a73e8;
+        color: #1a73e8;
+        font-size: 11px;
+        cursor: pointer;
+      }
+
+      /* Table Container */
+      .table-container {
+        background: #fff;
+        margin: 0;
+      }
+      .table-wrapper {
+        overflow-x: auto;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        min-width: 1200px;
+      }
+      thead th {
+        background: #fafafa;
+        padding: 12px 16px;
+        text-align: left;
+        font-weight: 500;
+        font-size: 13px;
+        color: #333;
+        border-bottom: 1px solid #e8e8e8;
+        white-space: nowrap;
+      }
+      tbody td {
+        padding: 12px 16px;
+        border-bottom: 1px solid #f0f0f0;
+        font-size: 13px;
+        color: #555;
+        vertical-align: middle;
+      }
+      tbody tr:hover {
+        background: #f5f8ff;
+      }
+      .col-system-name {
+        min-width: 200px;
+      }
+      .col-product {
+        min-width: 160px;
+      }
+      .col-dept {
+        min-width: 160px;
+      }
+      .col-owner {
+        min-width: 160px;
+      }
+      .col-code {
+        min-width: 140px;
+      }
+      .col-id {
+        min-width: 200px;
+      }
+      .col-scene {
+        min-width: 100px;
+      }
+      .col-actions {
+        min-width: 80px;
+      }
+
+      /* Filter inputs in header */
+      .filter-input {
+        width: 100%;
+        padding: 4px 8px;
+        border: 1px solid #d9d9d9;
+        border-radius: 4px;
+        font-size: 12px;
+        color: #999;
+        margin-top: 6px;
+      }
+      .filter-input:focus {
+        border-color: #1a73e8;
+        outline: none;
+      }
+      .filter-select-header {
+        width: 100%;
+        padding: 4px 28px 4px 8px;
+        border: 1px solid #d9d9d9;
+        border-radius: 4px;
+        font-size: 12px;
+        color: #999;
+        margin-top: 6px;
+        appearance: none;
+        background: #fff
+          url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 12 12'%3E%3Cpath d='M3 5l3 3 3-3' fill='none' stroke='%23999' stroke-width='1.5'/%3E%3C/svg%3E")
+          no-repeat right 8px center;
+        cursor: pointer;
+      }
+
+      .action-icons {
+        display: flex;
+        gap: 8px;
+      }
+      .action-icon {
+        cursor: pointer;
+        color: #1a73e8;
+        font-size: 15px;
+      }
+      .action-icon.star-filled {
+        color: #1a73e8;
+      }
+      .action-icon.star-empty {
+        color: #d9d9d9;
+      }
+      .action-icon:hover {
+        opacity: 0.7;
+      }
+
+      .text-ellipsis {
+        max-width: 200px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        display: inline-block;
+      }
+      .text-dash {
+        color: #ccc;
+      }
+
+      /* Pagination */
+      .pagination-bar {
+        background: #fff;
+        padding: 16px 24px;
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 8px;
+        border-top: 1px solid #e8e8e8;
+      }
+      .pagination-bar .total {
+        font-size: 13px;
+        color: #666;
+        margin-right: 8px;
+      }
+      .page-btn {
+        min-width: 32px;
+        height: 32px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid #d9d9d9;
+        border-radius: 4px;
+        background: #fff;
+        cursor: pointer;
+        font-size: 13px;
+        color: #333;
+        transition: all 0.2s;
+      }
+      .page-btn:hover {
+        border-color: #1a73e8;
+        color: #1a73e8;
+      }
+      .page-btn.active {
+        background: #1a73e8;
+        color: #fff;
+        border-color: #1a73e8;
+      }
+      .page-btn.disabled {
+        color: #ccc;
+        cursor: not-allowed;
+      }
+      .page-size-select {
+        padding: 4px 8px;
+        border: 1px solid #d9d9d9;
+        border-radius: 4px;
+        font-size: 13px;
+      }
+      .jump-input {
+        width: 50px;
+        padding: 4px 8px;
+        border: 1px solid #d9d9d9;
+        border-radius: 4px;
+        font-size: 13px;
+        text-align: center;
+      }
+      .jump-label {
+        font-size: 13px;
+        color: #666;
+      }
+
+      /* Help Button */
+      .help-fab {
+        position: fixed;
+        bottom: 24px;
+        right: 24px;
+        width: 44px;
+        height: 44px;
+        border-radius: 50%;
+        background: #1a73e8;
+        color: #fff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 20px;
+        cursor: pointer;
+        box-shadow: 0 2px 8px rgba(26, 115, 232, 0.4);
+        z-index: 200;
+      }
+      .help-fab:hover {
+        background: #1565c0;
+      }
+      .help-fab-label {
+        position: fixed;
+        bottom: 72px;
+        right: 16px;
+        font-size: 12px;
+        color: #1a73e8;
+        cursor: pointer;
+        text-align: center;
+        z-index: 200;
+      }
+
+      /* Watermark */
+      .watermark {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+        z-index: 999;
+        opacity: 0.04;
+        font-size: 14px;
+        color: #000;
+        transform: rotate(-15deg);
+        display: flex;
+        flex-wrap: wrap;
+        align-content: flex-start;
+        gap: 120px 200px;
+        padding: 60px;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Watermark -->
+    <div class="watermark" id="watermark"></div>
+
+    <!-- Header -->
+    <header class="header">
+      <div class="logo">
+        <svg viewBox="0 0 28 28" fill="none">
+          <circle cx="14" cy="14" r="13" stroke="#1a73e8" stroke-width="2" />
+          <path
+            d="M8 14c0-3.3 2.7-6 6-6s6 2.7 6 6"
+            stroke="#1a73e8"
+            stroke-width="2"
+            stroke-linecap="round"
+          />
+          <circle cx="14" cy="14" r="2" fill="#1a73e8" />
+        </svg>
+        <div class="logo-text">Midea <span>DevSecOps</span></div>
+      </div>
+      <nav class="nav">
+        <div class="nav-item">工作台</div>
+        <div class="nav-item active">系统<span class="badge">32</span></div>
+        <div class="nav-item">团队</div>
+        <div class="nav-item">统计</div>
+        <div class="nav-item">共享用例库</div>
+        <div class="nav-item">知识库</div>
+        <div class="nav-item">ITTMP运营门户</div>
+      </nav>
+      <div class="header-right">
+        <span class="header-icon">&#128269;</span>
+        <span class="header-icon">&#128247;</span>
+        <span class="header-icon">&#9881;</span>
+        <span class="header-icon">&#128218;</span>
+        <span class="header-icon">&#127760;</span>
+        <div class="user-info">
+          <div class="avatar">&#128100;</div>
+          <span class="user-name">yipp2</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Toolbar -->
+    <div class="toolbar">
+      <button class="btn btn-primary">+ 新建系统</button>
+      <button class="btn btn-outline">+ 导入系统</button>
+      <button class="btn btn-outline">&#9662; 筛选</button>
+      <select class="filter-select">
+        <option>所有的</option>
+      </select>
+      <div class="toolbar-right">
+        <a class="link-blue">权限申请</a>
+        <span class="help-icon">?</span>
+      </div>
+    </div>
+
+    <!-- Table -->
+    <div class="table-container">
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th class="col-system-name">
+                系统名称
+                <div>
+                  <input
+                    class="filter-input"
+                    placeholder="请输入搜索关键词，按下Enter进行搜索"
+                  />
+                </div>
+              </th>
+              <th class="col-product">
+                所属产品
+                <div>
+                  <select class="filter-select-header">
+                    <option>请选择</option>
+                  </select>
+                </div>
+              </th>
+              <th class="col-dept">
+                所属部门
+                <div>
+                  <select class="filter-select-header">
+                    <option>请选择</option>
+                  </select>
+                </div>
+              </th>
+              <th class="col-owner">负责人</th>
+              <th class="col-code">系统编码</th>
+              <th class="col-id">系统ID</th>
+              <th class="col-scene">
+                使用场景
+                <div>
+                  <select class="filter-select-header">
+                    <option>请选择</option>
+                  </select>
+                </div>
+              </th>
+              <th class="col-actions">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Workspace推广</td>
+              <td class="text-dash">-</td>
+              <td>研发效能与智能办公</td>
+              <td>易平萍(yipp2)</td>
+              <td>workspace-promote</td>
+              <td>
+                <span class="text-ellipsis">95ed4d69522f4778868ef...</span>
+              </td>
+              <td class="text-dash">-</td>
+              <td>
+                <div class="action-icons">
+                  <span class="action-icon star-filled">&#9733;</span
+                  ><span class="action-icon">&#9998;</span
+                  ><span class="action-icon">&#128279;</span>
+                </div>
+              </td>
+            </tr>
+            <tr>
+              <td>DevSphere</td>
+              <td class="text-dash">-</td>
+              <td class="text-dash">-</td>
+              <td class="text-dash">-</td>
+              <td>devsphere</td>
+              <td>
+                <span class="text-ellipsis">1798460095ae472e9008...</span>
+              </td>
+              <td class="text-dash">-</td>
+              <td>
+                <div class="action-icons">
+                  <span class="action-icon star-filled">&#9733;</span
+                  ><span class="action-icon">&#9998;</span
+                  ><span class="action-icon">&#128279;</span>
+                </div>
+              </td>
+            </tr>
+            <tr>
+              <td>F-ITTMP</td>
+              <td>IPM智能产品</td>
+              <td>研发效能与智能办公</td>
+              <td>周阳(zhouyang83)</td>
+              <td>f-ittmp</td>
+              <td>ITS000001096</td>
+              <td>纯自用-集</td>
+              <td>
+                <div class="action-icons">
+                  <span class="action-icon star-filled">&#9733;</span
+                  ><span class="action-icon">&#128279;</span>
+                </div>
+              </td>
+            </tr>
+            <tr>
+              <td>F-DevOps</td>
+              <td>IPM智能产品</td>
+              <td>研发效能与智能办公</td>
+              <td>周阳(zhouyang83)</td>
+              <td>F-DevOps</td>
+              <td>ITS000000860</td>
+              <td>纯自用-集</td>
+              <td>
+                <div class="action-icons">
+                  <span class="action-icon star-filled">&#9733;</span
+                  ><span class="action-icon">&#128279;</span>
+                </div>
+              </td>
+            </tr>
+            <tr>
+              <td>sangfor-hids</td>
+              <td class="text-dash">-</td>
+              <td>信息安全</td>
+              <td>许晖敏(xuhm41)</td>
+              <td>sangfor-hids</td>
+              <td>
+                <span class="text-ellipsis">3edfa69a9579486da45e3...</span>
+              </td>
+              <td class="text-dash">-</td>
+              <td>
+                <div class="action-icons">
+                  <span class="action-icon star-empty">&#9734;</span
+                  ><span class="action-icon">&#9998;</span
+                  ><span class="action-icon">&#128279;</span>
+                </div>
+              </td>
+            </tr>
+            <tr>
+              <td>T-CmdbSpace</td>
+              <td>MM美的监控</td>
+              <td>云原生系统</td>
+              <td>刘府阳(liufy66)</td>
+              <td>t-CmdbSpace</td>
+              <td>ITS000000198</td>
+              <td class="text-dash">-</td>
+              <td>
+                <div class="action-icons">
+                  <span class="action-icon star-empty">&#9734;</span
+                  ><span class="action-icon">&#128279;</span>
+                </div>
+              </td>
+            </tr>
+            <tr>
+              <td>T-AIOPS</td>
+              <td>MM美的监控</td>
+              <td>云原生系统</td>
+              <td>张龙(zhanglong106)</td>
+              <td>t-AIOPS</td>
+              <td>ITS000000192</td>
+              <td class="text-dash">-</td>
+              <td>
+                <div class="action-icons">
+                  <span class="action-icon star-empty">&#9734;</span
+                  ><span class="action-icon">&#128279;</span>
+                </div>
+              </td>
+            </tr>
+            <tr>
+              <td>中立云POC</td>
+              <td class="text-dash">-</td>
+              <td>研发效能与智能办公</td>
+              <td>陈国辉(chengh15)</td>
+              <td>t-gnc</td>
+              <td>
+                <span class="text-ellipsis">41bf1953c29c4358b275...</span>
+              </td>
+              <td class="text-dash">-</td>
+              <td>
+                <div class="action-icons">
+                  <span class="action-icon star-empty">&#9734;</span
+                  ><span class="action-icon">&#9998;</span
+                  ><span class="action-icon">&#128279;</span>
+                </div>
+              </td>
+            </tr>
+            <tr>
+              <td>T-AAS</td>
+              <td>MSE微服务引擎</td>
+              <td>云原生系统</td>
+              <td>赖焕燃(laihr2)</td>
+              <td>t-AAS</td>
+              <td>ITS000000035</td>
+              <td class="text-dash">-</td>
+              <td>
+                <div class="action-icons">
+                  <span class="action-icon star-empty">&#9734;</span
+                  ><span class="action-icon">&#128279;</span>
+                </div>
+              </td>
+            </tr>
+            <tr>
+              <td>T-IRCP</td>
+              <td>T-AIDPAIGC开发者平台</td>
+              <td>AI产品与测试</td>
+              <td>陈柏宇(chenby22)</td>
+              <td>t-IRCP</td>
+              <td>ITS000000027</td>
+              <td class="text-dash">-</td>
+              <td>
+                <div class="action-icons">
+                  <span class="action-icon star-empty">&#9734;</span
+                  ><span class="action-icon">&#128279;</span>
+                </div>
+              </td>
+            </tr>
+            <tr>
+              <td>T-VNET</td>
+              <td>VN虚拟网络</td>
+              <td>云原生系统</td>
+              <td>黄思铭(huangsm43)</td>
+              <td>t-VNET</td>
+              <td>ITS000000011</td>
+              <td class="text-dash">-</td>
+              <td>
+                <div class="action-icons">
+                  <span class="action-icon star-empty">&#9734;</span
+                  ><span class="action-icon">&#128279;</span>
+                </div>
+              </td>
+            </tr>
+            <tr>
+              <td>SCA扫描专用</td>
+              <td class="text-dash">-</td>
+              <td>信息安全</td>
+              <td>彭晴(pengqing7)</td>
+              <td>sca-scan</td>
+              <td>
+                <span class="text-ellipsis">9b88e0cae8fe464194f42...</span>
+              </td>
+              <td class="text-dash">-</td>
+              <td>
+                <div class="action-icons">
+                  <span class="action-icon star-empty">&#9734;</span
+                  ><span class="action-icon">&#9998;</span
+                  ><span class="action-icon">&#128279;</span>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Pagination -->
+    <div class="pagination-bar">
+      <span class="total">共133条</span>
+      <button class="page-btn disabled">&lt;</button>
+      <button class="page-btn active">1</button>
+      <button class="page-btn">2</button>
+      <button class="page-btn">3</button>
+      <button class="page-btn">4</button>
+      <button class="page-btn">5</button>
+      <button class="page-btn">&gt;</button>
+      <select class="page-size-select">
+        <option>30 条/页</option>
+        <option>50 条/页</option>
+        <option>100 条/页</option>
+      </select>
+      <span class="jump-label">跳至</span>
+      <input class="jump-input" type="text" />
+      <span class="jump-label">页</span>
+    </div>
+
+    <!-- Help FAB -->
+    <div class="help-fab-label">帮助<br />反馈</div>
+    <div class="help-fab">?</div>
+
+    <script>
+      // Generate watermark
+      const wm = document.getElementById("watermark");
+      for (let i = 0; i < 80; i++) {
+        const span = document.createElement("span");
+        span.textContent = "yipp2";
+        wm.appendChild(span);
+      }
+
+      // Page button interaction
+      document.querySelectorAll(".page-btn:not(.disabled)").forEach((btn) => {
+        btn.addEventListener("click", function () {
+          document
+            .querySelectorAll(".page-btn")
+            .forEach((b) => b.classList.remove("active"));
+          if (
+            !this.textContent.includes("&") &&
+            !this.textContent.includes("<") &&
+            !this.textContent.includes(">")
+          ) {
+            this.classList.add("active");
+          }
+        });
+      });
+
+      // Star toggle
+      document.querySelectorAll(".action-icon").forEach((icon) => {
+        if (
+          icon.textContent.trim() === "★" ||
+          icon.textContent.trim() === "☆"
+        ) {
+          icon.addEventListener("click", function () {
+            if (this.classList.contains("star-filled")) {
+              this.classList.remove("star-filled");
+              this.classList.add("star-empty");
+              this.innerHTML = "&#9734;";
+            } else if (this.classList.contains("star-empty")) {
+              this.classList.remove("star-empty");
+              this.classList.add("star-filled");
+              this.innerHTML = "&#9733;";
+            }
+          });
+        }
+      });
+    </script>
+  </body>
+</html>

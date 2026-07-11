@@ -76,6 +76,9 @@ def _get_latest_seq(cate_key: str) -> str | None:
             .first()
         )
         return row[0] if row else None
+    except Exception as e:
+        print(f"[news_flash] _get_latest_seq error for {cate_key}: {e}")
+        return None
     finally:
         db.close()
 

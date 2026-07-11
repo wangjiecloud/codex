@@ -288,13 +288,29 @@ def _run_full_sync():
             )
         return
 
-    # [6/6] 板块新闻同步
-    sched_log("info", "[6/6] 开始同步板块新闻...")
+    # [6/7] 板块新闻同步
+    sched_log("info", "[6/7] 开始同步板块新闻...")
     try:
         from routers.theme import sync_theme_news as _sync_theme_news
         _sync_theme_news()
     except Exception as e:
-        sched_log("error", f"[6/6] 板块新闻同步失败: {e}")
+        sched_log("error", f"[6/7] 板块新闻同步失败: {e}")
+
+    # [7/7] 技术指标计算（KDJ + MA 写入 stock_indicator）
+    sched_log("info", "[7/7] 开始计算技术指标（KDJ/MA）...")
+    try:
+        import subprocess, sys, os
+        script_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "compute_indicators.py")
+        result = subprocess.run(
+            [sys.executable, script_path],
+            capture_output=True, text=True, timeout=120
+        )
+        if result.returncode == 0:
+            sched_log("success", "[7/7] 技术指标计算完成")
+        else:
+            sched_log("error", f"[7/7] 技术指标计算失败: {result.stderr[-200:]}")
+    except Exception as e:
+        sched_log("error", f"[7/7] 技术指标计算异常: {e}")
 
     with _lock:
         _status.update(

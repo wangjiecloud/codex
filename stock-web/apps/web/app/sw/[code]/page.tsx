@@ -411,7 +411,11 @@ export default function SwBoardDetailPage() {
 
           {/* K线图 */}
           <div className="overflow-hidden">
-            <StockChart data={klineData} activeIndicators={activeIndicators} />
+            <StockChart
+              data={klineData}
+              activeIndicators={activeIndicators}
+              activeMAs={[5, 10, 20, 60]}
+            />
           </div>
         </div>
 

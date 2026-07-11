@@ -131,19 +131,10 @@ function addToRecentlyViewed(code: string, name: string) {
   if (typeof window === "undefined") return;
   try {
     const recent = getRecentlyViewed();
-    const exists = recent.some((item) => item.code === code);
-
-    if (!exists) {
-      const updated = [{ code, name }, ...recent];
-      localStorage.setItem(WATCHLIST_KEY, JSON.stringify(updated));
-    } else if (
-      recent.length > 0 &&
-      recent[0].code === code &&
-      recent[0].name !== name
-    ) {
-      recent[0].name = name;
-      localStorage.setItem(WATCHLIST_KEY, JSON.stringify(recent));
-    }
+    // 无论是否已存在，都移到第一位（已存在则先移除再插到头部）
+    const filtered = recent.filter((item) => item.code !== code);
+    const updated = [{ code, name }, ...filtered];
+    localStorage.setItem(WATCHLIST_KEY, JSON.stringify(updated));
   } catch {}
 }
 
@@ -158,8 +149,9 @@ function removeFromRecentlyViewed(code: string) {
 
 const API = "http://localhost:8000";
 const INDICATORS = ["VOL", "MACD", "KDJ", "BOLL", "RSI", "DMI", "CCI", "W&R"];
+const MA_PERIODS = [5, 10, 20, 30, 60];
 const PERIODS = ["日K", "周K", "月K"];
-const BOTTOM_TABS = ["财务", "AI分析", "资讯", "公告"];
+const BOTTOM_TABS = ["财务", "资讯", "公告"];
 
 const PERIOD_MAP: Record<string, string> = {
   日K: "daily",
@@ -243,19 +235,26 @@ export default function StockDetailPage() {
     generateMockData(code),
   );
   const [news, setNews] = useState<NewsItem[]>([]);
-  const [activeIndicators, setActiveIndicators] = useState([
-    "VOL",
-    "MACD",
-    "KDJ",
-  ]);
+  const [activeIndicators, setActiveIndicators] = useState(["VOL", "MACD"]);
+  const [activeMAs, setActiveMAs] = useState<number[]>([5, 10, 20]);
+  const toggleMA = (period: number) => {
+    setActiveMAs((prev) =>
+      prev.includes(period)
+        ? prev.filter((p) => p !== period)
+        : [...prev, period],
+    );
+  };
   const [activePeriod, setActivePeriod] = useState("日K");
   const [activeTab, setActiveTab] = useState("财务");
   const [isStarred, setIsStarred] = useState(false);
   const [watchlist, setWatchlist] = useState<
     Array<{ code: string; name: string }>
   >([]);
-  const [bottomHeight, setBottomHeight] = useState(180);
+  const [bottomHeight, setBottomHeight] = useState(150);
   const [isResizing, setIsResizing] = useState(false);
+  const [bottomCollapsed, setBottomCollapsed] = useState(false);
+  const [chartAreaHeight, setChartAreaHeight] = useState(0);
+  const chartAreaRef = useRef<HTMLDivElement>(null);
   const [quoteLoading, setQuoteLoading] = useState(true);
   const [fundamental, setFundamental] = useState<FundamentalData | null>(null);
   const [gubaNews, setGubaNews] = useState<GubaItem[]>([]);
@@ -288,6 +287,8 @@ export default function StockDetailPage() {
   useEffect(() => {
     if (quote.name) {
       addToRecentlyViewed(code, quote.name);
+      // 置顶后同步刷新左侧列表 UI
+      setWatchlist(getRecentlyViewed());
     }
   }, [code, quote.name]);
 
@@ -376,19 +377,6 @@ export default function StockDetailPage() {
     );
   };
 
-  const orderBookRows = Array.from({ length: 5 }, (_, i) => {
-    const seed =
-      Math.abs(Math.sin((quote.price * 1000 + i + 1) * 9301 + 49297)) * 233280;
-    const vol = Math.floor((seed % 4500) + 500);
-    const seed2 =
-      Math.abs(Math.sin((quote.price * 1000 + i + 6) * 9301 + 49297)) * 233280;
-    const vol2 = Math.floor((seed2 % 4500) + 500);
-    return {
-      sell: { price: (quote.price + (5 - i) * 0.001).toFixed(3), vol },
-      buy: { price: (quote.price - (i + 1) * 0.001).toFixed(3), vol: vol2 },
-    };
-  });
-
   const displayName = quote.name || `股票${code}`;
 
   const handleMouseDown = (e: React.MouseEvent) => {
@@ -405,8 +393,8 @@ export default function StockDetailPage() {
 
       const containerRect = container.getBoundingClientRect();
       const newHeight = containerRect.bottom - e.clientY;
-      const minHeight = 150;
-      const maxHeight = containerRect.height - 200;
+      const minHeight = 120;
+      const maxHeight = containerRect.height - 300;
 
       setBottomHeight(Math.min(Math.max(newHeight, minHeight), maxHeight));
     };
@@ -432,6 +420,18 @@ export default function StockDetailPage() {
     };
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  // 监听图表区容器高度变化，传给 StockChart 做自适应分配
+  useEffect(() => {
+    const el = chartAreaRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => {
+      setChartAreaHeight(el.clientHeight);
+    });
+    ro.observe(el);
+    setChartAreaHeight(el.clientHeight);
+    return () => ro.disconnect();
   }, []);
 
   const handleSearchInput = (val: string) => {
@@ -613,7 +613,11 @@ export default function StockDetailPage() {
                 )}
               >
                 <button
-                  onClick={() => router.push(`/stock/${s.code}`)}
+                  onClick={() => {
+                    addToRecentlyViewed(s.code, s.name);
+                    setWatchlist(getRecentlyViewed());
+                    router.push(`/stock/${s.code}`);
+                  }}
                   className="flex-1 flex items-center justify-between px-2 py-1.5"
                 >
                   <div className="text-left">
@@ -664,78 +668,66 @@ export default function StockDetailPage() {
           id="main-chart-container"
           className="flex-1 flex flex-col overflow-hidden"
         >
-          {/* Stock header */}
-          <div className="flex items-start justify-between px-4 py-2 border-b border-[var(--border-color)] bg-[var(--bg-primary)] shrink-0">
-            <div>
-              <div className="flex items-baseline gap-3">
-                {quoteLoading ? (
-                  <div className="h-7 w-48 bg-[var(--bg-tertiary)] animate-pulse rounded" />
-                ) : (
-                  <>
-                    <span className="text-lg font-bold text-[var(--text-primary)]">
-                      {displayName}
-                    </span>
-                    <span className="text-[var(--text-tertiary)]">
-                      ({code})
-                    </span>
-                    {(() => {
-                      const badge = getMarketBadge(code);
-                      return (
-                        <span
-                          className={cn(
-                            "text-[10px] font-semibold px-1.5 py-0.5 rounded",
-                            badge.bg,
-                            badge.text,
-                          )}
-                        >
-                          {badge.label}
-                        </span>
-                      );
-                    })()}
-                    {klineData.length > 0 && (
-                      <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-[var(--bg-tertiary)] text-[var(--text-tertiary)] border border-[var(--border-color)]">
-                        {klineData[klineData.length - 1].time}
+          {/* Stock header — 紧凑单行布局 */}
+          <div className="flex items-center justify-between px-3 py-1.5 border-b border-[var(--border-color)] bg-[var(--bg-primary)] shrink-0 gap-4">
+            {/* 左：名称 + 代码 + 标签 + 价格 */}
+            <div className="flex items-baseline gap-2 min-w-0 flex-wrap">
+              {quoteLoading ? (
+                <div className="h-5 w-48 bg-[var(--bg-tertiary)] animate-pulse rounded" />
+              ) : (
+                <>
+                  <span className="text-sm font-bold text-[var(--text-primary)] whitespace-nowrap">
+                    {displayName}
+                  </span>
+                  <span className="text-[11px] text-[var(--text-tertiary)]">
+                    ({code})
+                  </span>
+                  {(() => {
+                    const badge = getMarketBadge(code);
+                    return (
+                      <span
+                        className={cn(
+                          "text-[10px] font-semibold px-1.5 py-0.5 rounded",
+                          badge.bg,
+                          badge.text,
+                        )}
+                      >
+                        {badge.label}
                       </span>
+                    );
+                  })()}
+                  {klineData.length > 0 && (
+                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--bg-tertiary)] text-[var(--text-tertiary)] border border-[var(--border-color)]">
+                      {klineData[klineData.length - 1].time}
+                    </span>
+                  )}
+                  <span
+                    className={cn(
+                      "text-lg font-bold font-mono whitespace-nowrap",
+                      getPriceColor(quote.change),
                     )}
-                  </>
-                )}
-              </div>
-              <div className="flex items-baseline gap-2 mt-0.5">
-                {quoteLoading ? (
-                  <div className="h-8 w-40 bg-[var(--bg-tertiary)] animate-pulse rounded" />
-                ) : (
-                  <>
-                    <span
-                      className={cn(
-                        "text-2xl font-bold font-mono",
-                        getPriceColor(quote.change),
-                      )}
-                    >
-                      {quote.price > 0 ? quote.price.toFixed(3) : "--"}
-                    </span>
-                    <span
-                      className={cn("text-sm", getPriceColor(quote.change))}
-                    >
-                      {quote.changeAmt >= 0 ? "+" : ""}
-                      {quote.price > 0 ? quote.changeAmt.toFixed(3) : "--"}
-                    </span>
-                    <span
-                      className={cn("text-sm", getPriceColor(quote.change))}
-                    >
-                      {quote.price > 0 ? formatPercent(quote.change) : "--"}
-                    </span>
-                  </>
-                )}
-              </div>
+                  >
+                    {quote.price > 0 ? quote.price.toFixed(3) : "--"}
+                  </span>
+                  <span className={cn("text-xs", getPriceColor(quote.change))}>
+                    {quote.changeAmt >= 0 ? "+" : ""}
+                    {quote.price > 0 ? quote.changeAmt.toFixed(3) : "--"}
+                  </span>
+                  <span className={cn("text-xs", getPriceColor(quote.change))}>
+                    {quote.price > 0 ? formatPercent(quote.change) : "--"}
+                  </span>
+                </>
+              )}
             </div>
-            <div className="grid grid-cols-2 gap-x-6 gap-y-0.5 text-right mt-1">
+            {/* 右：行情数据横排 */}
+            <div className="flex items-center gap-3 shrink-0 text-[11px] whitespace-nowrap">
               {[
                 ["今开", quote.open > 0 ? quote.open.toFixed(3) : "--"],
-                ["最高", quote.high > 0 ? quote.high.toFixed(3) : "--"],
                 [
                   "昨收",
                   quote.prevClose > 0 ? quote.prevClose.toFixed(3) : "--",
                 ],
+                ["最高", quote.high > 0 ? quote.high.toFixed(3) : "--"],
                 ["最低", quote.low > 0 ? quote.low.toFixed(3) : "--"],
                 [
                   "成交量",
@@ -748,8 +740,13 @@ export default function StockDetailPage() {
                     : "--",
                 ],
               ].map(([label, val]) => (
-                <div key={label} className="flex gap-2 justify-end text-[11px]">
-                  <span className="text-[var(--text-tertiary)]">{label}</span>
+                <div
+                  key={label}
+                  className="flex flex-col items-end leading-tight"
+                >
+                  <span className="text-[var(--text-tertiary)] text-[10px]">
+                    {label}
+                  </span>
                   <span className="text-[var(--text-secondary)] font-mono">
                     {val}
                   </span>
@@ -758,213 +755,132 @@ export default function StockDetailPage() {
             </div>
           </div>
 
-          {/* K-line chart */}
-          <div className="flex-1 overflow-y-auto">
-            <StockChart data={klineData} activeIndicators={activeIndicators} />
-          </div>
-
-          {/* Indicator selector */}
-          <div className="flex items-center gap-1 px-3 py-1.5 border-t border-[var(--border-color)] bg-[var(--bg-deep)] shrink-0 overflow-x-auto">
-            {INDICATORS.map((ind) => (
-              <button
-                key={ind}
-                onClick={() => toggleIndicator(ind)}
-                className={cn(
-                  "px-2.5 py-1 rounded text-[11px] whitespace-nowrap transition-colors",
-                  activeIndicators.includes(ind)
-                    ? "bg-[#f5a623]/20 text-[#f5a623] border border-[#f5a623]/40"
-                    : "text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] border border-transparent hover:border-[var(--border-color)]",
-                )}
-              >
-                {ind}
-              </button>
-            ))}
+          {/* K-line chart + indicator selector */}
+          <div
+            ref={chartAreaRef}
+            className="flex-1 overflow-hidden flex flex-col min-h-0"
+          >
+            {/* Indicator selector — sticky */}
+            <div className="flex items-center gap-1 px-3 py-1.5 border-b border-[var(--border-color)] bg-[var(--bg-deep)] overflow-x-auto shrink-0">
+              {INDICATORS.map((ind) => (
+                <button
+                  key={ind}
+                  onClick={() => toggleIndicator(ind)}
+                  className={cn(
+                    "px-2.5 py-1 rounded text-[11px] whitespace-nowrap transition-colors",
+                    activeIndicators.includes(ind)
+                      ? "bg-[#f5a623]/20 text-[#f5a623] border border-[#f5a623]/40"
+                      : "text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] border border-transparent hover:border-[var(--border-color)]",
+                  )}
+                >
+                  {ind}
+                </button>
+              ))}
+              {/* MA 均线切换按钮 */}
+              <div className="w-px h-4 bg-[var(--border-color)] mx-1 shrink-0" />
+              {MA_PERIODS.map((p) => {
+                const active = activeMAs.includes(p);
+                return (
+                  <button
+                    key={`ma${p}`}
+                    onClick={() => toggleMA(p)}
+                    className={cn(
+                      "px-2.5 py-1 rounded text-[11px] whitespace-nowrap transition-colors",
+                      active
+                        ? "bg-[#f5a623]/20 text-[#f5a623] border border-[#f5a623]/40"
+                        : "text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] border border-transparent hover:border-[var(--border-color)]",
+                    )}
+                  >
+                    MA{p}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="flex-1 overflow-hidden min-h-0">
+              <StockChart
+                data={klineData}
+                activeIndicators={activeIndicators}
+                activeMAs={activeMAs}
+                onToggleMA={toggleMA}
+                containerHeight={
+                  chartAreaHeight > 0 ? chartAreaHeight - 36 : undefined
+                }
+              />
+            </div>
           </div>
 
           {/* Resizable divider */}
           <div
-            onMouseDown={handleMouseDown}
+            onMouseDown={bottomCollapsed ? undefined : handleMouseDown}
             className={cn(
-              "h-1 bg-[var(--border-color)] hover:bg-[#f5a623]/40 cursor-row-resize transition-colors shrink-0 relative group",
+              "h-1 bg-[var(--border-color)] transition-colors shrink-0 relative group",
+              !bottomCollapsed && "hover:bg-[#f5a623]/40 cursor-row-resize",
               isResizing && "bg-[#f5a623]/60",
             )}
           >
-            <div className="absolute inset-0 flex items-center justify-center">
-              <div className="w-12 h-0.5 bg-[var(--text-tertiary)] group-hover:bg-[#f5a623] transition-colors rounded-full" />
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <div className="w-16 h-0.5 bg-[var(--text-tertiary)] group-hover:bg-[#f5a623]/30 transition-colors rounded-full" />
             </div>
+            {/* 折叠/展开切换按钮 — 居中 */}
+            <button
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={() => setBottomCollapsed((v) => !v)}
+              className="absolute left-1/2 -translate-x-1/2 top-1/2 -translate-y-1/2 flex items-center justify-center w-8 h-5 rounded hover:bg-[#f5a623]/20 transition-colors text-[var(--text-tertiary)] hover:text-[#f5a623]"
+              title={bottomCollapsed ? "展开面板" : "收起面板"}
+            >
+              <svg
+                width="10"
+                height="10"
+                viewBox="0 0 10 10"
+                fill="currentColor"
+                className={cn(
+                  "transition-transform duration-200",
+                  bottomCollapsed ? "rotate-180" : "",
+                )}
+              >
+                <path d="M5 3L9 7H1L5 3Z" />
+              </svg>
+            </button>
           </div>
 
           {/* Bottom tabs */}
-          <div className="flex items-center border-t border-[var(--border-color)] bg-[var(--bg-secondary)] shrink-0">
-            {BOTTOM_TABS.map((tab) => (
-              <button
-                key={tab}
-                onClick={() => {
-                  setActiveTab(tab);
-                }}
-                className={cn(
-                  "px-4 py-2 text-[11px] whitespace-nowrap transition-colors border-b-2",
-                  activeTab === tab
-                    ? "text-[#f5a623] border-[#f5a623]"
-                    : "text-[var(--text-tertiary)] border-transparent hover:text-[var(--text-secondary)]",
-                )}
+          <div
+            className={cn(
+              "flex flex-col overflow-hidden transition-all duration-200 shrink-0",
+              bottomCollapsed ? "h-0" : "",
+            )}
+          >
+            <div className="flex items-center border-t border-[var(--border-color)] bg-[var(--bg-secondary)] shrink-0">
+              {BOTTOM_TABS.map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => {
+                    setActiveTab(tab);
+                  }}
+                  className={cn(
+                    "px-4 py-2 text-[11px] whitespace-nowrap transition-colors border-b-2",
+                    activeTab === tab
+                      ? "text-[#f5a623] border-[#f5a623]"
+                      : "text-[var(--text-tertiary)] border-transparent hover:text-[var(--text-secondary)]",
+                  )}
+                >
+                  {tab}
+                </button>
+              ))}
+            </div>
+
+            {/* Tab content */}
+            {(activeTab === "资讯" || activeTab === "公告") && (
+              <div
+                className="overflow-y-auto bg-[var(--bg-primary)]"
+                style={{ height: `${bottomHeight}px` }}
               >
-                {tab}
-              </button>
-            ))}
-          </div>
-
-          {/* Tab content */}
-          {(activeTab === "资讯" || activeTab === "公告") && (
-            <div
-              className="overflow-y-auto bg-[var(--bg-primary)]"
-              style={{ height: `${bottomHeight}px` }}
-            >
-              {gubaLoading ? (
-                <div className="flex items-center justify-center py-6 text-[var(--text-tertiary)] text-[11px]">
-                  <svg
-                    className="animate-spin mr-2"
-                    width="14"
-                    height="14"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                  >
-                    <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-                  </svg>
-                  加载中...
-                </div>
-              ) : (
-                (() => {
-                  const items = activeTab === "资讯" ? gubaNews : gubaNotice;
-                  if (items.length === 0)
-                    return (
-                      <div className="text-center py-6 text-[var(--text-tertiary)] text-[11px]">
-                        {gubaLoading ? "同步中，请稍候..." : "暂无数据"}
-                      </div>
-                    );
-                  return (
-                    <div className="divide-y divide-[var(--border-color)]">
-                      {items.map((item, idx) => (
-                        <a
-                          key={idx}
-                          href={item.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="flex items-start gap-2 px-3 py-2 hover:bg-[var(--bg-hover)] transition-colors group"
-                        >
-                          <div className="flex-1 min-w-0">
-                            <div className="text-[11px] text-[var(--text-primary)] group-hover:text-[#f5a623] line-clamp-2 leading-relaxed">
-                              {item.title}
-                            </div>
-                            <div className="flex items-center gap-2 mt-0.5 text-[10px] text-[var(--text-tertiary)]">
-                              <span>{item.author || "匿名"}</span>
-                              {item.readCount > 0 && (
-                                <span>
-                                  阅读{" "}
-                                  {item.readCount >= 10000
-                                    ? (item.readCount / 10000).toFixed(1) + "万"
-                                    : item.readCount}
-                                </span>
-                              )}
-                              {item.replyCount > 0 && (
-                                <span>评论 {item.replyCount}</span>
-                              )}
-                              <span className="ml-auto">
-                                {item.pubTime?.slice(0, 16) || ""}
-                              </span>
-                            </div>
-                          </div>
-                          <ExternalLink
-                            size={10}
-                            className="text-[var(--text-tertiary)] shrink-0 mt-1 opacity-0 group-hover:opacity-100 transition-opacity"
-                          />
-                        </a>
-                      ))}
-                    </div>
-                  );
-                })()
-              )}
-            </div>
-          )}
-
-          {activeTab === "财务" && (
-            <div
-              className="overflow-y-auto bg-[var(--bg-primary)] p-3"
-              style={{ height: `${bottomHeight}px` }}
-            >
-              {!fundamental ? (
-                <div className="text-center py-6 text-[var(--text-tertiary)] text-[11px]">
-                  暂无财务数据
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  <div className="text-[10px] text-[var(--text-tertiary)]">
-                    报告期: {fundamental.report_date || "--"}
-                    {fundamental.updated_at && (
-                      <span className="ml-3">
-                        更新: {fundamental.updated_at}
-                      </span>
-                    )}
-                  </div>
-                  <div className="grid grid-cols-2 gap-x-6 gap-y-1.5">
-                    {[
-                      ["营业总收入", fundamental.revenue],
-                      ["收入同比", fundamental.revenue_yoy],
-                      ["净利润", fundamental.net_profit],
-                      ["净利润同比", fundamental.net_profit_yoy],
-                      ["每股收益 EPS", fundamental.eps],
-                      ["每股净资产", fundamental.nav_per_share],
-                      ["净资产收益率 ROE", fundamental.roe],
-                      ["销售毛利率", fundamental.gross_margin],
-                      ["销售净利率", fundamental.net_margin],
-                      ["资产负债率", fundamental.debt_ratio],
-                      ["流动比率", fundamental.current_ratio],
-                      ["速动比率", fundamental.quick_ratio],
-                      ["存货周转率", fundamental.inventory_turnover],
-                      ["应收账款周转天数", fundamental.ar_days],
-                    ]
-                      .filter(([, v]) => v && v !== "--")
-                      .map(([label, val]) => (
-                        <div
-                          key={label}
-                          className="flex justify-between items-center border-b border-[var(--border-color)] pb-1"
-                        >
-                          <span className="text-[10px] text-[var(--text-tertiary)]">
-                            {label}
-                          </span>
-                          <span className="text-[11px] font-mono text-[var(--text-primary)]">
-                            {val}
-                          </span>
-                        </div>
-                      ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Right panel: order book + AI */}
-        <div className="w-[200px] border-l border-[var(--border-color)] bg-[var(--bg-deep)] flex flex-col shrink-0 overflow-hidden">
-          {activeTab === "AI分析" ? (
-            <div className="flex-1 overflow-hidden">
-              <AgentPanel code={code} stockName={displayName} />
-            </div>
-          ) : activeTab === "资讯" || activeTab === "公告" ? (
-            <>
-              {/* Guba sync panel */}
-              <div className="px-2 py-2 border-b border-[var(--border-color)]">
-                <div className="text-[10px] text-[var(--text-tertiary)] mb-2">
-                  {activeTab === "资讯" ? "媒体资讯" : "公司公告"}
-                </div>
-                {gubaSyncing && (
-                  <div className="text-[10px] text-[#f5a623] mb-1.5 flex items-center gap-1">
+                {gubaLoading ? (
+                  <div className="flex items-center justify-center py-6 text-[var(--text-tertiary)] text-[11px]">
                     <svg
-                      className="animate-spin"
-                      width="10"
-                      height="10"
+                      className="animate-spin mr-2"
+                      width="14"
+                      height="14"
                       viewBox="0 0 24 24"
                       fill="none"
                       stroke="currentColor"
@@ -972,133 +888,120 @@ export default function StockDetailPage() {
                     >
                       <path d="M21 12a9 9 0 1 1-6.219-8.56" />
                     </svg>
-                    正在同步最新数据...
+                    加载中...
+                  </div>
+                ) : (
+                  (() => {
+                    const items = activeTab === "资讯" ? gubaNews : gubaNotice;
+                    if (items.length === 0)
+                      return (
+                        <div className="text-center py-6 text-[var(--text-tertiary)] text-[11px]">
+                          {gubaLoading ? "同步中，请稍候..." : "暂无数据"}
+                        </div>
+                      );
+                    return (
+                      <div className="divide-y divide-[var(--border-color)]">
+                        {items.map((item, idx) => (
+                          <a
+                            key={idx}
+                            href={item.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="flex items-start gap-2 px-3 py-2 hover:bg-[var(--bg-hover)] transition-colors group"
+                          >
+                            <div className="flex-1 min-w-0">
+                              <div className="text-[11px] text-[var(--text-primary)] group-hover:text-[#f5a623] line-clamp-2 leading-relaxed">
+                                {item.title}
+                              </div>
+                              <div className="flex items-center gap-2 mt-0.5 text-[10px] text-[var(--text-tertiary)]">
+                                <span>{item.author || "匿名"}</span>
+                                {item.readCount > 0 && (
+                                  <span>
+                                    阅读{" "}
+                                    {item.readCount >= 10000
+                                      ? (item.readCount / 10000).toFixed(1) +
+                                        "万"
+                                      : item.readCount}
+                                  </span>
+                                )}
+                                {item.replyCount > 0 && (
+                                  <span>评论 {item.replyCount}</span>
+                                )}
+                                <span className="ml-auto">
+                                  {item.pubTime?.slice(0, 16) || ""}
+                                </span>
+                              </div>
+                            </div>
+                            <ExternalLink
+                              size={10}
+                              className="text-[var(--text-tertiary)] shrink-0 mt-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                            />
+                          </a>
+                        ))}
+                      </div>
+                    );
+                  })()
+                )}
+              </div>
+            )}
+
+            {activeTab === "财务" && (
+              <div
+                className="overflow-y-auto bg-[var(--bg-primary)] p-3"
+                style={{ height: `${bottomHeight}px` }}
+              >
+                {!fundamental ? (
+                  <div className="text-center py-6 text-[var(--text-tertiary)] text-[11px]">
+                    暂无财务数据
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="text-[10px] text-[var(--text-tertiary)]">
+                      报告期: {fundamental.report_date || "--"}
+                      {fundamental.updated_at && (
+                        <span className="ml-3">
+                          更新: {fundamental.updated_at}
+                        </span>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 gap-x-6 gap-y-1.5">
+                      {[
+                        ["营业总收入", fundamental.revenue],
+                        ["收入同比", fundamental.revenue_yoy],
+                        ["净利润", fundamental.net_profit],
+                        ["净利润同比", fundamental.net_profit_yoy],
+                        ["每股收益 EPS", fundamental.eps],
+                        ["每股净资产", fundamental.nav_per_share],
+                        ["净资产收益率 ROE", fundamental.roe],
+                        ["销售毛利率", fundamental.gross_margin],
+                        ["销售净利率", fundamental.net_margin],
+                        ["资产负债率", fundamental.debt_ratio],
+                        ["流动比率", fundamental.current_ratio],
+                        ["速动比率", fundamental.quick_ratio],
+                        ["存货周转率", fundamental.inventory_turnover],
+                        ["应收账款周转天数", fundamental.ar_days],
+                      ]
+                        .filter(([, v]) => v && v !== "--")
+                        .map(([label, val]) => (
+                          <div
+                            key={label}
+                            className="flex justify-between items-center border-b border-[var(--border-color)] pb-1"
+                          >
+                            <span className="text-[10px] text-[var(--text-tertiary)]">
+                              {label}
+                            </span>
+                            <span className="text-[11px] font-mono text-[var(--text-primary)]">
+                              {val}
+                            </span>
+                          </div>
+                        ))}
+                    </div>
                   </div>
                 )}
-                <button
-                  onClick={() => {
-                    const postType = activeTab === "资讯" ? "news" : "notice";
-                    setGubaSyncing(true);
-                    fetch(`http://localhost:8000/api/guba/sync/${code}`, {
-                      method: "POST",
-                    })
-                      .then(() =>
-                        fetch(
-                          `http://localhost:8000/api/guba/${code}?post_type=${postType}&count=50`,
-                        ),
-                      )
-                      .then((r) => (r.ok ? r.json() : null))
-                      .then((data) => {
-                        if (data?.items) {
-                          if (postType === "news")
-                            setGubaNews(data.items as GubaItem[]);
-                          else setGubaNotice(data.items as GubaItem[]);
-                        }
-                      })
-                      .catch(() => {})
-                      .finally(() => setGubaSyncing(false));
-                  }}
-                  disabled={gubaSyncing}
-                  className="w-full py-1.5 text-[11px] bg-[#f5a623]/10 hover:bg-[#f5a623]/20 border border-[#f5a623]/30 text-[#f5a623] rounded transition-colors disabled:opacity-40"
-                >
-                  {gubaSyncing ? "同步中..." : "重新同步"}
-                </button>
               </div>
-              <div className="p-2 text-[10px] text-[var(--text-tertiary)] leading-relaxed">
-                <p>
-                  {activeTab === "资讯"
-                    ? "来源：东方财富股吧资讯"
-                    : "来源：东方财富官方公告"}
-                </p>
-                <p className="mt-1">切换 tab 自动同步</p>
-                <p className="mt-1">每日 17:30 自动更新</p>
-              </div>
-            </>
-          ) : (
-            <>
-              {/* Order book */}
-              <div className="px-2 py-1.5 border-b border-[var(--border-color)]">
-                <div className="flex justify-between text-[10px] text-[var(--text-tertiary)] mb-1">
-                  <span>委比</span>
-                </div>
-                {orderBookRows.reverse().map((row, i) => (
-                  <div
-                    key={`sell-${i}`}
-                    className="flex justify-between py-0.5"
-                  >
-                    <span className="text-[10px] text-[var(--text-tertiary)]">
-                      卖{5 - i}
-                    </span>
-                    <span className="text-[11px] text-[#09d464] font-mono">
-                      {row.sell.price}
-                    </span>
-                    <span className="text-[10px] text-[var(--text-tertiary)] font-mono">
-                      {row.sell.vol}
-                    </span>
-                  </div>
-                ))}
-                <div className="my-1 border-t border-[var(--border-color)]" />
-                {[...orderBookRows].reverse().map((row, i) => (
-                  <div key={`buy-${i}`} className="flex justify-between py-0.5">
-                    <span className="text-[10px] text-[var(--text-tertiary)]">
-                      买{i + 1}
-                    </span>
-                    <span className="text-[11px] text-[#e84444] font-mono">
-                      {row.buy.price}
-                    </span>
-                    <span className="text-[10px] text-[var(--text-tertiary)] font-mono">
-                      {row.buy.vol}
-                    </span>
-                  </div>
-                ))}
-              </div>
-
-              {/* Quote stats */}
-              <div className="px-2 py-1.5 border-b border-[var(--border-color)]">
-                <div className="text-[10px] text-[var(--text-tertiary)] font-medium mb-1">
-                  行情数据
-                </div>
-                {[
-                  [
-                    "昨收",
-                    quote.prevClose > 0 ? quote.prevClose.toFixed(3) : "--",
-                  ],
-                  ["今开", quote.open > 0 ? quote.open.toFixed(3) : "--"],
-                  ["最高", quote.high > 0 ? quote.high.toFixed(3) : "--"],
-                  ["最低", quote.low > 0 ? quote.low.toFixed(3) : "--"],
-                  [
-                    "市值",
-                    quote.marketCap > 0 ? formatAmount(quote.marketCap) : "--",
-                  ],
-                  ["市盈率", quote.pe > 0 ? quote.pe.toFixed(2) : "--"],
-                  ["市净率", quote.pb > 0 ? quote.pb.toFixed(2) : "--"],
-                  [
-                    "成交额",
-                    quote.turnover > 0 ? formatAmount(quote.turnover) : "--",
-                  ],
-                ].map(([label, val]) => (
-                  <div key={label} className="flex justify-between py-0.5">
-                    <span className="text-[10px] text-[var(--text-tertiary)]">
-                      {label}
-                    </span>
-                    <span className="text-[11px] text-[var(--text-secondary)] font-mono">
-                      {val}
-                    </span>
-                  </div>
-                ))}
-              </div>
-
-              {/* AI Analysis shortcut */}
-              <div className="p-2">
-                <button
-                  onClick={() => setActiveTab("AI分析")}
-                  className="w-full py-2 bg-[#f5a623]/10 hover:bg-[#f5a623]/20 border border-[#f5a623]/30 text-[#f5a623] rounded-lg text-[11px] font-medium transition-colors"
-                >
-                  启动 AI 分析
-                </button>
-              </div>
-            </>
-          )}
+            )}
+          </div>
+          {/* /bottom-collapse-wrapper */}
         </div>
       </div>
     </div>

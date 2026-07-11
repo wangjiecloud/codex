@@ -441,7 +441,7 @@ fn config_summary_entries(
             ),
         ),
     ];
-    if config.model_provider.wire_api == WireApi::Responses {
+    if matches!(config.model_provider.wire_api, WireApi::Responses) {
         entries.push((
             "reasoning effort",
             config

@@ -33,6 +33,7 @@ use crate::exec_events::ErrorItem;
 use crate::exec_events::FileChangeItem;
 use crate::exec_events::FileUpdateChange;
 use crate::exec_events::ItemCompletedEvent;
+use crate::exec_events::ItemDeltaEvent;
 use crate::exec_events::ItemStartedEvent;
 use crate::exec_events::ItemUpdatedEvent;
 use crate::exec_events::McpToolCallItem;
@@ -469,6 +470,13 @@ impl EventProcessorWithJsonOutput {
                 if let Some(item) = self.map_started_item(notification.item) {
                     events.push(ThreadEvent::ItemStarted(ItemStartedEvent { item }));
                 }
+                CodexStatus::Running
+            }
+            ServerNotification::AgentMessageDelta(notification) => {
+                events.push(ThreadEvent::ItemDelta(ItemDeltaEvent {
+                    item_id: notification.item_id.clone(),
+                    delta: notification.delta.clone(),
+                }));
                 CodexStatus::Running
             }
             ServerNotification::ItemCompleted(notification) => {

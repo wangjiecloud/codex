@@ -22,7 +22,7 @@ pub fn create_config_summary_entries(config: &Config, model: &str) -> Vec<(&'sta
             ),
         ),
     ];
-    if config.model_provider.wire_api == WireApi::Responses {
+    if matches!(config.model_provider.wire_api, WireApi::Responses) {
         let reasoning_effort = config
             .model_reasoning_effort
             .as_ref()

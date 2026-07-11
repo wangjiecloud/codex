@@ -24,6 +24,47 @@ from bs_session import get_bs, reset_bs
 
 router = APIRouter()
 
+
+def is_trading_day(d: date | None = None) -> bool:
+    """判断指定日期（默认今天）是否为 A 股交易日（周一至周五，排除节假日）。
+    使用 baostock 查询准确结果；若 baostock 不可用则降级为仅判断周末。
+    """
+    if d is None:
+        d = date.today()
+    # 周末直接排除
+    if d.weekday() >= 5:
+        return False
+    try:
+        bs = get_bs()
+        rs = bs.query_trade_dates(
+            start_date=d.strftime("%Y-%m-%d"),
+            end_date=d.strftime("%Y-%m-%d"),
+        )
+        if rs.error_code == "0" and rs.next():
+            row = rs.get_row_data()
+            # row[1] == "1" 表示交易日
+            return row[1] == "1"
+    except Exception:
+        pass
+    # 降级：仅排除周末
+    return True
+
+
+def _latest_kline_date(code: str) -> str | None:
+    """查询数据库中该股票日 K 线的最新日期，不存在则返回 None。"""
+    db = SessionLocal()
+    try:
+        row = db.execute(
+            text(
+                "SELECT MAX(trade_date) FROM stock_kline "
+                "WHERE code=:code AND period='daily'"
+            ),
+            {"code": code},
+        ).fetchone()
+        return row[0] if row and row[0] else None
+    finally:
+        db.close()
+
 _industry_list_cache: dict = {}
 _industry_stocks_cache: dict = {}
 _industry_graph_cache: dict[str, dict] = {}
@@ -161,28 +202,25 @@ def _db_commit_with_retry(db, max_retries=3):
 
 
 def sync_all_data():
+    """17:30 定时任务入口。复用前端一键刷新的同一套逻辑（_run_full_sync），
+    确保行情、申万板块、K线、基本面、快讯全部同步，且有超时保护和 stop 支持。
+    """
     from routers.system import sched_log
-    from routers.sw_industry import sync_sw_industries
 
-    sched_log("info", "每日全量同步开始（行情+申万板块+K线）", source="scheduler")
-    _sync_all_quotes()
-    try:
-        count = sync_sw_industries()
-        sched_log(
-            "success", f"申万行业板块同步完成，共 {count} 个板块", source="scheduler"
-        )
-    except Exception as e:
-        sched_log("error", f"申万行业板块同步失败: {e}", source="scheduler")
-    db = SessionLocal()
-    try:
-        codes = _get_a_shares(db)
-    finally:
-        db.close()
-    for code in codes:
-        _sync_klines(code, "daily")
-    sched_log(
-        "success", f"每日全量同步完成，共 {len(codes)} 只股票", source="scheduler"
-    )
+    if not is_trading_day():
+        sched_log("info", "非交易日，跳过每日全量同步", source="scheduler")
+        return
+
+    from routers.sync import _run_full_sync, _status, _lock
+    import threading
+
+    with _lock:
+        if _status["running"]:
+            sched_log("warning", "17:30 定时同步：检测到同步任务已在运行，跳过本次触发", source="scheduler")
+            return
+
+    sched_log("info", "17:30 定时同步启动，复用全量同步流程", source="scheduler")
+    threading.Thread(target=_run_full_sync, daemon=True).start()
 
 
 def _to_bs_code(code: str) -> str:
@@ -202,6 +240,10 @@ def _safe_float(val, default=0.0) -> float:
 def _sync_all_quotes():
     from routers.sync import _status, _lock
     from routers.system import sched_log
+
+    if not is_trading_day():
+        sched_log("info", "非交易日，跳过行情同步", source="scheduler")
+        return
 
     if not _quotes_lock.acquire(blocking=False):
         sched_log("warning", "行情同步已在运行中，跳过本次触发", source="scheduler")
@@ -244,24 +286,31 @@ def _sync_all_quotes():
         batch_statements = []
         BATCH_SIZE = 50
 
+        # 预加载 kline 最新交易日和收盘价，用于合理性校验
+        _kline_latest: dict[str, tuple[str, float]] = {}  # code -> (trade_date, close)
+        db_kline = SessionLocal()
+        try:
+            from sqlalchemy import text as _text
+            rows_kline = db_kline.execute(_text(
+                "SELECT k.code, k.trade_date, k.close FROM stock_kline k "
+                "INNER JOIN (SELECT code, MAX(trade_date) AS max_date FROM stock_kline "
+                "WHERE period='daily' GROUP BY code) m ON k.code=m.code AND k.trade_date=m.max_date "
+                "WHERE k.period='daily'"
+            )).fetchall()
+            for row_k in rows_kline:
+                _kline_latest[row_k[0]] = (row_k[1], float(row_k[2]))
+        finally:
+            db_kline.close()
+
+        # 最新交易日（kline 中最大日期）
+        _latest_trade_date = max((v[0] for v in _kline_latest.values()), default="")
+
         for idx, raw_code in enumerate(all_codes):
             from routers.sync import _stop_requested
 
             if _stop_requested.is_set():
                 sched_log("warning", "行情同步已被用户停止")
                 break
-
-            # Skip if stock already has today's quote data (北京时间判断)
-            q = quotes.get(raw_code)
-            if q and q.updated_at:
-                today_cst = (datetime.utcnow() + timedelta(hours=8)).date()
-                quote_date_cst = (q.updated_at + timedelta(hours=8)).date()
-                if quote_date_cst >= today_cst:
-                    skipped_count += 1
-                    with _lock:
-                        _status["current"] = raw_code
-                        _status["done"] = idx + 1
-                    continue
 
             with _lock:
                 _status["current"] = raw_code
@@ -297,6 +346,7 @@ def _sync_all_quotes():
                 if rs.error_code != "0":
                     print(f"[sync_quotes] {raw_code} baostock error: {rs.error_msg}")
                     reset_bs()
+                    bs = get_bs()
                     continue
 
                 row_data = []
@@ -312,9 +362,57 @@ def _sync_all_quotes():
             if not row_data:
                 continue
 
+            # 过滤掉列数不足的行（baostock 偶发返回空行或残缺行，防止 list index out of range）
+            expected_cols = len(fields.split(","))
+            row_data = [r for r in row_data if len(r) >= expected_cols]
+            if not row_data:
+                print(f"[sync_quotes] {raw_code} 所有行列数不足 {expected_cols}，跳过")
+                continue
+
             r = row_data[-1]
+
+            # 校验 baostock 返回的 code 字段（index=1）是否与请求的 code 一致，防止串码
+            returned_bs_code = str(r[1]).strip().lower()  # e.g. "sh.688012"
+            if returned_bs_code != bs_code.lower():
+                print(f"[sync_quotes] {raw_code} 串码：请求 {bs_code}，返回 {returned_bs_code}，重置session跳过")
+                reset_bs()
+                bs = get_bs()
+                continue
+
+            row_trade_date = r[0]  # baostock 返回的行情日期
+
+            # 跳过逻辑：判断行情日期而非 updated_at，确保拿到的是最新交易日数据
+            if _latest_trade_date and row_trade_date < _latest_trade_date:
+                # baostock 返回的不是最新交易日，说明数据还未更新，跳过
+                skipped_count += 1
+                with _lock:
+                    _status["done"] = idx + 1
+                continue
+
+            q = quotes.get(raw_code)
+            if q and q.updated_at and row_trade_date:
+                # 若当前 stock_quote 已经记录了该行情日期的数据，跳过
+                existing_kline = _kline_latest.get(raw_code)
+                if existing_kline and existing_kline[0] == row_trade_date:
+                    # 还需检查价格是否合理，不合理则不跳过（强制覆盖修正）
+                    if abs(q.price - existing_kline[1]) / existing_kline[1] < 0.01:
+                        skipped_count += 1
+                        with _lock:
+                            _status["done"] = idx + 1
+                        continue
+
             close = round(_safe_float(r[5]), 4)
             preclose = round(_safe_float(r[6]), 4)
+
+            # 价格合理性校验：仅拦截 baostock 串码（偏差通常 >100%）
+            # 除权场景下价格跳变可达 30-50%，不应拦截，直接信任 baostock 数据
+            kline_ref = _kline_latest.get(raw_code)
+            if kline_ref and kline_ref[1] > 0 and close > 0:
+                diff_pct = abs(close - kline_ref[1]) / kline_ref[1] * 100
+                if diff_pct > 60:
+                    print(f"[sync_quotes] {raw_code} 价格异常：baostock={close}, kline={kline_ref[1]}, 偏差={diff_pct:.1f}%，跳过写入")
+                    sched_log("warning", f"[行情同步] {raw_code} 价格异常（baostock={close}, kline={kline_ref[1]}, 偏差={diff_pct:.1f}%），已跳过", source="scheduler")
+                    continue
             high = round(_safe_float(r[3]), 4)
             low = round(_safe_float(r[4]), 4)
             change_amt = round(close - preclose, 4)
@@ -419,6 +517,13 @@ def _sync_all_quotes():
 
 
 def _sync_klines(code: str, period: str = "daily"):
+    # 今日已有最新 K 线则跳过（避免重复全量拉取）
+    if period == "daily":
+        latest = _latest_kline_date(code)
+        today_str = date.today().strftime("%Y-%m-%d")
+        if latest and latest >= today_str:
+            return
+
     from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 
     def _fetch_rows():
@@ -735,6 +840,43 @@ async def trigger_sync(background_tasks: BackgroundTasks):
     return {"status": "started", "codes": len(codes)}
 
 
+@router.post("/sync/quotes/batch")
+async def sync_quotes_batch(payload: dict):
+    """批量刷新指定股票的行情，同步写入 stock_quote 表后返回最新数据。
+    body: {"codes": ["000001", "600183", ...]}
+    """
+    from routers.quote import _fetch_and_cache_quote, _is_a_share
+
+    codes = payload.get("codes", [])
+    if not codes or not isinstance(codes, list):
+        raise HTTPException(status_code=400, detail="codes 参数不能为空")
+
+    a_codes = [c for c in codes if _is_a_share(str(c).strip())]
+    if not a_codes:
+        raise HTTPException(status_code=400, detail="codes 中没有有效的A股代码")
+
+    results = {}
+    errors = {}
+
+    def _do_batch():
+        for code in a_codes:
+            try:
+                data = _fetch_and_cache_quote(code)
+                results[code] = data
+            except Exception as e:
+                errors[code] = str(e)
+        # 清除内存缓存，让下次 /stocks 重新读库
+        _industry_stocks_cache.clear()
+
+    await run_in_threadpool(_do_batch)
+    return {
+        "refreshed": len(results),
+        "failed": len(errors),
+        "quotes": results,
+        "errors": errors,
+    }
+
+
 @router.post("/sync/kline/{code}")
 async def sync_kline(
     code: str,
@@ -770,6 +912,100 @@ async def sync_fundamental(
         raise HTTPException(status_code=400, detail="Not an industry stock")
     background_tasks.add_task(_sync_fundamental, code)
     return {"status": "started", "code": code}
+
+
+# ── 产业内股票批量同步 ──────────────────────────────────────────────
+_industry_sync_status: dict = {
+    "running": False,
+    "industry_id": None,
+    "done": 0,
+    "total": 0,
+    "message": "",
+    "errors": [],
+}
+_industry_sync_lock = _threading.Lock()
+
+
+def _sync_industry_stocks(industry_id: str) -> None:
+    """批量同步指定产业内所有 A 股的 kline + fundamental + quote。"""
+    from routers.system import sched_log
+
+    global _industry_sync_status
+    with _industry_sync_lock:
+        if _industry_sync_status["running"]:
+            return
+        _industry_sync_status = {
+            "running": True,
+            "industry_id": industry_id,
+            "done": 0,
+            "total": 0,
+            "message": f"[产业同步] 正在读取 {industry_id} 产业节点...",
+            "errors": [],
+        }
+
+    db = SessionLocal()
+    try:
+        nodes = (
+            db.query(IndustryNode)
+            .filter(IndustryNode.industry_id == industry_id)
+            .all()
+        )
+        codes: list[str] = []
+        for node in nodes:
+            stocks = json.loads(node.stocks or "[]")
+            for code in stocks:
+                if code and code not in codes:
+                    codes.append(code)
+    finally:
+        db.close()
+
+    if not codes:
+        _industry_sync_status["running"] = False
+        _industry_sync_status["message"] = f"[产业同步] {industry_id} 无 A 股节点，已跳过"
+        sched_log("warning", f"[产业同步] {industry_id} 无 A 股节点", source="manual")
+        return
+
+    total = len(codes)
+    _industry_sync_status["total"] = total
+    sched_log("info", f"[产业同步] 开始同步 {industry_id}，共 {total} 只股票", source="manual")
+
+    errors: list[str] = []
+    for idx, code in enumerate(codes):
+        _industry_sync_status["done"] = idx
+        _industry_sync_status["message"] = f"[产业同步] ({idx + 1}/{total}) 同步 {code}"
+        try:
+            _sync_klines(code, "daily")
+        except Exception as e:
+            errors.append(f"{code} kline: {e}")
+        try:
+            _sync_fundamental(code)
+        except Exception as e:
+            errors.append(f"{code} fundamental: {e}")
+
+    _industry_sync_status["done"] = total
+    _industry_sync_status["running"] = False
+    _industry_sync_status["errors"] = errors
+    msg = f"[产业同步] {industry_id} 完成，共 {total} 只，错误 {len(errors)} 条"
+    _industry_sync_status["message"] = msg
+    sched_log("info", msg, source="manual")
+
+
+@router.post("/sync/industry-stocks/{industry_id}")
+async def sync_industry_stocks(industry_id: str, background_tasks: BackgroundTasks):
+    """触发指定产业内所有 A 股的 kline + fundamental 批量同步。"""
+    if _industry_sync_status.get("running"):
+        return {"status": "already_running", **_industry_sync_status}
+    background_tasks.add_task(_sync_industry_stocks, industry_id)
+    return {"status": "started", "industry_id": industry_id}
+
+
+@router.get("/sync/industry-stocks/status")
+async def get_industry_sync_status():
+    """查询产业内股票批量同步进度。"""
+    return _industry_sync_status
+
+
+# ── 结束：产业内股票批量同步 ─────────────────────────────────────────
 
 
 @router.post("/sync/news/{code}")

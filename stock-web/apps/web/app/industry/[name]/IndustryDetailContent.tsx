@@ -1881,9 +1881,9 @@ function ProcessFlowView({
 
                     <div
                       style={{
-                        display: "grid",
-                        gridTemplateColumns:
-                          "repeat(auto-fit, minmax(140px, 1fr))",
+                        display: "flex",
+                        flexWrap: "wrap",
+                        alignItems: "flex-start",
                         gap: 12,
                         marginTop: 8,
                         width: "100%",
@@ -1907,30 +1907,31 @@ function ProcessFlowView({
                         });
                         const renderNode = (nd: ComponentNode) => {
                           const isSel = selectedId === nd.id;
-                          return (
+                           return (
                             <button
-                              key={nd.id}
-                              onClick={() => onSelect(nd.id)}
-                              style={{
-                                display: "flex",
-                                flexDirection: "column",
-                                alignItems: "flex-start",
-                                gap: 4,
-                                padding: "10px 14px",
-                                borderRadius: 8,
-                                background: isSel
-                                  ? `${lc.accent}22`
-                                  : `${lc.accent}08`,
-                                border: `1.5px solid ${isSel ? lc.accent : lc.border}`,
-                                cursor: "pointer",
-                                minWidth: 120,
-                                transition: "all 0.18s ease",
-                                boxShadow: isSel
-                                  ? `0 0 16px ${lc.accent}44, inset 0 0 8px ${lc.accent}18`
-                                  : "none",
-                                transform: isSel ? "translateY(-2px)" : "none",
-                              }}
-                            >
+                               key={nd.id}
+                               onClick={() => onSelect(nd.id)}
+                               style={{
+                                 display: "flex",
+                                 flexDirection: "column",
+                                 alignItems: "flex-start",
+                                 gap: 4,
+                                 padding: "10px 14px",
+                                 borderRadius: 8,
+                                 background: isSel
+                                   ? `${lc.accent}22`
+                                   : `${lc.accent}08`,
+                                 border: `1.5px solid ${isSel ? lc.accent : lc.border}`,
+                                 cursor: "pointer",
+                                 minWidth: 120,
+                                 flexShrink: 0,
+                                 transition: "all 0.18s ease",
+                                 boxShadow: isSel
+                                   ? `0 0 16px ${lc.accent}44, inset 0 0 8px ${lc.accent}18`
+                                   : "none",
+                                 transform: isSel ? "translateY(-2px)" : "none",
+                               }}
+                             >
                               <div
                                 style={{
                                   display: "flex",

@@ -92,8 +92,13 @@ def _sort_meta_missing_first(codes: list) -> list:
 def _run_full_sync():
     from routers.system import sched_log
     from routers.sw_industry import sync_sw_industries
+    from routers.industry import is_trading_day
 
     _stop_requested.clear()
+
+    if not is_trading_day():
+        sched_log("info", "非交易日，跳过全量同步", source="scheduler")
+        return
 
     db = SessionLocal()
     try:
@@ -264,13 +269,32 @@ def _run_full_sync():
             )
         return
 
-    # [5/5] 板块新闻同步
-    sched_log("info", "[5/5] 开始同步板块新闻...")
+    # [5/6] 申万行业板块 K 线同步
+    sched_log("info", "[5/6] 开始同步申万行业板块 K 线...")
+    try:
+        from routers.sw_industry import _sync_rotation_klines as _sync_sw_klines
+        _sync_sw_klines()
+        sched_log("success", "[5/6] 申万行业板块 K 线同步完成")
+    except Exception as e:
+        sched_log("error", f"[5/6] 申万行业板块 K 线同步失败: {e}")
+
+    if _stop_requested.is_set():
+        sched_log("warning", "同步已被用户停止")
+        with _lock:
+            _status.update(
+                running=False,
+                phase="stopped",
+                finished_at=datetime.utcnow().isoformat(),
+            )
+        return
+
+    # [6/6] 板块新闻同步
+    sched_log("info", "[6/6] 开始同步板块新闻...")
     try:
         from routers.theme import sync_theme_news as _sync_theme_news
         _sync_theme_news()
     except Exception as e:
-        sched_log("error", f"[5/5] 板块新闻同步失败: {e}")
+        sched_log("error", f"[6/6] 板块新闻同步失败: {e}")
 
     with _lock:
         _status.update(

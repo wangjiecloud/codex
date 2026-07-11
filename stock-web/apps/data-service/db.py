@@ -104,6 +104,270 @@ class StockFundamental(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class StockF10Snapshot(Base):
+    """东方财富 F10 主要指标快照（每次抓取覆盖最新一条）"""
+    __tablename__ = "stock_f10_snapshot"
+    code = Column(String(10), primary_key=True)
+    # ---------- 基本每股指标 ----------
+    eps_basic = Column(Float)           # 基本每股收益(元)
+    eps_diluted = Column(Float)         # 稀释每股收益(元)
+    eps_deducted = Column(Float)        # 扣非每股收益(元)
+    nav_per_share = Column(Float)       # 每股净资产(元)
+    reserve_per_share = Column(Float)   # 每股公积金(元)
+    retained_per_share = Column(Float)  # 每股未分配利润(元)
+    cfps = Column(Float)                # 每股经营现金流(元)
+    # ---------- 估值指标 ----------
+    pe_dynamic = Column(Float)          # 市盈率-动(倍)
+    pe_ttm = Column(Float)              # 市盈率TTM(倍)
+    pe_static = Column(Float)           # 市盈率-静(倍)
+    pb = Column(Float)                  # 市净率(倍)
+    total_shares = Column(Float)        # 总股本(万股)
+    circulating_shares = Column(Float)  # 流通股本(万股)
+    total_market_cap = Column(Float)    # 总市值(元)
+    circulating_market_cap = Column(Float)  # 流通市值(元)
+    # ---------- 成长能力指标 ----------
+    revenue = Column(Float)             # 营业总收入(元)
+    revenue_yoy = Column(Float)         # 营业总收入同比增长(%)
+    revenue_qoq = Column(Float)         # 营业总收入滚动环比增长(%)
+    gross_profit = Column(Float)        # 毛利润(元)
+    net_profit = Column(Float)          # 归属净利润(元)
+    net_profit_yoy = Column(Float)      # 归属净利润同比增长(%)
+    net_profit_qoq = Column(Float)      # 归属净利润滚动环比增长(%)
+    deducted_profit = Column(Float)     # 扣非净利润(元)
+    deducted_profit_yoy = Column(Float) # 扣非净利润同比增长(%)
+    deducted_profit_qoq = Column(Float) # 扣非净利润滚动环比增长(%)
+    # ---------- 盈利能力指标 ----------
+    roe_weighted = Column(Float)        # 净资产收益率(加权)(%)
+    roe_deducted = Column(Float)        # 净资产收益率(扣非/加权)(%)
+    roa_weighted = Column(Float)        # 总资产收益率(加权)(%)
+    gross_margin = Column(Float)        # 毛利率(%)
+    net_margin = Column(Float)          # 净利率(%)
+    # ---------- 资产负债指标 ----------
+    debt_ratio = Column(Float)          # 资产负债率(%)
+    current_ratio = Column(Float)       # 流动比率
+    quick_ratio = Column(Float)         # 速动比率
+    # ---------- 运营效率指标 ----------
+    inventory_turnover = Column(Float)  # 存货周转率
+    ar_days = Column(Float)             # 应收账款周转天数
+    # ---------- 收益质量指标 ----------
+    prepaid_revenue_ratio = Column(Float)   # 预收账款/营业收入
+    sales_cashflow_ratio = Column(Float)    # 销售净现金流/营业收入
+    # ---------- 报告期及数据源信息 ----------
+    report_period = Column(String(20))  # 最新报告期(如2026-03-31)
+    data_source = Column(String(50), default="eastmoney_f10")
+    source_url = Column(Text)           # 来源 URL
+    raw_json = Column(Text)             # 原始数据 JSON 全量备份
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class StockF10FinancialHistory(Base):
+    """东方财富 F10 财务历史数据（多报告期，按 code+report_date 唯一）"""
+    __tablename__ = "stock_f10_financial_history"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    code = Column(String(10), index=True)
+    report_date = Column(String(20))      # 报告期 yyyy-MM-dd
+    # 成长能力
+    revenue = Column(Float)
+    revenue_yoy = Column(Float)
+    revenue_qoq = Column(Float)
+    gross_profit = Column(Float)
+    net_profit = Column(Float)
+    net_profit_yoy = Column(Float)
+    net_profit_qoq = Column(Float)
+    deducted_profit = Column(Float)
+    deducted_profit_yoy = Column(Float)
+    # 每股指标
+    eps_basic = Column(Float)
+    eps_diluted = Column(Float)
+    eps_deducted = Column(Float)
+    nav_per_share = Column(Float)
+    cfps = Column(Float)
+    # 盈利能力
+    roe_weighted = Column(Float)
+    roa_weighted = Column(Float)
+    gross_margin = Column(Float)
+    net_margin = Column(Float)
+    # 资产负债
+    debt_ratio = Column(Float)
+    current_ratio = Column(Float)
+    quick_ratio = Column(Float)
+    updated_at = Column(DateTime, default=datetime.utcnow)
+    __table_args__ = (UniqueConstraint("code", "report_date"),)
+
+
+class StockF10DividendHistory(Base):
+    """东方财富 F10 分红历史"""
+    __tablename__ = "stock_f10_dividend_history"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    code = Column(String(10), index=True)
+    report_period = Column(String(20))    # 报告期(如2025年报)
+    announce_date = Column(String(20))    # 公告日期
+    dividend_plan = Column(String(100))   # 分红方案(如10派2.3元)
+    record_date = Column(String(20))      # 股权登记日
+    ex_div_date = Column(String(20))      # 除权除息日
+    dividend_per_share = Column(Float)    # 每股股利(元,税前)
+    status = Column(String(20))           # 方案进度
+    updated_at = Column(DateTime, default=datetime.utcnow)
+    __table_args__ = (UniqueConstraint("code", "report_period"),)
+
+
+class StockF10InstitutionForecast(Base):
+    """东方财富 F10 机构盈利预测"""
+    __tablename__ = "stock_f10_institution_forecast"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    code = Column(String(10), index=True)
+    institution = Column(String(100))     # 机构名称
+    year = Column(String(10))             # 预测年份(如2026E)
+    eps_forecast = Column(Float)          # 预测每股收益(元)
+    pe_forecast = Column(Float)           # 对应市盈率
+    net_profit_forecast = Column(Float)   # 预测净利润(元)
+    revenue_forecast = Column(Float)      # 预测营收(元)
+    rating = Column(String(20))           # 评级(买入/增持等)
+    report_date = Column(String(20))      # 报告日期
+    updated_at = Column(DateTime, default=datetime.utcnow)
+    __table_args__ = (UniqueConstraint("code", "institution", "year"),)
+
+
+class StockF10BusinessAnalysis(Base):
+    """东方财富 F10 经营分析（主营构成、研发、客户供应商等）"""
+    __tablename__ = "stock_f10_business_analysis"
+    code = Column(String(10), primary_key=True)
+    report_date = Column(String(20))
+    # 主营构成 JSON（按产品/行业/地区分类）
+    main_business_breakdown = Column(Text)   # JSON
+    # 研发投入
+    rd_expense = Column(Float)               # 研发投入金额(元)
+    rd_expense_ratio = Column(Float)         # 研发投入占营收比(%)
+    # 员工竞争力
+    employee_count = Column(Integer)
+    revenue_per_employee = Column(Float)     # 人均营业总收入(万元)
+    profit_per_employee = Column(Float)      # 人均净利润(万元)
+    salary_per_employee = Column(Float)      # 人均薪酬(万元)
+    # 前五大客户
+    top5_customers = Column(Text)            # JSON
+    top5_customers_ratio = Column(Float)     # 前五大客户销售占比(%)
+    # 经营评述摘要
+    business_review = Column(Text)
+    core_competence = Column(Text)           # 核心竞争力描述
+    industry_background = Column(Text)       # 行业背景描述
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class StockF10ShareholderInfo(Base):
+    """东方财富 F10 股东研究快照"""
+    __tablename__ = "stock_f10_shareholder_info"
+    code = Column(String(10), primary_key=True)
+    report_date = Column(String(20))
+    total_shareholders = Column(Integer)       # 股东总户数
+    avg_shares_per_holder = Column(Float)      # 户均持股(股)
+    top10_holders = Column(Text)               # JSON 前十大股东
+    top10_float_holders = Column(Text)         # JSON 前十大流通股东
+    institutional_ratio = Column(Float)        # 机构持股比例(%)
+    major_holder_change = Column(Text)         # 主要股东变化描述
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class StockF10FinancialStatement(Base):
+    """东方财富 F10 财务三表详细科目（资产负债表/利润表/现金流量表）"""
+    __tablename__ = "stock_f10_financial_statement"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    code = Column(String(10), index=True)
+    report_date = Column(String(20))          # 报告期 yyyy-MM-dd
+    statement_type = Column(String(20))       # "balance_sheet" | "income" | "cashflow"
+    tab_label = Column(String(20), default="按报告期")  # 按报告期/按单季度/同比/年报
+    content_text = Column(Text)               # 原始文本内容（全量存储）
+    updated_at = Column(DateTime, default=datetime.utcnow)
+    __table_args__ = (UniqueConstraint("code", "statement_type", "tab_label", "report_date"),)
+
+
+class StockF10PeerComparison(Base):
+    """东方财富 F10 同行比较数据"""
+    __tablename__ = "stock_f10_peer_comparison"
+    code = Column(String(10), primary_key=True)
+    report_date = Column(String(20))
+    content_text = Column(Text)               # 同行比较原始文本
+    # 行业排名信息
+    industry_name = Column(String(50))        # 所属申万行业
+    industry_rank = Column(Integer)           # 行业排名
+    industry_total = Column(Integer)          # 行业总公司数
+    # 关键指标行业对比 JSON
+    peer_metrics_json = Column(Text)          # {"roe_rank": 5, "gross_margin_rank": 3, ...}
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class StockF10CompanyProfile(Base):
+    """东方财富 F10 公司概况 + 公司高管 + 股本结构"""
+    __tablename__ = "stock_f10_company_profile"
+    code = Column(String(10), primary_key=True)
+    # 公司概况 gsgk
+    company_name = Column(String(100))
+    listed_date = Column(String(20))          # 上市日期
+    registered_capital = Column(Float)       # 注册资本(万元)
+    employees = Column(Integer)               # 员工人数
+    business_scope = Column(Text)             # 经营范围
+    main_business = Column(Text)              # 主营业务描述
+    core_competence = Column(Text)            # 核心竞争力
+    industry_background = Column(Text)        # 行业背景
+    # 公司高管 gsgg
+    executives_json = Column(Text)            # JSON 高管列表 [{name, title, salary}, ...]
+    # 股本结构 gbjg
+    share_structure_json = Column(Text)       # JSON 股本结构各期
+    total_shares = Column(Float)              # 总股本(万股)
+    float_a_shares = Column(Float)            # 流通A股(万股)
+    restricted_shares = Column(Float)         # 限售股(万股)
+    # 核心题材 hxtc
+    concept_sectors = Column(Text)            # JSON 所属板块列表
+    # 资本运作 zbyz
+    capital_operations = Column(Text)         # 资本运作历史文本
+    # 关联个股 glgg
+    related_stocks_json = Column(Text)        # JSON 关联个股
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class StockF10KeyEvents(Base):
+    """东方财富 F10 公司大事纪要"""
+    __tablename__ = "stock_f10_key_events"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    code = Column(String(10), index=True)
+    event_date = Column(String(20))           # 事件日期
+    event_type = Column(String(50))           # 事件类型（股东大会/增发/回购/调研等）
+    event_desc = Column(Text)                 # 事件描述
+    source_url = Column(Text)                 # 公告链接
+    updated_at = Column(DateTime, default=datetime.utcnow)
+    __table_args__ = (UniqueConstraint("code", "event_date", "event_type"),)
+
+
+class StockF10FundFlow(Base):
+    """东方财富 F10 资金流向与龙虎榜"""
+    __tablename__ = "stock_f10_fund_flow"
+    code = Column(String(10), primary_key=True)
+    # 资金流向 zjlx
+    fund_flow_text = Column(Text)             # 资金流向原始文本
+    margin_balance = Column(Float)            # 融资余额(元)
+    margin_net_buy = Column(Float)            # 融资净买入额(元)
+    # 龙虎榜 lhbd
+    dragon_tiger_text = Column(Text)          # 龙虎榜原始文本
+    last_dragon_date = Column(String(20))     # 最近一次上榜日期
+    last_dragon_reason = Column(String(200))  # 上榜原因
+    # 大宗交易摘要
+    block_trade_text = Column(Text)           # 大宗交易文本
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class StockF10ResearchReport(Base):
+    """东方财富 F10 研究报告摘要"""
+    __tablename__ = "stock_f10_research_report"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    code = Column(String(10), index=True)
+    report_date = Column(String(20))          # 报告日期
+    institution = Column(String(100))         # 机构名称
+    rating = Column(String(20))               # 评级（买入/增持/推荐等）
+    title = Column(Text)                      # 报告标题
+    summary = Column(Text)                    # 报告摘要
+    updated_at = Column(DateTime, default=datetime.utcnow)
+    __table_args__ = (UniqueConstraint("code", "report_date", "institution", "title"),)
+
+
 class StockNews(Base):
     __tablename__ = "stock_news"
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -293,6 +557,7 @@ class FundFlowSnapshot(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     trade_date = Column(String(10), index=True)   # YYYY-MM-DD
     board_type = Column(String(10))               # concept | industry
+    period = Column(String(10), default="today")  # today | 3d | 5d | 10d
     name = Column(String(100))
     index_val = Column(Float, default=0.0)
     change_pct = Column(Float, default=0.0)
@@ -304,7 +569,7 @@ class FundFlowSnapshot(Base):
     top_stock_change_pct = Column(Float, default=0.0)
     top_stock_price = Column(Float, default=0.0)
     updated_at = Column(DateTime, default=datetime.utcnow)
-    __table_args__ = (UniqueConstraint("trade_date", "board_type", "name"),)
+    __table_args__ = (UniqueConstraint("trade_date", "board_type", "period", "name"),)
 
 
 class StockGuba(Base):
@@ -363,6 +628,18 @@ class StockGubaSync(Base):
     updated_at = Column(DateTime, default=datetime.utcnow)
 
 
+class Memo(Base):
+    """备忘录"""
+
+    __tablename__ = "memo"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    title = Column(String(200), default="")
+    content = Column(Text, nullable=False, default="")
+    pinned = Column(Integer, nullable=False, default=0)   # 1=置顶
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 def get_db():
     db = SessionLocal()
     try:
@@ -396,3 +673,77 @@ def init_db():
                 )
             )
             conn.commit()
+
+        ffs_cols = {
+            row[1] for row in conn.execute(text("PRAGMA table_info(fund_flow_snapshot)"))
+        }
+        if "period" not in ffs_cols:
+            # SQLite 不支持修改唯一约束，需重建表
+            conn.execute(text("DROP INDEX IF EXISTS ix_fund_flow_snapshot_trade_date"))
+            conn.execute(text("ALTER TABLE fund_flow_snapshot RENAME TO fund_flow_snapshot_old"))
+            conn.execute(text("""
+                CREATE TABLE fund_flow_snapshot (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    trade_date  VARCHAR(10),
+                    board_type  VARCHAR(10),
+                    period      VARCHAR(10) DEFAULT 'today',
+                    name        VARCHAR(100),
+                    index_val   FLOAT DEFAULT 0.0,
+                    change_pct  FLOAT DEFAULT 0.0,
+                    inflow      FLOAT DEFAULT 0.0,
+                    outflow     FLOAT DEFAULT 0.0,
+                    netflow     FLOAT DEFAULT 0.0,
+                    comp_count  INTEGER DEFAULT 0,
+                    top_stock   VARCHAR(50) DEFAULT '',
+                    top_stock_change_pct FLOAT DEFAULT 0.0,
+                    top_stock_price      FLOAT DEFAULT 0.0,
+                    updated_at  DATETIME,
+                    UNIQUE(trade_date, board_type, period, name)
+                )
+            """))
+            conn.execute(text("""
+                INSERT INTO fund_flow_snapshot
+                    (trade_date, board_type, period, name,
+                     index_val, change_pct, inflow, outflow, netflow,
+                     comp_count, top_stock, top_stock_change_pct, top_stock_price, updated_at)
+                SELECT
+                    trade_date, board_type, 'today', name,
+                    index_val, change_pct, inflow, outflow, netflow,
+                    comp_count, top_stock, top_stock_change_pct, top_stock_price, updated_at
+                FROM fund_flow_snapshot_old
+            """))
+            conn.execute(text(
+                "CREATE INDEX ix_fund_flow_snapshot_trade_date ON fund_flow_snapshot (trade_date)"
+            ))
+            conn.execute(text("DROP TABLE fund_flow_snapshot_old"))
+            conn.commit()
+
+        # memo 表（备忘录，若不存在则建表）
+        memo_tables = {row[0] for row in conn.execute(text("SELECT name FROM sqlite_master WHERE type='table'"))}
+        if "memo" not in memo_tables:
+            conn.execute(text("""
+                CREATE TABLE memo (
+                    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+                    title     VARCHAR(200) DEFAULT '',
+                    content   TEXT NOT NULL DEFAULT '',
+                    pinned    INTEGER NOT NULL DEFAULT 0,
+                    created_at DATETIME NOT NULL,
+                    updated_at DATETIME NOT NULL
+                )
+            """))
+            conn.commit()
+
+        # stock_fundamental 旧表字段补全（向下兼容）
+        sf_cols = {
+            row[1] for row in conn.execute(text("PRAGMA table_info(stock_fundamental)"))
+        }
+        for col_def in [
+            ("net_margin", "FLOAT"),
+            ("current_ratio", "FLOAT"),
+            ("quick_ratio", "FLOAT"),
+            ("inventory_turnover", "FLOAT"),
+            ("ar_days", "FLOAT"),
+        ]:
+            if col_def[0] not in sf_cols:
+                conn.execute(text(f"ALTER TABLE stock_fundamental ADD COLUMN {col_def[0]} {col_def[1]}"))
+        conn.commit()

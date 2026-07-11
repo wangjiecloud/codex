@@ -507,6 +507,8 @@ export function WatchlistPanel() {
   const [graphLoading, setGraphLoading] = useState(false);
   const [quotesLoading, setQuotesLoading] = useState(false);
   const [refreshSeed, setRefreshSeed] = useState(0);
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState<{ refreshed: number; failed: number } | null>(null);
 
   const loadedGraphs = useRef<Set<string>>(new Set());
   const quotesLoaded = useRef(false);
@@ -759,6 +761,35 @@ export function WatchlistPanel() {
     .map((c) => quotes[c])
     .filter((q): q is StockQuote => !!q);
 
+  /* ── Sync quotes for currently visible stocks ── */
+  const handleSyncQuotes = useCallback(async () => {
+    if (syncing || !visibleCodes.length) return;
+    setSyncing(true);
+    setSyncResult(null);
+    try {
+      const res = await fetch(
+        "http://localhost:8000/api/industry/sync/quotes/batch",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ codes: visibleCodes }),
+        },
+      );
+      const data = await res.json();
+      setSyncResult({ refreshed: data.refreshed ?? 0, failed: data.failed ?? 0 });
+      // 用返回的新行情直接更新本地 state（无需重新全量拉取）
+      if (data.quotes && Object.keys(data.quotes).length > 0) {
+        setQuotes((prev) => ({ ...prev, ...data.quotes }));
+      }
+    } catch {
+      setSyncResult({ refreshed: 0, failed: visibleCodes.length });
+    } finally {
+      setSyncing(false);
+      // 3 秒后清除提示
+      setTimeout(() => setSyncResult(null), 3000);
+    }
+  }, [syncing, visibleCodes]);
+
   const upCount = displayStocks.filter((s) => s.change > 0).length;
   const dnCount = displayStocks.filter((s) => s.change < 0).length;
 
@@ -811,19 +842,26 @@ export function WatchlistPanel() {
                 );
               })}
         </div>
-        <div className="absolute top-1 right-1">
+        <div className="absolute top-1 right-1 flex items-center gap-1.5">
+          {syncResult && (
+            <span className={
+              "text-[10px] font-mono px-1.5 py-0.5 rounded " +
+              (syncResult.failed === 0
+                ? "text-[#09d464] bg-[#09d464]/10"
+                : "text-[#e84444] bg-[#e84444]/10")
+            }>
+              {syncResult.failed === 0
+                ? `已刷新 ${syncResult.refreshed} 只`
+                : `${syncResult.refreshed} 成功 / ${syncResult.failed} 失败`}
+            </span>
+          )}
           <button
-            onClick={() => {
-              loadedGraphs.current.clear();
-              quotesLoaded.current = false;
-              setSubGroupsMap({});
-              setQuotes({});
-              setRefreshSeed((s) => s + 1);
-            }}
-            title="刷新行情"
+            onClick={handleSyncQuotes}
+            disabled={syncing || !visibleCodes.length}
+            title={syncing ? "刷新中…" : `刷新当前 ${visibleCodes.length} 只股票行情`}
             className={
-              "p-1.5 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--accent)] hover:bg-[var(--bg-hover)] transition-colors " +
-              (initLoading ? "animate-spin text-[var(--accent)]" : "")
+              "p-1.5 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--accent)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed " +
+              (syncing ? "animate-spin text-[var(--accent)]" : "")
             }
           >
             <RefreshCw size={12} />

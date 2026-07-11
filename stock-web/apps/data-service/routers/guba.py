@@ -46,6 +46,8 @@ def _fetch_news(code: str) -> list[dict]:
         m = _re.search(r'Q\((\{.*\})\)', text, _re.DOTALL)
         if not m:
             # 降级：找 Q( 到最后一个 ) 之间
+            if "Q(" not in text:
+                raise ValueError(f"unexpected response format, content[:200]={text[:200]}")
             start = text.index("Q(") + 2
             end = text.rindex(")")
             d = _json.loads(text[start:end])

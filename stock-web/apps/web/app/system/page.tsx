@@ -875,14 +875,14 @@ export default function SystemMonitorPage() {
     }
   };
 
-  const waitForSyncComplete = async (typeName: string): Promise<void> => {
-    return new Promise((resolve, reject) => {
-      const maxAttempts = 200;
-      let attempts = 0;
-      let lastLoggedProgress = -1;
-      let confirmedStarted = false;
-      let startCheckAttempts = 0;
-      const maxStartChecks = 6;
+   const waitForSyncComplete = async (typeName: string): Promise<void> => {
+     return new Promise((resolve, reject) => {
+       const maxAttempts = 900; // 900 × 2s = 30分钟，覆盖K线3300只全量同步
+       let attempts = 0;
+       let lastLoggedProgress = -1;
+       let confirmedStarted = false;
+       let startCheckAttempts = 0;
+       const maxStartChecks = 6;
 
       const poll = async () => {
         if (unmountedRef.current) {
@@ -950,7 +950,8 @@ export default function SystemMonitorPage() {
           if (attempts < maxAttempts) {
             setTimeout(poll, 2000);
           } else {
-            reject(new Error("同步超时"));
+            addLog("warning", `${typeName}等待超时（30分钟），继续执行后续步骤`);
+            resolve();
           }
         } catch (error) {
           if (unmountedRef.current) {

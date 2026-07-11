@@ -1331,6 +1331,9 @@ fn should_process_notification(
         ServerNotification::TurnStarted(notification) => {
             notification.thread_id == thread_id && notification.turn.id == turn_id
         }
+        ServerNotification::AgentMessageDelta(notification) => {
+            notification.thread_id == thread_id && notification.turn_id == turn_id
+        }
         _ => false,
     }
 }

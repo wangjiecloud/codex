@@ -7,6 +7,17 @@
 
 1、所有的股票相关的数据，都要存到数据库中
 
+1.1、股票基本面（F10）数据爬取规则：
+
+- **必须使用 f10-scraper skill**（位于 `.agents/skills/f10-scraper/`）来爬取和入库 F10 数据
+- 爬取命令（在 `apps/data-service/` 目录下执行）：
+  ```bash
+  python ../../.agents/skills/f10-scraper/scripts/scrape_f10.py --code {股票代码}
+  ```
+- 覆盖 11 张数据库表：stock_f10_snapshot / stock_f10_financial_statement / stock_f10_dividend_history / stock_f10_institution_forecast / stock_f10_business_analysis / stock_f10_shareholder_info / stock_f10_peer_comparison / stock_f10_company_profile / stock_f10_key_events / stock_f10_fund_flow / stock_f10_research_report
+- 爬取后必须用 `--verify-only` 参数验证数据已写入所有表
+- 详细的爬取方法、SPA 结构说明、已知问题解决方案见 `.agents/skills/f10-scraper/SKILL.md`
+
 2、新增产业时必须完整补全以下所有数据，缺一不可：
 
 - stock_meta：产业内所有股票的基本信息（code/name/market/industry_ids）
@@ -77,7 +88,20 @@
 - industry_list.company_count：重新统计产业内 stocks 字段去重后的 A 股数量并更新
 - 如果新增节点属于 upstream 层且 x 坐标与现有节点重叠，需重新均匀分布所有同层节点的 x 坐标（范围 100-1800）
 
-8、PCB 产业（pcb）A股股票完整列表（30只，截至2026-06）：
+9、编译 codex-rs 规则：
+
+- 编译前必须先执行 `cargo clean` 清理旧产物，释放磁盘空间，再执行编译
+- 编译命令统一使用 `cargo build --bin codex`（Mac arm64 原生，无需加 `--target` 参数）
+- 完整流程：
+  ```bash
+  cd ~/codespace/self/SuperJAI/oss/agent/codex/codex-rs
+  cargo clean
+  cargo build --bin codex
+  ```
+- 编译产物路径：`codex-rs/target/debug/codex`，每次编译会覆盖同一文件
+- 编译前确认磁盘剩余空间充足（`df -h /`），至少需要 10G 可用空间
+
+10、PCB 产业（pcb）A股股票完整列表（30只，截至2026-06）：
 
 - 上游原材料/耗材/设备（L0）：600176 中国巨石、603803 宏和科技、301217 铜冠铜箔、688728 德福科技、600110 诺德股份、601208 东材科技、605589 圣泉集团、603002 宏昌电子、688300 联瑞新材、688603 天承科技、002741 光华科技、000657 中钨高新、300407 鼎泰高科、301200 大族数控
 - 覆铜板 CCL（L1）：600183 生益科技（FR4/高速CCL）、603186 华正新材（FR4/高速CCL）、688519 南亚新材（高频高速CCL）

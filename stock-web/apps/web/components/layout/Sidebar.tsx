@@ -14,6 +14,7 @@ import {
   Layers,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 const navItems = [
   {
@@ -105,6 +106,11 @@ export function Sidebar() {
           );
         })}
       </nav>
+
+      {/* 换肤按钮放在 sidebar 底部，不遮挡任何页面内容 */}
+      <div className="mt-auto pt-4">
+        <ThemeToggle sidebar />
+      </div>
     </aside>
   );
 }

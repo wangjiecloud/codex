@@ -285,7 +285,7 @@ impl StatusHistoryCell {
                 ),
             ),
         ];
-        if config.model_provider.wire_api == WireApi::Responses {
+        if matches!(config.model_provider.wire_api, WireApi::Responses) {
             let effort_value = reasoning_effort_override
                 .unwrap_or_else(|| config.model_reasoning_effort.clone())
                 .map(|effort| effort.to_string())

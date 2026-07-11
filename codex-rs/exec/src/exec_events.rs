@@ -28,9 +28,13 @@ pub enum ThreadEvent {
     /// Emitted when an item is updated.
     #[serde(rename = "item.updated")]
     ItemUpdated(ItemUpdatedEvent),
+    /// Streaming delta for an agent message item. Emitted token-by-token during generation.
+    #[serde(rename = "item.delta")]
+    ItemDelta(ItemDeltaEvent),
     /// Signals that an item has reached a terminal state—either success or failure.
     #[serde(rename = "item.completed")]
     ItemCompleted(ItemCompletedEvent),
+
     /// Represents an unrecoverable error emitted directly by the event stream.
     #[serde(rename = "error")]
     Error(ThreadErrorEvent),
@@ -314,4 +318,11 @@ pub struct TodoItem {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 pub struct TodoListItem {
     pub items: Vec<TodoItem>,
+}
+
+/// Streaming delta for an agent message item.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+pub struct ItemDeltaEvent {
+    pub item_id: String,
+    pub delta: String,
 }

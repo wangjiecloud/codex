@@ -35,18 +35,27 @@ export interface TechnicalResult {
 }
 
 export interface FundamentalResult {
-  healthScore: number; // 0-100
+  healthScore: number; // 0-100 财务健康度
   valuation: "undervalued" | "fair" | "overvalued";
-  pe: number;
-  pb: number;
-  roe: number;
-  revenueGrowth: number;
-  profitGrowth: number;
-  debtRatio: number;
-  cashFlowStatus: string;
+  // 判断性描述（默认输出这些，不直接给数字）
+  valuationJudge: string;       // 估值水平判断总结
+  profitabilityJudge: string;   // 盈利能力判断
+  growthJudge: string;          // 成长性判断
+  cashflowJudge: string;        // 现金流判断
+  debtJudge: string;            // 债务风险判断
+  dividendJudge: string;        // 股东回报/分红判断
+  institutionJudge: string;     // 机构观点判断
+  // 具体数值（仅用户明确要求时填写，否则 null）
+  pe: number | null;
+  pb: number | null;
+  roe: number | null;
+  revenueGrowth: number | null;
+  profitGrowth: number | null;
+  debtRatio: number | null;
+  // 结构化输出
   advantages: string[];
   risks: string[];
-  summary: string;
+  summary: string; // 综合判断总结（重点给结论和投资逻辑）
 }
 
 export interface NewsSentimentResult {

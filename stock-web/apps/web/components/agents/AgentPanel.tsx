@@ -150,27 +150,66 @@ export function AgentPanel({ code, stockName }: AgentPanelProps) {
     setChatInput("");
     setChatLoading(true);
 
+    // Placeholder for streaming response
+    const placeholderId = Date.now();
+    setChatMessages((prev) => [
+      ...prev,
+      { role: "agent", content: "", agentId: activeAgent, _id: placeholderId },
+    ]);
+
     try {
       const res = await fetch(`/api/agents/${activeAgent}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ code, stockName, question: chatInput }),
       });
-      const data = await res.json();
-      setChatMessages((prev) => [
-        ...prev,
-        {
-          role: "agent",
-          content: data.result || "分析完成",
-          agentId: activeAgent,
-        },
-      ]);
+      const { taskId } = await res.json() as { taskId: string };
+
+      const sse = new EventSource(`/api/agents/stream/${taskId}`);
+      let accumulated = "";
+
+      sse.onmessage = (event) => {
+        const data = JSON.parse(event.data) as {
+          type: string;
+          text?: string;
+          message?: string;
+        };
+
+        if (data.type === "agent_message" && data.text) {
+          accumulated += (accumulated ? "\n\n" : "") + data.text;
+          setChatMessages((prev) =>
+            prev.map((m) =>
+              (m as ChatMessage & { _id?: number })._id === placeholderId
+                ? { ...m, content: accumulated }
+                : m,
+            ),
+          );
+        } else if (data.type === "done" || data.type === "error") {
+          if (data.type === "error") {
+            setChatMessages((prev) =>
+              prev.map((m) =>
+                (m as ChatMessage & { _id?: number })._id === placeholderId
+                  ? { ...m, content: data.message || "分析出错，请重试" }
+                  : m,
+              ),
+            );
+          }
+          setChatLoading(false);
+          sse.close();
+        }
+      };
+      sse.onerror = () => {
+        setChatLoading(false);
+        sse.close();
+      };
     } catch {
-      setChatMessages((prev) => [
-        ...prev,
-        { role: "agent", content: "分析出错，请重试", agentId: activeAgent },
-      ]);
-    } finally {
+      setChatMessages((prev) =>
+        prev.map((m) =>
+          (m as ChatMessage & { _id?: number })._id === placeholderId
+            ? { ...m, content: "分析出错，请重试" }
+            : m,
+        ),
+      );
       setChatLoading(false);
     }
   };

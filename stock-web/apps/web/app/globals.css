@@ -148,3 +148,207 @@ body {
   outline: none !important;
   box-shadow: none !important;
 }
+
+/* ── Markdown message styles ─────────────────────────────────────────────── */
+
+.md-body {
+  color: var(--text-secondary);
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.md-body .md-p {
+  margin: 0 0 0.6em;
+  line-height: 1.65;
+}
+.md-body .md-p:last-child { margin-bottom: 0; }
+
+.md-body .md-h1, .md-body .md-h2, .md-body .md-h3,
+.md-body .md-h4, .md-body .md-h5, .md-body .md-h6 {
+  color: var(--text-primary);
+  font-weight: 600;
+  margin: 0.9em 0 0.4em;
+  line-height: 1.3;
+}
+.md-body .md-h1 { font-size: 1.1em; }
+.md-body .md-h2 { font-size: 1.05em; }
+.md-body .md-h3 { font-size: 1em; border-bottom: 1px solid var(--border-color); padding-bottom: 2px; }
+.md-body .md-h4, .md-body .md-h5, .md-body .md-h6 { font-size: 0.95em; }
+
+.md-body .md-list {
+  margin: 0.4em 0 0.6em 1.2em;
+  padding: 0;
+}
+.md-body .md-li {
+  margin: 0.25em 0;
+  line-height: 1.6;
+}
+
+.md-body .md-strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.md-body .md-em { font-style: italic; }
+
+.md-body .md-hr {
+  border: none;
+  border-top: 1px solid var(--border-color);
+  margin: 0.8em 0;
+}
+
+/* 行内代码 */
+.md-body .md-inline-code,
+.md-inline-code {
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  font-size: 0.82em;
+  background: var(--bg-deep);
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
+  padding: 1px 5px;
+  color: #e6963a;
+}
+
+/* 代码块 */
+.md-body .md-code-block {
+  margin: 0.6em 0;
+  border-radius: 7px;
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+}
+.md-body .md-code-header {
+  background: var(--bg-deep);
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+}
+.md-body .md-code-lang {
+  font-family: "SF Mono", monospace;
+  font-size: 0.72em;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.md-body .md-code-pre {
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--bg-secondary);
+  overflow-x: auto;
+  max-width: 100%;
+}
+.md-body .md-code {
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  font-size: 0.8em;
+  line-height: 1.6;
+  color: #d4d4d4;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+/* 表格 */
+.md-body .md-table-wrap {
+  overflow-x: auto;
+  margin: 0.6em 0;
+}
+.md-body .md-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.82em;
+}
+.md-body .md-th {
+  background: var(--bg-deep);
+  color: var(--text-primary);
+  font-weight: 600;
+  padding: 5px 10px;
+  border: 1px solid var(--border-color);
+  text-align: left;
+  white-space: nowrap;
+}
+.md-body .md-td {
+  padding: 4px 10px;
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  vertical-align: top;
+}
+.md-body .md-tr:nth-child(even) .md-td {
+  background: var(--bg-secondary);
+}
+
+/* ── 备忘录 Markdown 渲染 ── */
+.memo-markdown h1,
+.memo-markdown h2,
+.memo-markdown h3 {
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-top: 1.1em;
+  margin-bottom: 0.4em;
+}
+.memo-markdown h1 { font-size: 1.1rem; }
+.memo-markdown h2 { font-size: 1rem; border-bottom: 1px solid var(--border-color); padding-bottom: 0.25em; }
+.memo-markdown h3 { font-size: 0.9rem; }
+
+.memo-markdown p {
+  margin: 0.4em 0;
+  color: var(--text-secondary);
+}
+
+.memo-markdown ul,
+.memo-markdown ol {
+  padding-left: 1.4em;
+  margin: 0.4em 0;
+}
+.memo-markdown li { margin: 0.25em 0; }
+.memo-markdown li ul,
+.memo-markdown li ol { margin: 0.15em 0; }
+
+.memo-markdown strong { color: var(--text-primary); font-weight: 600; }
+.memo-markdown em { color: var(--accent); font-style: normal; }
+
+.memo-markdown blockquote {
+  border-left: 3px solid var(--accent);
+  padding: 0.4em 0.8em;
+  margin: 0.6em 0;
+  background: rgba(245,166,35,0.06);
+  border-radius: 0 6px 6px 0;
+  color: var(--text-secondary);
+}
+
+.memo-markdown hr {
+  border: none;
+  border-top: 1px solid var(--border-color);
+  margin: 0.8em 0;
+}
+
+.memo-markdown table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+  margin: 0.6em 0;
+}
+.memo-markdown th {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-weight: 600;
+  padding: 6px 10px;
+  border: 1px solid var(--border-color);
+  text-align: left;
+}
+.memo-markdown td {
+  padding: 5px 10px;
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  vertical-align: top;
+}
+.memo-markdown tr:nth-child(even) td {
+  background: var(--bg-tertiary);
+}
+
+.memo-markdown code {
+  background: var(--bg-tertiary);
+  color: var(--accent);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 0.82em;
+  font-family: monospace;
+}

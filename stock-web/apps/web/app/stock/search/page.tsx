@@ -1,7 +1,9 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useRouter } from "next/navigation";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {
   Search,
   TrendingUp,
@@ -20,14 +22,29 @@ import {
   ChevronDown,
   Network,
   DatabaseZap,
+  BookOpen,
+  Pin,
+  PinOff,
+  Pencil,
+  Trash2,
+  Check,
+  Cpu,
+  Loader2,
+  Sparkles,
+  GripVertical,
+  ChevronsDownUp,
+  ChevronsUpDown,
+  CalendarDays,
+  FileText,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+
 
 const VISIBLE_DEFAULT = 50;
 const VISIBLE_ALL = 100;
 
 type SortMode = "hot" | "rise";
-type MainTab = "stock" | "news" | "relation";
+type MainTab = "stock" | "news" | "relation" | "memo";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 选股相关类型
@@ -196,12 +213,42 @@ function RelationPanel() {
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncProgress, setSyncProgress] = useState<{
-    done: number;
-    total: number;
+    done: number;       // 产业：已完成股票数 / 单股：帖子已抓数
+    total: number;      // 产业：总股票数 / 单股：总帖子数
     message: string;
+    // 产业同步时额外携带的当前股票帖子进度
+    postDone?: number;
+    postTotal?: number;
+    currentCode?: string;
+    industryMode?: boolean;
   } | null>(null);
   const [error, setError] = useState("");
+
+  // 解析后端 status 响应，提取产业层面进度和帖子层面进度
+  const parseStatus = (s: { done: number; total: number; message: string; mode?: string; post_done?: number; post_total?: number; code?: string }) => {
+    // 直接读后端 mode 字段；兜底用 message 中是否含 [产业同步] 前缀
+    const isIndustry = s.mode === "industry" || s.message.includes("[产业同步]");
+    // 直接读后端帖子层进度字段，不再靠 message 解析
+    const postDone = (s.post_done ?? 0) > 0 ? s.post_done : undefined;
+    const postTotal = (s.post_total ?? 0) > 0 ? s.post_total : undefined;
+    // currentCode 从 message 里提取（格式：正在抓取 CODE...）或直接用 s.code
+    const codeMatch = s.message.match(/抓取正文\s+(\w+)/);
+    return {
+      done: s.done,
+      total: s.total,
+      message: s.message,
+      industryMode: isIndustry,
+      postDone,
+      postTotal,
+      currentCode: codeMatch ? codeMatch[1] : s.code,
+    };
+  };
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // ── 产业同步 ──
+  const [showIndustryPicker, setShowIndustryPicker] = useState(false);
+  const [industryList, setIndustryList] = useState<{ id: string; name: string }[]>([]);
+  const industryPickerRef = useRef<HTMLDivElement>(null);
 
   // 点击搜索框外部关闭下拉（与个股页完全相同）
   useEffect(() => {
@@ -212,6 +259,30 @@ function RelationPanel() {
     };
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  // 点击产业选择器外部关闭
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (industryPickerRef.current && !industryPickerRef.current.contains(e.target as Node)) {
+        setShowIndustryPicker(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  // 拉取产业列表
+  useEffect(() => {
+    fetch(`${REL_API}/api/industry/list`)
+      .then((r) => r.json())
+      .then((d) => {
+        const list = (d.industries ?? [])
+          .filter((i: { id: string }) => i.id !== "overview")
+          .map((i: { id: string; name: string }) => ({ id: i.id, name: i.name }));
+        setIndustryList(list);
+      })
+      .catch(() => {});
   }, []);
 
   // 搜索输入处理（与个股页完全相同）
@@ -321,6 +392,33 @@ function RelationPanel() {
     }
   };
 
+  // 产业同步：对产业内所有 A 股逐一抓取股吧帖子，统计关联关系（复用 syncing/syncProgress/pollRef）
+  const startIndustrySync = async (industryId: string, industryName: string) => {
+    setShowIndustryPicker(false);
+    setSyncing(true);
+    setSyncProgress({ done: 0, total: 0, message: `正在启动 ${industryName} 产业关联同步...`, industryMode: true });
+    try {
+      await fetch(`${REL_API}/api/relation/sync/industry/${industryId}`, { method: "POST" });
+      stopPoll();
+      pollRef.current = setInterval(async () => {
+        try {
+          const res = await fetch(`${REL_API}/api/relation/status`, { cache: "no-store" });
+          const s = await res.json();
+          setSyncProgress(parseStatus(s));
+          if (!s.running) {
+            stopPoll();
+            setSyncing(false);
+          }
+        } catch {
+          stopPoll();
+          setSyncing(false);
+        }
+      }, 1000);
+    } catch {
+      setSyncing(false);
+    }
+  };
+
   const fetchAllGraph = async () => {
     setLoading(true);
     setError("");
@@ -353,7 +451,7 @@ function RelationPanel() {
         if (!s.running) return;
         // 后端正在同步，恢复 UI 状态
         setSyncing(true);
-        setSyncProgress({ done: s.done, total: s.total, message: s.message });
+        setSyncProgress(parseStatus(s));
         stopPoll();
         pollRef.current = setInterval(async () => {
           try {
@@ -361,11 +459,7 @@ function RelationPanel() {
               cache: "no-store",
             });
             const st = await r.json();
-            setSyncProgress({
-              done: st.done,
-              total: st.total,
-              message: st.message,
-            });
+            setSyncProgress(parseStatus(st));
             if (!st.running) {
               stopPoll();
               setSyncing(false);
@@ -655,6 +749,35 @@ function RelationPanel() {
           <RefreshCw size={14} className={cn(loading && "animate-spin")} />
           刷新
         </button>
+
+        {/* 产业同步 — 选择产业后批量同步该产业内所有个股的 kline + fundamental */}
+        <div className="relative" ref={industryPickerRef}>
+          <button
+            type="button"
+            onClick={() => setShowIndustryPicker((v) => !v)}
+            disabled={syncing}
+            title="选择产业，抓取该产业内所有个股的股吧帖子并分析关联关系"
+            className="flex items-center gap-1.5 border border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[#f5a623]/50 disabled:opacity-40 disabled:cursor-not-allowed px-4 py-3 rounded-xl text-sm transition-all whitespace-nowrap"
+          >
+            <Network size={14} />
+            {syncing ? "同步中..." : "产业同步"}
+            <ChevronDown size={12} className={cn("transition-transform", showIndustryPicker && "rotate-180")} />
+          </button>
+          {showIndustryPicker && industryList.length > 0 && (
+            <div className="absolute right-0 top-full mt-1 w-56 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-xl shadow-lg z-50 py-1 max-h-72 overflow-y-auto">
+              {industryList.map((ind) => (
+                <button
+                  key={ind.id}
+                  type="button"
+                  onClick={() => startIndustrySync(ind.id, ind.name)}
+                  className="w-full text-left px-4 py-2 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-secondary)] transition-colors"
+                >
+                  {ind.name}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* 已选中股票标签 */}
@@ -669,29 +792,61 @@ function RelationPanel() {
 
       {/* 同步进度条 */}
       {syncing && syncProgress && (
-        <div className="bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-xl px-4 py-3">
-          <div className="flex items-center justify-between mb-1.5">
-            <span className="text-xs text-[var(--text-secondary)]">
-              {syncProgress.message}
-            </span>
-            <span className="text-xs text-[var(--text-tertiary)] tabular-nums">
-              {syncProgress.total === -1
-                ? "获取列表中..."
-                : syncProgress.total === 0
-                  ? ""
-                  : `${syncProgress.done}/${syncProgress.total}`}
-            </span>
-          </div>
-          {syncProgress.total > 0 && (
-            <div className="h-1.5 bg-[var(--bg-tertiary)] rounded-full overflow-hidden">
-              <div
-                className="h-full bg-[#f5a623] rounded-full transition-all duration-300"
-                style={{
-                  width: `${Math.min(100, (syncProgress.done / syncProgress.total) * 100)}%`,
-                }}
-              />
+        <div className="bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-xl px-4 py-3 space-y-2.5">
+          {/* 产业整体进度（仅产业同步模式） */}
+          {syncProgress.industryMode && syncProgress.total > 0 && (
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs font-medium text-[var(--text-primary)]">
+                  产业整体进度
+                </span>
+                <span className="text-xs text-[var(--text-tertiary)] tabular-nums">
+                  {syncProgress.done}/{syncProgress.total} 只股票
+                </span>
+              </div>
+              <div className="h-2 bg-[var(--bg-tertiary)] rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-[var(--accent)] rounded-full transition-all duration-300"
+                  style={{
+                    width: `${Math.min(100, (syncProgress.done / syncProgress.total) * 100)}%`,
+                  }}
+                />
+              </div>
             </div>
           )}
+          {/* 当前股票帖子进度 */}
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-xs text-[var(--text-secondary)] truncate max-w-[75%]">
+                {syncProgress.industryMode && syncProgress.currentCode
+                  ? `正在抓取 ${syncProgress.currentCode}`
+                  : syncProgress.message}
+              </span>
+              <span className="text-xs text-[var(--text-tertiary)] tabular-nums shrink-0">
+                {syncProgress.postTotal && syncProgress.postDone !== undefined
+                  ? `${syncProgress.postDone}/${syncProgress.postTotal}`
+                  : syncProgress.total === -1
+                    ? "获取列表中..."
+                    : syncProgress.total === 0
+                      ? ""
+                      : !syncProgress.industryMode
+                        ? `${syncProgress.done}/${syncProgress.total}`
+                        : ""}
+              </span>
+            </div>
+            {(syncProgress.postTotal ?? syncProgress.total) > 0 && (
+              <div className="h-1.5 bg-[var(--bg-tertiary)] rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-[#f5a623] rounded-full transition-all duration-300"
+                  style={{
+                    width: syncProgress.postTotal && syncProgress.postDone !== undefined
+                      ? `${Math.min(100, (syncProgress.postDone / syncProgress.postTotal) * 100)}%`
+                      : `${Math.min(100, (syncProgress.done / syncProgress.total) * 100)}%`,
+                  }}
+                />
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -766,6 +921,492 @@ function RelationPanel() {
             关联股票（×N = 共现次数）
           </span>
           <span className="opacity-60">可拖拽 · 滚轮缩放</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AI 智能选股面板
+// ─────────────────────────────────────────────────────────────────────────────
+interface AITableColumn { key: string; label: string; }
+
+interface AIQueryState {
+  status: "idle" | "loading" | "done" | "error";
+  statusMsg: string;
+  sql: string;
+  columns: AITableColumn[];
+  rows: string[][];
+  total: number;
+  errorMsg: string;
+}
+
+const PAGE_SIZE_AI = 50;
+
+function AISearchPanel() {
+  const router = useRouter();
+  const [aiQuery, setAiQuery] = useState("");
+  const [state, setState] = useState<AIQueryState>({
+    status: "idle", statusMsg: "", sql: "", columns: [], rows: [], total: 0, errorMsg: "",
+  });
+  const [page, setPage] = useState(1);
+
+  // 列排序
+  const [sortKey, setSortKey] = useState<string | null>(null);
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+
+  const handleSort = (key: string) => {
+    setSortKey((prev) => {
+      if (prev === key) {
+        setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+        return key;
+      }
+      setSortDir("desc"); // 新列默认降序
+      return key;
+    });
+    setPage(1);
+  };
+
+  // 市值同步
+  const [marketCapSyncing, setMarketCapSyncing] = useState(false);
+  const [marketCapMsg, setMarketCapMsg] = useState("");
+
+  const handleSyncMarketCap = async () => {
+    if (marketCapSyncing) return;
+    setMarketCapSyncing(true);
+    setMarketCapMsg("启动中...");
+    try {
+      const res = await fetch("http://localhost:8000/api/quote/sync-market-cap", { method: "POST" });
+      if (res.ok) {
+        const d = await res.json() as { total?: number };
+        setMarketCapMsg(`后台同步 ${d.total ?? "?"} 只股票市值，约90分钟完成`);
+      } else {
+        setMarketCapMsg("启动失败，请检查后端服务");
+      }
+    } catch {
+      setMarketCapMsg("请求失败，请检查后端是否运行");
+    } finally {
+      setMarketCapSyncing(false);
+      setTimeout(() => setMarketCapMsg(""), 8000);
+    }
+  };
+
+  // 模型选择
+  const [modelInfo, setModelInfo] = useState<{
+    model: string;
+    models: { name: string; model: string }[];
+  } | null>(null);
+  const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
+  const [switchingModel, setSwitchingModel] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setModelDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  useEffect(() => {
+    fetch("/api/agents/config")
+      .then((r) => r.json())
+      .then((d: { currentModel?: string; models?: { name: string; model: string }[] }) => {
+        setModelInfo({ model: d.currentModel ?? "unknown", models: d.models ?? [] });
+      })
+      .catch(() => {});
+  }, []);
+
+  const switchModel = async (model: string) => {
+    if (!modelInfo || switchingModel) return;
+    setSwitchingModel(true);
+    setModelDropdownOpen(false);
+    try {
+      const res = await fetch("/api/agents/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model }),
+      });
+      if (res.ok) setModelInfo((prev) => (prev ? { ...prev, model } : prev));
+    } catch { /* ignore */ } finally { setSwitchingModel(false); }
+  };
+
+  const handleAISearch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!aiQuery.trim() || state.status === "loading") return;
+
+    setState({ status: "loading", statusMsg: "正在理解查询条件...", sql: "", columns: [], rows: [], total: 0, errorMsg: "" });
+    setPage(1);
+    setSortKey(null);
+    setSortDir("asc");
+
+    try {
+      const res = await fetch("/api/agents/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: aiQuery }),
+      });
+
+      if (!res.ok || !res.body) {
+        setState((s) => ({ ...s, status: "error", errorMsg: "请求失败，请检查服务状态" }));
+        return;
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop() ?? "";
+
+        for (const part of parts) {
+          const line = part.trim();
+          if (!line.startsWith("data: ")) continue;
+          try {
+            const ev = JSON.parse(line.slice(6)) as {
+              type: string;
+              message?: string;
+              sql?: string;
+              columns?: AITableColumn[];
+              rows?: string[][];
+              total?: number;
+            };
+            if (ev.type === "status") {
+              setState((s) => ({ ...s, statusMsg: ev.message ?? "" }));
+            } else if (ev.type === "sql") {
+              setState((s) => ({ ...s, sql: ev.sql ?? "" }));
+            } else if (ev.type === "result") {
+              // 保留 sql 字段（通过 functional update 保留之前 setState 的 sql）
+              setState((s) => ({
+                ...s,
+                status: "done",
+                statusMsg: "",
+                columns: ev.columns ?? [],
+                rows: ev.rows ?? [],
+                total: ev.total ?? 0,
+                errorMsg: "",
+              }));
+            } else if (ev.type === "empty") {
+              setState((s) => ({ ...s, status: "done", rows: [], total: 0 }));
+            } else if (ev.type === "error") {
+              setState((s) => ({ ...s, status: "error", errorMsg: ev.message ?? "查询出错" }));
+            }
+          } catch { /* ignore */ }
+        }
+      }
+      setState((s) => s.status === "loading" ? { ...s, status: "done" } : s);
+    } catch {
+      setState((s) => ({ ...s, status: "error", errorMsg: "请求失败，请检查服务状态" }));
+    }
+  };
+
+  const loading = state.status === "loading";
+  const hasResult = state.status === "done" && state.rows.length > 0;
+  const isEmpty = state.status === "done" && state.rows.length === 0;
+  const hasError = state.status === "error";
+
+  // 分页计算
+  const totalPages = Math.ceil(state.rows.length / PAGE_SIZE_AI);
+
+  // 排序计算（全量排序后再分页）
+  const sortedRows = useMemo(() => {
+    if (!sortKey) return state.rows;
+    const colIdx = state.columns.findIndex((c) => c.key === sortKey);
+    if (colIdx === -1) return state.rows;
+    return [...state.rows].sort((a, b) => {
+      const av = a[colIdx] ?? "";
+      const bv = b[colIdx] ?? "";
+      const an = parseFloat(av);
+      const bn = parseFloat(bv);
+      const numCompare = !isNaN(an) && !isNaN(bn) ? an - bn : av.localeCompare(bv, "zh-CN");
+      return sortDir === "asc" ? numCompare : -numCompare;
+    });
+  }, [state.rows, state.columns, sortKey, sortDir]);
+
+  const pageRows = sortedRows.slice((page - 1) * PAGE_SIZE_AI, page * PAGE_SIZE_AI);
+
+  // 涨跌幅列索引（用于着色）
+  const changeColIdx = state.columns.findIndex((c) => c.key === "change" || c.key === "change_pct");
+
+  return (
+    <div className="mb-8 bg-gradient-to-br from-[#f5a623]/5 to-[#f5a623]/10 border border-[#f5a623]/20 rounded-xl p-5">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 rounded-lg bg-[#f5a623]/10 flex items-center justify-center">
+            <Sparkles size={16} className="text-[#f5a623]" />
+          </div>
+          <div>
+            <h3 className="text-sm font-semibold text-[var(--text-primary)]">AI 智能选股</h3>
+            <p className="text-[11px] text-[var(--text-tertiary)]">用自然语言描述选股条件，AI 帮你从数据库筛选</p>
+          </div>
+        </div>
+
+        {/* 右侧操作区 */}
+        <div className="flex items-center gap-2">
+          {/* 同步市值按钮 */}
+          <button
+            onClick={handleSyncMarketCap}
+            disabled={marketCapSyncing}
+            title="后台异步同步全部股票市值（约90分钟）"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-[var(--bg-secondary)] border border-[var(--border-color)] hover:border-[#f5a623]/50 transition-all disabled:opacity-60 text-xs text-[var(--text-tertiary)] hover:text-[var(--text-primary)] whitespace-nowrap"
+          >
+            <DatabaseZap size={11} className={cn(marketCapSyncing && "animate-pulse text-[#f5a623]")} />
+            {marketCapSyncing ? "启动中..." : "同步市值"}
+          </button>
+
+          {/* 模型选择 */}
+          {modelInfo && (
+            <div className="relative" ref={dropdownRef}>
+            <button
+              onClick={() => setModelDropdownOpen((v) => !v)}
+              disabled={switchingModel}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-[var(--bg-secondary)] border border-[var(--border-color)] hover:border-[#f5a623]/50 transition-all disabled:opacity-60 text-xs"
+              title="点击切换模型"
+            >
+              <Cpu size={11} className="text-[#f5a623]" />
+              <span className="text-[var(--text-tertiary)] font-mono max-w-[80px] truncate">
+                {switchingModel ? "切换中…" : modelInfo.model}
+              </span>
+              <ChevronDown size={10} className={cn("text-[var(--text-tertiary)] transition-transform", modelDropdownOpen && "rotate-180")} />
+            </button>
+            {modelDropdownOpen && modelInfo.models.length > 0 && (
+              <div className="absolute right-0 top-full mt-1 w-48 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg shadow-lg z-50 py-1 overflow-hidden">
+                {modelInfo.models.map((m) => (
+                  <button key={m.model} onClick={() => switchModel(m.model)}
+                    className={cn("w-full text-left px-3 py-2 text-xs transition-colors flex items-center justify-between gap-2",
+                      m.model === modelInfo.model ? "bg-[#f5a623]/10 text-[#f5a623]" : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                    )}>
+                    <span className="font-medium truncate">{m.name}</span>
+                    <span className="font-mono text-[9px] text-[var(--text-tertiary)] shrink-0 truncate max-w-[60px]">{m.model}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+        </div>
+      </div>
+
+      {/* 市值同步提示 */}
+      {marketCapMsg && (
+        <div className="text-[11px] text-[var(--text-secondary)] bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg px-3 py-2 mb-3">
+          {marketCapMsg}
+        </div>
+      )}
+
+      {/* 搜索框 */}
+      <form onSubmit={handleAISearch} className="mb-4">
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={aiQuery}
+            onChange={(e) => setAiQuery(e.target.value)}
+            placeholder="例如：今天跌停的股票有哪些、市盈率低于20且ROE大于15%、PCB行业龙头"
+            className="flex-1 px-4 py-3 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg text-sm text-[var(--text-primary)] placeholder-[var(--text-tertiary)] focus:outline-none focus:border-[#f5a623]/50 focus:ring-1 focus:ring-[#f5a623]/30 transition-all"
+            disabled={loading}
+          />
+          <button type="submit" disabled={loading || !aiQuery.trim()}
+            className="px-5 py-3 bg-[#f5a623] hover:bg-[#e8961a] text-black font-medium rounded-lg text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 whitespace-nowrap"
+          >
+            {loading ? <><Loader2 size={14} className="animate-spin" />分析中...</> : <><Sparkles size={14} />AI 选股</>}
+          </button>
+        </div>
+      </form>
+
+      {/* 状态提示 */}
+      {loading && (
+        <div className="flex items-center gap-2 text-sm text-[var(--text-secondary)] py-2">
+          <Loader2 size={14} className="animate-spin text-[#f5a623]" />
+          <span>{state.statusMsg}</span>
+          {state.sql && <span className="text-[11px] text-[var(--text-tertiary)] truncate max-w-xs font-mono">{state.sql.slice(0, 60)}…</span>}
+        </div>
+      )}
+
+      {/* 错误提示 */}
+      {hasError && (
+        <div className="text-xs text-[#e84444] bg-[#e84444]/10 border border-[#e84444]/20 rounded-lg px-3 py-2">
+          {state.errorMsg}
+        </div>
+      )}
+
+      {/* 空结果 */}
+      {isEmpty && (
+        <div className="text-sm text-[var(--text-tertiary)] py-4 text-center">
+          未找到符合条件的股票，请调整查询条件后重试
+        </div>
+      )}
+
+      {/* 结果表格 */}
+      {hasResult && (
+        <div className="mt-2">
+          {/* 表格顶栏 */}
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium text-[var(--text-primary)]">
+                共 <span className="text-[#f5a623] font-bold">{state.total}</span> 只股票
+              </span>
+              {state.sql && (
+                <details className="inline">
+                  <summary className="text-[11px] text-[var(--text-tertiary)] cursor-pointer hover:text-[var(--text-secondary)] select-none">
+                    查看 SQL
+                  </summary>
+                  <div className="absolute z-10 mt-1 max-w-lg bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg p-3 shadow-xl">
+                    <pre className="text-[11px] text-[var(--text-secondary)] whitespace-pre-wrap font-mono">{state.sql}</pre>
+                  </div>
+                </details>
+              )}
+            </div>
+            {/* 分页信息 */}
+            {totalPages > 1 && (
+              <span className="text-[11px] text-[var(--text-tertiary)]">
+                第 {page} / {totalPages} 页（每页 {PAGE_SIZE_AI} 条）
+              </span>
+            )}
+          </div>
+
+          {/* 表格 */}
+          <div className="overflow-x-auto rounded-lg border border-[var(--border-color)]">
+            <table className="w-full text-sm border-collapse">
+              <thead>
+                <tr className="bg-[var(--bg-secondary)] border-b border-[var(--border-color)]">
+                  <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-[var(--text-tertiary)] whitespace-nowrap w-8">#</th>
+                  {state.columns.map((col) => {
+                    const isActive = sortKey === col.key;
+                    return (
+                      <th
+                        key={col.key}
+                        onClick={() => handleSort(col.key)}
+                        className="px-3 py-2.5 text-left text-[11px] font-semibold text-[var(--text-tertiary)] whitespace-nowrap cursor-pointer select-none hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors group"
+                      >
+                        <span className="inline-flex items-center gap-1">
+                          {col.label}
+                          <span className={cn(
+                            "inline-flex flex-col leading-[6px] transition-opacity",
+                            isActive ? "opacity-100" : "opacity-0 group-hover:opacity-40"
+                          )}>
+                            <span className={cn("text-[8px]", isActive && sortDir === "asc" ? "text-[#f5a623]" : "text-[var(--text-tertiary)]")}>▲</span>
+                            <span className={cn("text-[8px]", isActive && sortDir === "desc" ? "text-[#f5a623]" : "text-[var(--text-tertiary)]")}>▼</span>
+                          </span>
+                        </span>
+                      </th>
+                    );
+                  })}
+                </tr>
+              </thead>
+              <tbody>
+                {pageRows.map((row, ri) => {
+                  const globalIdx = (page - 1) * PAGE_SIZE_AI + ri + 1;
+                  const code = row[state.columns.findIndex((c) => c.key === "code")] ?? "";
+                  return (
+                    <tr key={ri}
+                      onClick={() => code && window.open(`/stock/${code}`, "_blank")}
+                      className={cn(
+                        "border-b border-[var(--border-color)] last:border-0 transition-colors",
+                        code ? "cursor-pointer hover:bg-[var(--bg-hover)]" : "",
+                        ri % 2 === 0 ? "bg-transparent" : "bg-[var(--bg-secondary)]/30",
+                      )}
+                    >
+                      <td className="px-3 py-2.5 text-[11px] text-[var(--text-tertiary)] tabular-nums">{globalIdx}</td>
+                      {row.map((cell, ci) => {
+                        const isChange = ci === changeColIdx;
+                        const num = isChange ? parseFloat(cell) : NaN;
+                        const isUp = isChange && !isNaN(num) && num > 0;
+                        const isDown = isChange && !isNaN(num) && num < 0;
+                        const isCode = state.columns[ci]?.key === "code";
+                        return (
+                          <td key={ci} className={cn(
+                            "px-3 py-2.5 whitespace-nowrap tabular-nums",
+                            isCode && "font-mono text-[var(--text-secondary)] text-xs",
+                            !isCode && "text-sm text-[var(--text-primary)]",
+                            isUp && "text-[#e84444] font-medium",
+                            isDown && "text-[#09d464] font-medium",
+                          )}>
+                            {isChange && !isNaN(num) ? `${num > 0 ? "+" : ""}${cell}%` : cell}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {/* 分页控件 */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-center gap-1.5 mt-3">
+              <button
+                onClick={() => setPage(1)}
+                disabled={page === 1}
+                className="px-2.5 py-1.5 text-xs rounded border border-[var(--border-color)] text-[var(--text-secondary)] hover:border-[#f5a623]/50 hover:text-[var(--text-primary)] disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+              >首页</button>
+              <button
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page === 1}
+                className="px-2.5 py-1.5 text-xs rounded border border-[var(--border-color)] text-[var(--text-secondary)] hover:border-[#f5a623]/50 hover:text-[var(--text-primary)] disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+              >上一页</button>
+
+              {/* 页码按钮 */}
+              {Array.from({ length: totalPages }, (_, i) => i + 1)
+                .filter((p) => p === 1 || p === totalPages || Math.abs(p - page) <= 2)
+                .reduce<(number | "...")[]>((acc, p, idx, arr) => {
+                  if (idx > 0 && p - (arr[idx - 1] as number) > 1) acc.push("...");
+                  acc.push(p);
+                  return acc;
+                }, [])
+                .map((p, i) =>
+                  p === "..." ? (
+                    <span key={`ellipsis-${i}`} className="px-1 text-xs text-[var(--text-tertiary)]">…</span>
+                  ) : (
+                    <button key={p}
+                      onClick={() => setPage(p as number)}
+                      className={cn(
+                        "w-7 h-7 text-xs rounded border transition-all",
+                        page === p
+                          ? "bg-[#f5a623] border-[#f5a623] text-black font-medium"
+                          : "border-[var(--border-color)] text-[var(--text-secondary)] hover:border-[#f5a623]/50 hover:text-[var(--text-primary)]"
+                      )}
+                    >{p}</button>
+                  )
+                )}
+
+              <button
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page === totalPages}
+                className="px-2.5 py-1.5 text-xs rounded border border-[var(--border-color)] text-[var(--text-secondary)] hover:border-[#f5a623]/50 hover:text-[var(--text-primary)] disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+              >下一页</button>
+              <button
+                onClick={() => setPage(totalPages)}
+                disabled={page === totalPages}
+                className="px-2.5 py-1.5 text-xs rounded border border-[var(--border-color)] text-[var(--text-secondary)] hover:border-[#f5a623]/50 hover:text-[var(--text-primary)] disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+              >末页</button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 预设查询示例（仅在空闲时显示） */}
+      {state.status === "idle" && (
+        <div className="flex flex-wrap gap-2">
+          <span className="text-[11px] text-[var(--text-tertiary)]">试试：</span>
+          {[
+            "今天跌停的股票有哪些",
+            "今天涨停的股票有哪些",
+            "PCB行业的股票",
+            "市盈率低于20且ROE大于15%",
+          ].map((example) => (
+            <button key={example} onClick={() => setAiQuery(example)}
+              className="text-[11px] text-[#f5a623] hover:text-[#e8961a] bg-[#f5a623]/10 hover:bg-[#f5a623]/20 px-2.5 py-1 rounded-md transition-colors"
+            >{example}</button>
+          ))}
         </div>
       )}
     </div>
@@ -1260,7 +1901,6 @@ function NewsPanel() {
 export default function StockSearchPage() {
   const router = useRouter();
   const [mainTab, setMainTab] = useState<MainTab>("stock");
-  const [query, setQuery] = useState("");
   const [sortMode, setSortMode] = useState<SortMode>("hot");
   const [stocks, setStocks] = useState<PopularStock[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1313,12 +1953,6 @@ export default function StockSearchPage() {
     fetchFromCache(sortMode);
   }, [sortMode, fetchFromCache, mainTab]);
 
-  const handleSearch = (e: React.FormEvent) => {
-    e.preventDefault();
-    const q = query.trim();
-    if (q) router.push(`/stock/${q}`);
-  };
-
   const formatUpdatedAt = (iso: string | null) => {
     if (!iso) return "";
     try {
@@ -1360,7 +1994,9 @@ export default function StockSearchPage() {
                 ? "选股"
                 : mainTab === "news"
                   ? "资讯"
-                  : "关联"}
+                  : mainTab === "relation"
+                    ? "关联"
+                    : "备忘录"}
             </h1>
             {/* 主 Tab 切换 */}
             <div className="flex items-center gap-0.5 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg p-0.5">
@@ -1400,42 +2036,36 @@ export default function StockSearchPage() {
                 <Network size={12} />
                 关联
               </button>
+              <button
+                onClick={() => setMainTab("memo")}
+                className={cn(
+                  "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all",
+                  mainTab === "memo"
+                    ? "bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-sm border border-[var(--border-color)]"
+                    : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]",
+                )}
+              >
+                <BookOpen size={12} />
+                备忘录
+              </button>
             </div>
           </div>
           <p className="text-[var(--text-tertiary)] text-sm">
             {mainTab === "stock"
-              ? "搜索 A 股股票，获取 AI 智能分析"
+              ? "AI 智能选股，热门股票榜单实时更新"
               : mainTab === "news"
                 ? "热门板块最新资讯，每 15 分钟自动更新"
-                : "基于股吧帖子正文挖掘的股票共现关联关系"}
+                : mainTab === "relation"
+                  ? "基于股吧帖子正文挖掘的股票共现关联关系"
+                  : "记录你的投资思考与分析笔记"}
           </p>
         </div>
       </div>
 
       {mainTab === "stock" ? (
         <>
-          {/* 搜索框 */}
-          <form onSubmit={handleSearch} className="mb-8">
-            <div className="relative">
-              <Search
-                className="absolute left-4 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)]"
-                size={18}
-              />
-              <input
-                type="text"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="输入股票代码或名称，如：600519 或 贵州茅台"
-                className="w-full pl-12 pr-4 py-4 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-xl text-[var(--text-primary)] placeholder-[var(--text-tertiary)] focus:outline-none focus:border-[#f5a623]/50 focus:ring-1 focus:ring-[#f5a623]/30 text-base transition-all"
-              />
-              <button
-                type="submit"
-                className="absolute right-3 top-1/2 -translate-y-1/2 bg-[#f5a623] hover:bg-[#e8961a] text-black font-medium px-5 py-2 rounded-lg text-sm transition-colors"
-              >
-                搜索
-              </button>
-            </div>
-          </form>
+          {/* AI 智能选股 */}
+          <AISearchPanel />
 
           {/* 榜单模块 */}
           <div>
@@ -1696,8 +2326,848 @@ export default function StockSearchPage() {
         </>
       ) : mainTab === "news" ? (
         <NewsPanel />
-      ) : (
+      ) : mainTab === "relation" ? (
         <RelationPanel />
+      ) : (
+        <MemoPanel />
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 备忘录 Tab 内容
+// ─────────────────────────────────────────────────────────────────────────────
+interface MemoItem {
+  id: number;
+  title: string;
+  content: string;
+  pinned: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+/** 将复盘文本按「数字、日期 内容」拆分成日期块 */
+interface DailyEntry {
+  idx: number;        // 条目序号（如 1 / 2 / 3）
+  date: string;       // 日期字符串（如 20260707）
+  label: string;      // 格式化后的日期标签（如 2026/07/07）
+  body: string;       // 该条目正文
+}
+
+function parseDailyEntries(content: string): DailyEntry[] | null {
+  // 匹配模式：数字+顿号+8位数字日期（如 1、20260707 或 2、20260708，或行首 -- 20260707 格式）
+  // 同时支持两种写法：「1、20260707」 和 「1、20260707,」
+  const RE = /(?:^|\n)(\d+)[、,，]\s*(\d{8})/g;
+  const matches: { idx: number; date: string; matchStart: number }[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = RE.exec(content)) !== null) {
+    matches.push({ idx: parseInt(m[1]), date: m[2], matchStart: m.index === 0 ? 0 : m.index + 1 });
+  }
+  if (matches.length < 2) return null; // 不足2个日期块，不做拆分
+
+  const entries: DailyEntry[] = [];
+  for (let i = 0; i < matches.length; i++) {
+    const cur = matches[i];
+    const nextStart = i + 1 < matches.length ? matches[i + 1].matchStart : content.length;
+    const body = content.slice(cur.matchStart, nextStart).trim();
+    const d = cur.date;
+    const label = `${d.slice(0, 4)}/${d.slice(4, 6)}/${d.slice(6, 8)}`;
+    entries.push({ idx: cur.idx, date: cur.date, label, body });
+  }
+  return entries;
+}
+
+/** 从文本提取摘要（去掉日期标记后的前 N 个字符） */
+function extractSummary(content: string, maxLen = 80): string {
+  const clean = content
+    .replace(/\d+[、,，]\s*\d{8}/g, "") // 去掉日期标记
+    .replace(/--\s*\d{8}/g, "")
+    .replace(/\n+/g, " ")
+    .trim();
+  return clean.length > maxLen ? clean.slice(0, maxLen) + "…" : clean;
+}
+
+const MEMO_COLLAPSE_KEY = "memo_collapsed_ids";
+
+function MemoPanel() {
+  const API = "http://localhost:8000/api/memo";
+
+  const [memos, setMemos] = useState<MemoItem[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // 持仓股列表
+  const [holdings, setHoldings] = useState<{ code: string; name: string }[]>([]);
+
+  // 折叠状态：存储已展开的 id 集合（默认全部折叠，只有主动展开的才记录）
+  const [expandedIds, setExpandedIds] = useState<Set<number>>(() => {
+    try {
+      const raw = localStorage.getItem(MEMO_COLLAPSE_KEY);
+      if (raw) return new Set(JSON.parse(raw) as number[]);
+    } catch { /* ignore */ }
+    return new Set<number>();
+  });
+
+  // 拖拽排序
+  const [dragOverId, setDragOverId] = useState<number | null>(null);
+  const dragItemId = useRef<number | null>(null);
+
+  // 新建/编辑表单
+  const [editingId, setEditingId] = useState<number | null>(null); // null = 新建
+  const [formTitle, setFormTitle] = useState("");
+  const [formContent, setFormContent] = useState("");
+  const [showForm, setShowForm] = useState(false);
+  const [formMode, setFormMode] = useState<"text" | "plan">("text");
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  // 操作预案表格行
+  interface PlanRow { code: string; name: string; dir: string; trigger: string; target: string; stop: string; pos: string; note: string; }
+  const EMPTY_ROW: PlanRow = { code: "", name: "", dir: "买入", trigger: "", target: "", stop: "", pos: "", note: "" };
+  const [planDate, setPlanDate] = useState(() => {
+    const d = new Date(); d.setDate(d.getDate() + 1);
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+  });
+  const [planRows, setPlanRows] = useState<PlanRow[]>([{ ...EMPTY_ROW }]);
+
+  const addPlanRow = () => setPlanRows((r) => [...r, { ...EMPTY_ROW }]);
+  const delPlanRow = (i: number) => setPlanRows((r) => r.length <= 1 ? r : r.filter((_, idx) => idx !== i));
+  const setPlanCell = (i: number, field: keyof PlanRow, val: string) =>
+    setPlanRows((r) => r.map((row, idx) => idx === i ? { ...row, [field]: val } : row));
+
+  // 将表格序列化为存储内容（JSON 前缀标记）
+  const serializePlan = () => JSON.stringify({ _type: "plan", date: planDate, rows: planRows });
+
+  // 解析内容：判断是否是操作预案 JSON
+  const parsePlan = (content: string): { date: string; rows: PlanRow[] } | null => {
+    try {
+      const obj = JSON.parse(content) as { _type?: string; date?: string; rows?: PlanRow[] };
+      if (obj._type === "plan" && obj.rows) return { date: obj.date ?? "", rows: obj.rows };
+    } catch { /* not json */ }
+    return null;
+  };
+
+  const fetchWithTimeout = (url: string, opts?: RequestInit, ms = 8000) => {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), ms);
+    return fetch(url, { ...opts, signal: ctrl.signal }).finally(() =>
+      clearTimeout(timer),
+    );
+  };
+
+  const fetchMemos = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetchWithTimeout(API);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data: MemoItem[] = await res.json();
+      setMemos(data);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(msg.includes("abort") ? "请求超时，请检查后端服务是否运行" : `加载失败：${msg}`);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // 折叠/展开切换（持久化到 localStorage）
+  const toggleCollapse = (id: number) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      try { localStorage.setItem(MEMO_COLLAPSE_KEY, JSON.stringify([...next])); } catch { /* ignore */ }
+      return next;
+    });
+  };
+
+  // 日期块折叠：key = `${memoId}-${dateStr}`，默认只展开最后一天
+  const [collapsedDates, setCollapsedDates] = useState<Set<string>>(new Set());
+
+  const toggleDateEntry = (key: string) => {
+    setCollapsedDates((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  // 卡片展开时，自动把旧日期全部折叠（只保留最后一天展开）
+  const expandMemo = (memoId: number, entries: DailyEntry[]) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      next.add(memoId);
+      try { localStorage.setItem(MEMO_COLLAPSE_KEY, JSON.stringify([...next])); } catch { /* ignore */ }
+      return next;
+    });
+    // 除最后一天，其余折叠
+    setCollapsedDates((prev) => {
+      const next = new Set(prev);
+      entries.slice(0, -1).forEach((e) => next.add(`${memoId}-${e.date}`));
+      return next;
+    });
+  };
+
+  // 全部展开 / 全部折叠
+  const expandAll = () => {
+    const all = new Set(memos.map((m) => m.id));
+    setExpandedIds(all);
+    try { localStorage.setItem(MEMO_COLLAPSE_KEY, JSON.stringify([...all])); } catch { /* ignore */ }
+  };
+  const collapseAll = () => {
+    setExpandedIds(new Set());
+    try { localStorage.setItem(MEMO_COLLAPSE_KEY, JSON.stringify([])); } catch { /* ignore */ }
+  };
+
+  // 拖拽处理
+  const handleDragStart = (id: number) => {
+    dragItemId.current = id;
+  };
+
+  const handleDragOver = (e: React.DragEvent, id: number) => {
+    e.preventDefault();
+    if (dragItemId.current !== id) setDragOverId(id);
+  };
+
+  const handleDrop = (e: React.DragEvent, targetId: number) => {
+    e.preventDefault();
+    const sourceId = dragItemId.current;
+    if (sourceId === null || sourceId === targetId) {
+      setDragOverId(null);
+      return;
+    }
+    setMemos((prev) => {
+      const arr = [...prev];
+      const srcIdx = arr.findIndex((m) => m.id === sourceId);
+      const tgtIdx = arr.findIndex((m) => m.id === targetId);
+      if (srcIdx === -1 || tgtIdx === -1) return prev;
+      const [item] = arr.splice(srcIdx, 1);
+      arr.splice(tgtIdx, 0, item);
+      return arr;
+    });
+    setDragOverId(null);
+    dragItemId.current = null;
+  };
+
+  const handleDragEnd = () => {
+    setDragOverId(null);
+    dragItemId.current = null;
+  };
+
+  useEffect(() => {
+    fetchMemos();
+    // 拉取持仓股列表
+    fetch("http://localhost:8000/api/portfolio")
+      .then((r) => r.ok ? r.json() : [])
+      .then((data: { code: string; name: string }[]) => {
+        setHoldings(data.map((h) => ({ code: h.code, name: h.name })));
+      })
+      .catch(() => {});
+  }, [fetchMemos]);
+
+  const openNew = () => {
+    setEditingId(null);
+    setFormTitle("");
+    setFormContent("");
+    setFormMode("text");
+    setSaveError(null);
+    setShowForm(true);
+  };
+
+  const openNewPlan = () => {
+    setEditingId(null);
+    setFormTitle("");
+    setFormContent("");
+    setFormMode("plan");
+    const d = new Date(); d.setDate(d.getDate() + 1);
+    setPlanDate(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`);
+    setPlanRows([{ ...EMPTY_ROW }]);
+    setSaveError(null);
+    setShowForm(true);
+  };
+
+  const openEdit = (m: MemoItem) => {
+    setEditingId(m.id);
+    setFormTitle(m.title);
+    setFormContent(m.content);
+    const plan = parsePlan(m.content);
+    if (plan) {
+      setFormMode("plan");
+      setPlanDate(plan.date);
+      setPlanRows(plan.rows);
+    } else {
+      setFormMode("text");
+    }
+    setSaveError(null);
+    setShowForm(true);
+  };
+
+  const cancelForm = () => {
+    setShowForm(false);
+    setEditingId(null);
+    setFormTitle("");
+    setFormContent("");
+    setFormMode("text");
+    setSaveError(null);
+  };
+
+  const saveMemo = async () => {
+    const content = formMode === "plan" ? serializePlan() : formContent;
+    if (formMode === "text" && !content.trim()) return;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      let res: Response;
+      if (editingId === null) {
+        res = await fetchWithTimeout(API, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title: formTitle, content }),
+        });
+      } else {
+        res = await fetchWithTimeout(`${API}/${editingId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title: formTitle, content }),
+        });
+      }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      cancelForm();
+      await fetchMemos();
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setSaveError(msg.includes("abort") ? "请求超时，请检查后端服务" : `保存失败：${msg}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const deleteMemo = async (id: number) => {
+    if (!confirm("确认删除这条备忘录？")) return;
+    try {
+      await fetchWithTimeout(`${API}/${id}`, { method: "DELETE" });
+      await fetchMemos();
+    } catch {
+      // ignore
+    }
+  };
+
+  const togglePin = async (m: MemoItem) => {
+    try {
+      await fetchWithTimeout(`${API}/${m.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pinned: !m.pinned }),
+      });
+      await fetchMemos();
+    } catch {
+      // ignore
+    }
+  };
+
+  const formatTime = (iso: string) => {
+    try {
+      const d = new Date(iso + "Z");
+      return d.toLocaleString("zh-CN", {
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    } catch {
+      return iso;
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* 顶部操作栏 */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-[var(--text-tertiary)]">
+            共 {memos.length} 条
+          </span>
+          {memos.length > 0 && (
+            <>
+              <button
+                onClick={expandAll}
+                title="全部展开"
+                className="flex items-center gap-1 px-2 py-1 rounded text-[10px] text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
+              >
+                <ChevronsUpDown size={11} />
+                全展开
+              </button>
+              <button
+                onClick={collapseAll}
+                title="全部折叠"
+                className="flex items-center gap-1 px-2 py-1 rounded text-[10px] text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
+              >
+                <ChevronsDownUp size={11} />
+                全折叠
+              </button>
+            </>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={openNewPlan}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-[var(--bg-secondary)] border border-[#f5a623]/50 text-[#f5a623] rounded-lg text-xs font-medium hover:bg-[#f5a623]/10 transition-colors"
+          >
+            <BarChart2 size={12} />
+            新建操作预案
+          </button>
+          <button
+            onClick={openNew}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-[#f5a623] text-black rounded-lg text-xs font-medium hover:bg-[#e09510] transition-colors"
+          >
+            <Pencil size={12} />
+            新建备忘录
+          </button>
+        </div>
+      </div>
+
+      {/* 新建 / 编辑表单 */}
+      {showForm && (
+        <div className="bg-[var(--bg-secondary)] border border-[#f5a623]/40 rounded-xl p-4 space-y-3">
+          {/* 标题 */}
+          <input
+            autoFocus
+            type="text"
+            placeholder={formMode === "plan" ? "标题（如：操作预案 07/10）" : "标题（可选）"}
+            value={formTitle}
+            onChange={(e) => setFormTitle(e.target.value)}
+            className="w-full bg-transparent text-sm font-medium text-[var(--text-primary)] placeholder-[var(--text-tertiary)] outline-none border-b border-[var(--border-color)] pb-2"
+          />
+
+          {formMode === "plan" ? (
+            /* ── 操作预案表格编辑器 ── */
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-[var(--text-tertiary)]">预案日期：</span>
+                <input
+                  type="date"
+                  value={planDate}
+                  onChange={(e) => setPlanDate(e.target.value)}
+                  className="text-xs bg-[var(--bg-primary)] border border-[var(--border-color)] rounded px-2 py-1 text-[var(--text-primary)] outline-none focus:border-[#f5a623]/50"
+                />
+              </div>
+              <div className="overflow-x-auto rounded-lg border border-[var(--border-color)]">
+                <table className="w-full text-xs border-collapse">
+                  <thead>
+                    <tr className="bg-[var(--bg-tertiary)] border-b border-[var(--border-color)]">
+                      {["名称","方向","触发条件","目标价","止损价","仓位%","备注",""].map((h, hi) => (
+                        <th key={hi} className="px-2 py-2 text-left font-semibold text-[var(--text-tertiary)] whitespace-nowrap first:pl-3">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {planRows.map((row, i) => (
+                      <tr key={i} className="border-b border-[var(--border-color)] last:border-0">
+                        {/* 名称（持仓股下拉） */}
+                        <td className="px-1 py-1 pl-2">
+                          <select
+                            value={row.code}
+                            onChange={(e) => {
+                              const h = holdings.find((h) => h.code === e.target.value);
+                              setPlanRows((r) => r.map((row, idx) => idx === i
+                                ? { ...row, code: e.target.value, name: h?.name ?? "" }
+                                : row));
+                            }}
+                            className="bg-[var(--bg-primary)] border border-[var(--border-color)] rounded px-1.5 py-1 text-xs outline-none focus:border-[#f5a623]/50 text-[var(--text-primary)] min-w-[120px]"
+                          >
+                            <option value="">选择持仓股...</option>
+                            {holdings.map((h) => (
+                              <option key={h.code} value={h.code}>{h.name}（{h.code}）</option>
+                            ))}
+                          </select>
+                        </td>
+                        {/* 方向 */}
+                        <td className="px-1 py-1">
+                          <select value={row.dir} onChange={(e) => setPlanCell(i, "dir", e.target.value)}
+                            className="bg-[var(--bg-primary)] border border-[var(--border-color)] rounded px-1.5 py-1 text-xs outline-none focus:border-[#f5a623]/50 text-[var(--text-primary)]">
+                            <option>买入</option>
+                            <option>加仓</option>
+                            <option>减仓</option>
+                            <option>止损</option>
+                            <option>止盈</option>
+                            <option>观察</option>
+                          </select>
+                        </td>
+                        {/* 触发条件 */}
+                        <td className="px-1 py-1">
+                          <input value={row.trigger} onChange={(e) => setPlanCell(i, "trigger", e.target.value)}
+                            placeholder="如：站上5日线+放量" className="w-[160px] bg-[var(--bg-primary)] border border-[var(--border-color)] rounded px-1.5 py-1 text-[var(--text-primary)] outline-none focus:border-[#f5a623]/50 text-xs" />
+                        </td>
+                        {/* 目标价 */}
+                        <td className="px-1 py-1">
+                          <input value={row.target} onChange={(e) => setPlanCell(i, "target", e.target.value)}
+                            placeholder="—" className="w-[60px] bg-[var(--bg-primary)] border border-[var(--border-color)] rounded px-1.5 py-1 text-[var(--text-primary)] outline-none focus:border-[#f5a623]/50 text-xs text-center" />
+                        </td>
+                        {/* 止损价 */}
+                        <td className="px-1 py-1">
+                          <input value={row.stop} onChange={(e) => setPlanCell(i, "stop", e.target.value)}
+                            placeholder="—" className="w-[60px] bg-[var(--bg-primary)] border border-[var(--border-color)] rounded px-1.5 py-1 text-[var(--text-primary)] outline-none focus:border-[#f5a623]/50 text-xs text-center" />
+                        </td>
+                        {/* 仓位% */}
+                        <td className="px-1 py-1">
+                          <input value={row.pos} onChange={(e) => setPlanCell(i, "pos", e.target.value)}
+                            placeholder="10%" className="w-[50px] bg-[var(--bg-primary)] border border-[var(--border-color)] rounded px-1.5 py-1 text-[var(--text-primary)] outline-none focus:border-[#f5a623]/50 text-xs text-center" />
+                        </td>
+                        {/* 备注 */}
+                        <td className="px-1 py-1">
+                          <input value={row.note} onChange={(e) => setPlanCell(i, "note", e.target.value)}
+                            placeholder="备注" className="w-[100px] bg-[var(--bg-primary)] border border-[var(--border-color)] rounded px-1.5 py-1 text-[var(--text-primary)] outline-none focus:border-[#f5a623]/50 text-xs" />
+                        </td>
+                        {/* 删除 */}
+                        <td className="px-1 py-1 pr-2">
+                          <button onClick={() => delPlanRow(i)} disabled={planRows.length <= 1}
+                            className="p-1 text-[var(--text-tertiary)] hover:text-red-400 disabled:opacity-20 transition-colors">
+                            <Trash2 size={12} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <button onClick={addPlanRow}
+                className="flex items-center gap-1 text-xs text-[#f5a623] hover:text-[#e09510] transition-colors py-0.5">
+                <span className="text-base leading-none">+</span> 添加一行
+              </button>
+            </div>
+          ) : (
+            /* ── 普通文本备忘录 ── */
+            <textarea
+              placeholder="写下你的投资思考、分析笔记..."
+              value={formContent}
+              onChange={(e) => setFormContent(e.target.value)}
+              rows={6}
+              className="w-full bg-transparent text-sm text-[var(--text-primary)] placeholder-[var(--text-tertiary)] outline-none resize-none leading-relaxed"
+            />
+          )}
+
+          <div className="flex items-center justify-end gap-2 pt-1 border-t border-[var(--border-color)]">
+            {saveError && (
+              <p className="flex-1 text-xs text-red-400">{saveError}</p>
+            )}
+            <button
+              onClick={cancelForm}
+              className="px-3 py-1.5 text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
+            >
+              取消
+            </button>
+            <button
+              onClick={saveMemo}
+              disabled={(formMode === "text" && !formContent.trim()) || saving}
+              className="flex items-center gap-1 px-3 py-1.5 bg-[#f5a623] text-black rounded-lg text-xs font-medium disabled:opacity-40 hover:bg-[#e09510] transition-colors"
+            >
+              <Check size={12} />
+              {saving ? "保存中..." : "保存"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 备忘录列表 */}
+      {loading ? (
+        <div className="text-center py-12 text-[var(--text-tertiary)] text-sm">
+          加载中...
+        </div>
+      ) : error ? (
+        <div className="text-center py-12 space-y-2">
+          <p className="text-sm text-red-400">{error}</p>
+          <button
+            onClick={fetchMemos}
+            className="text-xs text-[var(--text-tertiary)] underline hover:text-[var(--text-primary)]"
+          >
+            重试
+          </button>
+        </div>
+      ) : memos.length === 0 ? (
+        <div className="text-center py-16 space-y-2">
+          <BookOpen size={32} className="mx-auto text-[var(--text-tertiary)] opacity-40" />
+          <p className="text-sm text-[var(--text-tertiary)]">还没有备忘录</p>
+          <p className="text-xs text-[var(--text-tertiary)] opacity-70">
+            点击「新建备忘录」开始记录
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {memos.map((m) => {
+            const isExpanded = expandedIds.has(m.id);
+            const isDragTarget = dragOverId === m.id;
+            const plan = parsePlan(m.content);
+            const dailyEntries = !plan ? parseDailyEntries(m.content) : null;
+            const isDailyLog = dailyEntries !== null && dailyEntries.length >= 2;
+            const summary = !plan ? extractSummary(m.content) : null;
+
+            // 计算标题展示
+            const displayTitle = m.title || (
+              plan
+                ? `操作预案 ${parsePlan(m.content)?.date}（${parsePlan(m.content)?.rows.length} 行）`
+                : isDailyLog
+                  ? `${dailyEntries[0].label} — ${dailyEntries[dailyEntries.length - 1].label}（${dailyEntries.length} 天）`
+                  : m.content.slice(0, 40).replace(/\n/g, " ") + (m.content.length > 40 ? "..." : "")
+            );
+
+            return (
+              <div
+                key={m.id}
+                draggable
+                onDragStart={() => handleDragStart(m.id)}
+                onDragOver={(e) => handleDragOver(e, m.id)}
+                onDrop={(e) => handleDrop(e, m.id)}
+                onDragEnd={handleDragEnd}
+                className={cn(
+                  "group flex bg-[var(--bg-secondary)] border rounded-xl transition-all",
+                  m.pinned
+                    ? "border-[#f5a623]/40"
+                    : "border-[var(--border-color)] hover:border-[var(--border-hover)]",
+                  isDragTarget && "border-[#f5a623]/60 bg-[#f5a623]/5 scale-[1.01] shadow-md",
+                  dragItemId.current === m.id && "opacity-40",
+                )}
+              >
+                {/* 左侧控制栏 */}
+                <div className="flex flex-col items-center justify-start gap-0.5 px-1.5 pt-3 pb-3 shrink-0 border-r border-[var(--border-color)]">
+                  <div
+                    className="cursor-grab active:cursor-grabbing p-1 rounded text-[var(--text-tertiary)] opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity"
+                    title="拖拽排序"
+                  >
+                    <GripVertical size={13} />
+                  </div>
+                  <button
+                    onClick={() => isExpanded ? toggleCollapse(m.id) : (isDailyLog ? expandMemo(m.id, dailyEntries) : toggleCollapse(m.id))}
+                    title={isExpanded ? "折叠" : "展开"}
+                    className="p-1 rounded text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-primary)] transition-all"
+                  >
+                    {isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                  </button>
+                </div>
+
+                {/* 卡片主体 */}
+                <div className="flex-1 min-w-0 p-4">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex-1 min-w-0">
+
+                      {/* ── 标题行 ── */}
+                      <div
+                        className="flex items-center gap-2 cursor-pointer select-none mb-1"
+                        onClick={() => isExpanded ? toggleCollapse(m.id) : (isDailyLog ? expandMemo(m.id, dailyEntries) : toggleCollapse(m.id))}
+                      >
+                        {m.pinned && <Pin size={11} className="text-[#f5a623] shrink-0" />}
+                        {/* 类型图标 */}
+                        {plan ? (
+                          <BarChart2 size={12} className="text-[var(--text-tertiary)] shrink-0" />
+                        ) : isDailyLog ? (
+                          <CalendarDays size={12} className="text-[#60a5fa] shrink-0" />
+                        ) : (
+                          <FileText size={12} className="text-[var(--text-tertiary)] shrink-0" />
+                        )}
+                        <p className="text-sm font-medium text-[var(--text-primary)] truncate">
+                          {displayTitle}
+                        </p>
+                        {/* 日期范围 badge（复盘日记专属） */}
+                        {isDailyLog && !isExpanded && (
+                          <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-[#60a5fa]/10 text-[#60a5fa]">
+                            {dailyEntries.length} 天
+                          </span>
+                        )}
+                      </div>
+
+                      {/* ── 折叠时：摘要 ── */}
+                      {!isExpanded && (
+                        <div
+                          className="cursor-pointer"
+                          onClick={() => isDailyLog ? expandMemo(m.id, dailyEntries) : toggleCollapse(m.id)}
+                        >
+                          {plan ? (
+                            <p className="text-xs text-[var(--text-tertiary)]">
+                              📋 {plan.date} · {plan.rows.length} 条操作计划
+                            </p>
+                          ) : isDailyLog ? (
+                            <div className="space-y-1">
+                              {/* 日期条目预览 */}
+                              <div className="flex flex-wrap gap-1.5 mt-1">
+                                {dailyEntries.map((e) => (
+                                  <span
+                                    key={e.date}
+                                    className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--bg-tertiary)] text-[var(--text-tertiary)] font-mono"
+                                  >
+                                    {e.label}
+                                  </span>
+                                ))}
+                              </div>
+                              {/* 文本摘要 */}
+                              {summary && (
+                                <p className="text-xs text-[var(--text-tertiary)] leading-relaxed line-clamp-2 mt-1">
+                                  {summary}
+                                </p>
+                              )}
+                            </div>
+                          ) : (
+                            summary && (
+                              <p className="text-xs text-[var(--text-tertiary)] leading-relaxed line-clamp-2">
+                                {summary}
+                              </p>
+                            )
+                          )}
+                          <p className="mt-1.5 text-[11px] text-[var(--text-tertiary)]">
+                            {formatTime(m.updated_at)}
+                          </p>
+                        </div>
+                      )}
+
+                      {/* ── 展开时：完整内容 ── */}
+                      {isExpanded && (
+                        <>
+                          {plan ? (
+                            /* 操作预案表格 */
+                            <div className="mt-2 space-y-1.5">
+                              <p className="text-[11px] text-[var(--text-tertiary)]">📋 {plan.date}</p>
+                              <div className="overflow-x-auto rounded-lg border border-[var(--border-color)]">
+                                <table className="w-full text-xs border-collapse">
+                                  <thead>
+                                    <tr className="bg-[var(--bg-tertiary)] border-b border-[var(--border-color)]">
+                                      {["代码","名称","方向","触发条件","目标价","止损价","仓位%","备注"].map((h) => (
+                                        <th key={h} className="px-3 py-2 text-left font-semibold text-[var(--text-tertiary)] whitespace-nowrap">{h}</th>
+                                      ))}
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {plan.rows.map((row, ri) => {
+                                      const DIR_COLOR: Record<string, string> = {
+                                        买入: "text-[#e84444]", 加仓: "text-[#e84444]",
+                                        止损: "text-[#09d464]", 减仓: "text-[#09d464]", 止盈: "text-[#09d464]",
+                                        观察: "text-[var(--text-tertiary)]",
+                                      };
+                                      return (
+                                        <tr key={ri} className={cn("border-b border-[var(--border-color)] last:border-0", ri % 2 === 1 && "bg-[var(--bg-secondary)]/40")}>
+                                          <td className="px-3 py-2 font-mono text-[var(--text-secondary)]">{row.code || "—"}</td>
+                                          <td className="px-3 py-2 text-[var(--text-primary)] font-medium whitespace-nowrap">{row.name || "—"}</td>
+                                          <td className={cn("px-3 py-2 font-semibold whitespace-nowrap", DIR_COLOR[row.dir] ?? "text-[var(--text-secondary)]")}>{row.dir}</td>
+                                          <td className="px-3 py-2 text-[var(--text-secondary)]">{row.trigger || "—"}</td>
+                                          <td className="px-3 py-2 tabular-nums text-[var(--text-primary)]">{row.target || "—"}</td>
+                                          <td className="px-3 py-2 tabular-nums text-[var(--text-primary)]">{row.stop || "—"}</td>
+                                          <td className="px-3 py-2 tabular-nums text-[var(--text-secondary)]">{row.pos || "—"}</td>
+                                          <td className="px-3 py-2 text-[var(--text-tertiary)]">{row.note || ""}</td>
+                                        </tr>
+                                      );
+                                    })}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          ) : isDailyLog ? (
+                            /* 复盘日记：按日期分块，每块可独立折叠 */
+                            <div className="mt-3 space-y-0">
+                              {dailyEntries.map((entry, ei) => {
+                                const dateKey = `${m.id}-${entry.date}`;
+                                const isDateCollapsed = collapsedDates.has(dateKey);
+                                const bodyText = entry.body
+                                  .replace(/^\d+[、,，]\s*\d{8}\s*/, "")
+                                  .replace(/--\s*\d{8}/g, "")
+                                  .trim();
+                                const bodyPreview = bodyText.slice(0, 60).replace(/\n/g, " ") + (bodyText.length > 60 ? "…" : "");
+
+                                return (
+                                  <div key={entry.date} className={cn(
+                                    "relative pl-4",
+                                    ei < dailyEntries.length - 1 && "pb-3",
+                                  )}>
+                                    {/* 时间轴线 */}
+                                    {ei < dailyEntries.length - 1 && (
+                                      <div className="absolute left-[5px] top-5 bottom-0 w-px bg-[var(--border-color)]" />
+                                    )}
+                                    {/* 圆点：折叠时实心，展开时空心 */}
+                                    <div className={cn(
+                                      "absolute left-0 top-[5px] w-2.5 h-2.5 rounded-full border-2 border-[var(--bg-secondary)] transition-colors",
+                                      isDateCollapsed ? "bg-[var(--border-color)]" : "bg-[#60a5fa]/70",
+                                    )} />
+
+                                    {/* 日期标题行（可点击折叠） */}
+                                    <button
+                                      onClick={() => toggleDateEntry(dateKey)}
+                                      className="w-full flex items-center gap-2 mb-1.5 group/date"
+                                    >
+                                      <span className="text-[11px] font-semibold text-[#60a5fa] font-mono tracking-wide">
+                                        {entry.label}
+                                      </span>
+                                      <div className="flex-1 h-px bg-[var(--border-color)]" />
+                                      {isDateCollapsed ? (
+                                        <ChevronRight size={11} className="text-[var(--text-tertiary)] shrink-0" />
+                                      ) : (
+                                        <ChevronDown size={11} className="text-[var(--text-tertiary)] shrink-0" />
+                                      )}
+                                    </button>
+
+                                    {/* 折叠时：一行摘要 */}
+                                    {isDateCollapsed && (
+                                      <p
+                                        className="text-xs text-[var(--text-tertiary)] leading-relaxed mb-1 cursor-pointer"
+                                        onClick={() => toggleDateEntry(dateKey)}
+                                      >
+                                        {bodyPreview}
+                                      </p>
+                                    )}
+
+                                    {/* 展开时：完整正文 */}
+                                    {!isDateCollapsed && (
+                                      <div className="memo-markdown text-sm text-[var(--text-secondary)] leading-relaxed">
+                                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                          {bodyText}
+                                        </ReactMarkdown>
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            /* 普通 markdown 内容 */
+                            <div className="mt-2 memo-markdown text-sm text-[var(--text-secondary)] leading-relaxed">
+                              <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown>
+                            </div>
+                          )}
+                          <p className="mt-3 text-[11px] text-[var(--text-tertiary)]">
+                            {formatTime(m.updated_at)}
+                          </p>
+                        </>
+                      )}
+                    </div>
+
+                    {/* 操作按钮（hover显示） */}
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                      <button
+                        onClick={() => togglePin(m)}
+                        title={m.pinned ? "取消置顶" : "置顶"}
+                        className="p-1.5 rounded-md hover:bg-[var(--bg-primary)] text-[var(--text-tertiary)] hover:text-[#f5a623] transition-colors"
+                      >
+                        {m.pinned ? <PinOff size={13} /> : <Pin size={13} />}
+                      </button>
+                      <button
+                        onClick={() => openEdit(m)}
+                        title="编辑"
+                        className="p-1.5 rounded-md hover:bg-[var(--bg-primary)] text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors"
+                      >
+                        <Pencil size={13} />
+                      </button>
+                      <button
+                        onClick={() => deleteMemo(m.id)}
+                        title="删除"
+                        className="p-1.5 rounded-md hover:bg-[var(--bg-primary)] text-[var(--text-tertiary)] hover:text-red-400 transition-colors"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
       )}
     </div>
   );

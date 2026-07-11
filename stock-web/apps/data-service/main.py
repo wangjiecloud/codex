@@ -18,6 +18,7 @@ from routers import (
     guba,
     fund_flow,
     relation,
+    memo,
 )
 import akshare as ak
 from fastapi import HTTPException
@@ -53,6 +54,7 @@ app.include_router(cleanup.router, prefix="/api/cleanup", tags=["数据清理"])
 app.include_router(guba.router, prefix="/api/guba", tags=["股吧资讯"])
 app.include_router(fund_flow.router, prefix="/api/fund-flow", tags=["资金流向"])
 app.include_router(relation.router, prefix="/api/relation", tags=["股票关联"])
+app.include_router(memo.router, prefix="/api/memo", tags=["备忘录"])
 
 _scheduler = BackgroundScheduler(timezone="Asia/Shanghai")
 
@@ -219,6 +221,11 @@ def startup():
 
     if not auto_sync:
         print("[startup] AUTO_SYNC_ON_STARTUP=false, skipping startup sync")
+        return
+
+    from routers.industry import is_trading_day
+    if not is_trading_day():
+        print("[startup] non-trading day — skipping startup sync")
         return
 
     now = datetime.now().time()

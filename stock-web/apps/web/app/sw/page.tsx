@@ -171,27 +171,43 @@ interface FundFlowItem {
   topStockPrice: number | null;
 }
 
+// /dates 接口返回格式：{ today: [...], "3d": [...], "5d": [...], "10d": [...] }
+type DatesMap = Partial<Record<"today" | "3d" | "5d" | "10d", string[]>>;
+
+const PERIOD_LABELS: Record<string, string> = {
+  "today": "今日",
+  "3d": "3日",
+  "5d": "5日",
+  "10d": "10日",
+};
+
 function FundFlowModal({ onClose }: { onClose: () => void }) {
   const [boardType, setBoardType] = useState<"concept" | "industry">("concept");
   const [period, setPeriod] = useState<"today" | "3d" | "5d" | "10d">("today");
-  // trade_date: null = 用 period，非 null = 历史快照日期
-  const [tradeDate, setTradeDate] = useState<string | null>(null);
-  const [availableDates, setAvailableDates] = useState<string[]>([]);
+  // selectedDate: null = 今日（实时或读今日库存），非 null = 历史日期
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  // datesMap: 各 period 下有数据的交易日列表
+  const [datesMap, setDatesMap] = useState<DatesMap>({});
   const [sortField, setSortField] = useState<
     "netflow" | "inflow" | "outflow" | "changePct"
   >("netflow");
   const [sortOrder, setSortOrderFF] = useState<"desc" | "asc">("desc");
   const [items, setItems] = useState<FundFlowItem[]>([]);
-  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [searchText, setSearchText] = useState("");
 
-  // 获取已有快照日期
+  // 组件挂载时：1) 触发后台异步快照 2) 获取各 period 的已有快照日期
   useEffect(() => {
+    // 后台静默拉取最新数据入库，不阻塞 UI
+    fetch(`${API}/api/fund-flow/snapshot`, {
+      method: "POST",
+      cache: "no-store",
+    }).catch(() => {});
+    // 获取日期列表
     fetch(`${API}/api/fund-flow/dates`, { cache: "no-store" })
       .then((r) => r.json())
-      .then((d) => setAvailableDates(d.dates || []))
+      .then((d: DatesMap) => setDatesMap(d))
       .catch(() => {});
   }, []);
 
@@ -203,11 +219,10 @@ function FundFlowModal({ onClose }: { onClose: () => void }) {
         sort: sortField,
         order: sortOrder,
         limit: "500",
+        period,
       });
-      if (tradeDate) {
-        params.set("trade_date", tradeDate);
-      } else {
-        params.set("period", period);
+      if (selectedDate) {
+        params.set("trade_date", selectedDate);
       }
       const res = await fetch(`${API}/api/fund-flow/${boardType}?${params}`, {
         cache: "no-store",
@@ -215,8 +230,7 @@ function FundFlowModal({ onClose }: { onClose: () => void }) {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setItems(data.items || []);
-      setTotal(data.total || 0);
-    } catch (e) {
+    } catch {
       setError("数据获取失败，请稍后重试");
       setItems([]);
     } finally {
@@ -226,7 +240,7 @@ function FundFlowModal({ onClose }: { onClose: () => void }) {
 
   useEffect(() => {
     fetchData();
-  }, [boardType, period, tradeDate, sortField, sortOrder]);
+  }, [boardType, period, selectedDate, sortField, sortOrder]);
 
   const fmtFlow = (v: number | null) => {
     if (v === null || v === undefined) return "--";
@@ -239,27 +253,23 @@ function FundFlowModal({ onClose }: { onClose: () => void }) {
   );
 
   const filteredItems = searchText.trim()
-    ? items.filter((i) =>
-        i.name.toLowerCase().includes(searchText.trim().toLowerCase()),
-      )
+    ? items.filter((i) => {
+        const search = searchText.trim().toLowerCase();
+        // 支持搜索板块名称或领涨股名称
+        return (
+          i.name.toLowerCase().includes(search) ||
+          i.topStock.toLowerCase().includes(search)
+        );
+      })
     : items;
 
-  // 生成 T 到 T-5 的标签（T=今日，T-1~T-5 按 availableDates 填充）
-  const today = new Date();
-  const dateTabs: { label: string; key: "period" | "date"; value: string }[] = [
-    { label: "今日", key: "period", value: "today" },
-    { label: "3日", key: "period", value: "3d" },
-    { label: "5日", key: "period", value: "5d" },
-    { label: "10日", key: "period", value: "10d" },
-  ];
-  // T-1 ~ T-5：取最近5个快照日期（排除今天）
-  const todayStr = today.toISOString().slice(0, 10);
-  const histDates = availableDates.filter((d) => d < todayStr).slice(0, 5);
-  histDates.forEach((d, i) => {
-    const mm = d.slice(5, 7);
-    const dd = d.slice(8, 10);
-    dateTabs.push({ label: `T-${i + 1} (${mm}/${dd})`, key: "date", value: d });
-  });
+  // 日期维度 tabs：T（今日）+ T-1~T-5（取 today period 的历史日期）
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayDates = datesMap["today"] ?? [];
+  // 当前 period 有数据的日期集合
+  const periodDates = new Set(datesMap[period] ?? []);
+  // 历史日期：排除今天，最多5条
+  const histDates = todayDates.filter((d) => d < todayStr).slice(0, 5);
 
   const SORT_FIELDS = [
     { key: "netflow", label: "净流入" },
@@ -277,17 +287,11 @@ function FundFlowModal({ onClose }: { onClose: () => void }) {
     }
   };
 
-  const isActiveTab = (tab: (typeof dateTabs)[0]) => {
-    if (tab.key === "date") return tradeDate === tab.value;
-    return tradeDate === null && period === tab.value;
-  };
-
-  const handleTabClick = (tab: (typeof dateTabs)[0]) => {
-    if (tab.key === "date") {
-      setTradeDate(tab.value);
-    } else {
-      setTradeDate(null);
-      setPeriod(tab.value as typeof period);
+  // 切换日期时，若历史日期下当前 period 无数据，自动回退到 today
+  const handleDateSelect = (d: string | null) => {
+    setSelectedDate(d);
+    if (d && !periodDates.has(d) && period !== "today") {
+      setPeriod("today");
     }
   };
 
@@ -302,82 +306,150 @@ function FundFlowModal({ onClose }: { onClose: () => void }) {
         onClick={(e) => e.stopPropagation()}
       >
         {/* 标题栏 */}
-        <div className="flex items-center gap-3 px-5 py-3 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] flex-shrink-0">
-          <TrendingUp size={15} className="text-[var(--accent)]" />
-          <span className="text-[14px] font-bold text-[var(--text-primary)]">
-            板块主力资金流向
-          </span>
-          <span className="text-[11px] text-[var(--text-tertiary)]">
-            来源：同花顺数据中心
-          </span>
+        <div className="flex flex-col gap-2 px-5 pt-3 pb-2 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] flex-shrink-0">
+          {/* 第一行：标题 + 板块类型 + 搜索 + 关闭 */}
+          <div className="flex items-center gap-3">
+            <TrendingUp size={15} className="text-[var(--accent)]" />
+            <span className="text-[14px] font-bold text-[var(--text-primary)]">
+              板块主力资金流向
+            </span>
+            <span className="text-[11px] text-[var(--text-tertiary)]">
+              来源：同花顺数据中心
+            </span>
 
-          {/* 板块类型 */}
-          <div className="flex items-center gap-1 ml-3">
-            {(["concept", "industry"] as const).map((t) => (
+            {/* 板块类型 */}
+            <div className="flex items-center gap-1 ml-2">
+              {(["concept", "industry"] as const).map((t) => (
+                <button
+                  key={t}
+                  onClick={() => setBoardType(t)}
+                  className={cn(
+                    "px-2.5 py-0.5 rounded text-[11px] transition-colors",
+                    boardType === t
+                      ? "bg-[var(--accent)] text-black font-medium"
+                      : "text-[var(--text-tertiary)] hover:text-[var(--text-primary)] border border-[var(--border-color)]",
+                  )}
+                >
+                  {t === "concept" ? "概念板块" : "行业板块"}
+                </button>
+              ))}
+            </div>
+
+            <div className="ml-auto flex items-center gap-2">
+              <input
+                type="text"
+                value={searchText}
+                onChange={(e) => setSearchText(e.target.value)}
+                placeholder="搜索板块/股票..."
+                className="px-2 py-0.5 rounded border border-[var(--border-color)] bg-[var(--bg-primary)] text-[11px] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] outline-none focus:border-[var(--accent)] transition-colors w-28"
+              />
               <button
-                key={t}
-                onClick={() => setBoardType(t)}
-                className={cn(
-                  "px-2.5 py-0.5 rounded text-[11px] transition-colors",
-                  boardType === t
-                    ? "bg-[var(--accent)] text-black font-medium"
-                    : "text-[var(--text-tertiary)] hover:text-[var(--text-primary)] border border-[var(--border-color)]",
-                )}
+                onClick={fetchData}
+                disabled={loading}
+                className="flex items-center gap-1 px-2 py-0.5 rounded border border-[var(--border-color)] text-[11px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
               >
-                {t === "concept" ? "概念板块" : "行业板块"}
+                <RefreshCw
+                  size={11}
+                  className={cn(loading && "animate-spin")}
+                />
+                刷新
               </button>
-            ))}
+              <button
+                onClick={onClose}
+                className="p-1 rounded hover:bg-[var(--bg-hover)] text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors"
+              >
+                <X size={14} />
+              </button>
+            </div>
           </div>
 
-          <div className="w-px h-3 bg-[var(--border-color)]" />
-
-          {/* 日期/周期 tabs */}
-          <div className="flex items-center gap-1 flex-wrap">
-            {dateTabs.map((tab) => (
+          {/* 第二行：日期 tabs（T / T-1 ~ T-5）+ period sub-tabs（今日/3日/5日/10日） */}
+          <div className="flex items-center gap-3">
+            {/* 日期维度 */}
+            <div className="flex items-center gap-1">
+              <span className="text-[10px] text-[var(--text-tertiary)] mr-0.5">
+                日期
+              </span>
+              {/* T：今日 */}
               <button
-                key={tab.key + tab.value}
-                onClick={() => handleTabClick(tab)}
+                onClick={() => handleDateSelect(null)}
                 className={cn(
                   "px-2 py-0.5 rounded text-[11px] transition-colors whitespace-nowrap",
-                  isActiveTab(tab)
+                  selectedDate === null
                     ? "bg-[var(--accent)] text-black font-medium"
                     : "text-[var(--text-tertiary)] hover:text-[var(--text-primary)] border border-[var(--border-color)]",
-                  tab.key === "date" && !availableDates.includes(tab.value)
-                    ? "opacity-40 cursor-not-allowed"
-                    : "",
                 )}
               >
-                {tab.label}
+                T
               </button>
-            ))}
-          </div>
+              {/* T-1 ~ T-5 */}
+              {histDates.length === 0 ? (
+                <span className="text-[10px] text-[var(--text-tertiary)] opacity-50 ml-1">
+                  T-1~T-5 每日积累
+                </span>
+              ) : (
+                histDates.map((d, i) => {
+                  const mm = d.slice(5, 7);
+                  const dd = d.slice(8, 10);
+                  return (
+                    <button
+                      key={d}
+                      onClick={() => handleDateSelect(d)}
+                      className={cn(
+                        "px-2 py-0.5 rounded text-[11px] transition-colors whitespace-nowrap",
+                        selectedDate === d
+                          ? "bg-[var(--accent)] text-black font-medium"
+                          : "text-[var(--text-tertiary)] hover:text-[var(--text-primary)] border border-[var(--border-color)]",
+                      )}
+                    >
+                      T-{i + 1}
+                      <span className="ml-0.5 text-[9px] opacity-60">
+                        ({mm}/{dd})
+                      </span>
+                    </button>
+                  );
+                })
+              )}
+            </div>
 
-          <div className="w-px h-3 bg-[var(--border-color)]" />
+            <div className="w-px h-3 bg-[var(--border-color)]" />
 
-          {/* 搜索 */}
-          <input
-            type="text"
-            value={searchText}
-            onChange={(e) => setSearchText(e.target.value)}
-            placeholder="搜索板块..."
-            className="px-2 py-0.5 rounded border border-[var(--border-color)] bg-[var(--bg-primary)] text-[11px] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] outline-none focus:border-[var(--accent)] transition-colors w-28"
-          />
+            {/* Period 维度：今日/3日/5日/10日 */}
+            <div className="flex items-center gap-1">
+              <span className="text-[10px] text-[var(--text-tertiary)] mr-0.5">
+                周期
+              </span>
+              {(["today", "3d", "5d", "10d"] as const).map((p) => {
+                // 历史日期下：仅当该 period 有当天数据时可点击
+                const disabled =
+                  selectedDate !== null && !periodDates.has(selectedDate);
+                const unavailable =
+                  selectedDate !== null && !periodDates.has(selectedDate);
+                return (
+                  <button
+                    key={p}
+                    onClick={() => !unavailable && setPeriod(p)}
+                    className={cn(
+                      "px-2 py-0.5 rounded text-[11px] transition-colors whitespace-nowrap",
+                      period === p
+                        ? "bg-[var(--accent)] text-black font-medium"
+                        : "text-[var(--text-tertiary)] hover:text-[var(--text-primary)] border border-[var(--border-color)]",
+                      unavailable && p !== "today"
+                        ? "opacity-30 cursor-not-allowed"
+                        : "",
+                    )}
+                  >
+                    {PERIOD_LABELS[p]}
+                  </button>
+                );
+              })}
+            </div>
 
-          <div className="ml-auto flex items-center gap-2">
-            <button
-              onClick={fetchData}
-              disabled={loading}
-              className="flex items-center gap-1 px-2 py-0.5 rounded border border-[var(--border-color)] text-[11px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
-            >
-              <RefreshCw size={11} className={cn(loading && "animate-spin")} />
-              刷新
-            </button>
-            <button
-              onClick={onClose}
-              className="p-1 rounded hover:bg-[var(--bg-hover)] text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors"
-            >
-              <X size={14} />
-            </button>
+            {selectedDate && (
+              <span className="text-[10px] text-[var(--accent)] ml-1">
+                历史快照 {selectedDate}
+              </span>
+            )}
           </div>
         </div>
 
@@ -386,7 +458,9 @@ function FundFlowModal({ onClose }: { onClose: () => void }) {
           {loading ? (
             <div className="flex items-center justify-center py-24 text-[var(--text-tertiary)] text-sm gap-2">
               <RefreshCw size={14} className="animate-spin" />
-              拉取数据中（同花顺接口约需5-10秒）...
+              {selectedDate
+                ? "读取历史快照..."
+                : "拉取数据中（同花顺接口约需5-10秒）..."}
             </div>
           ) : error ? (
             <div className="flex flex-col items-center justify-center py-24 gap-3">
@@ -402,11 +476,9 @@ function FundFlowModal({ onClose }: { onClose: () => void }) {
             </div>
           ) : filteredItems.length === 0 ? (
             <div className="flex items-center justify-center py-24 text-[var(--text-tertiary)] text-sm">
-              {tradeDate
-                ? `${tradeDate} 暂无历史快照数据`
-                : period === "today"
-                  ? "今日暂无数据（非交易时段）"
-                  : "暂无数据"}
+              {selectedDate
+                ? `${selectedDate} ${PERIOD_LABELS[period]} 暂无历史快照数据`
+                : "今日暂无数据（非交易时段或接口未返回数据）"}
             </div>
           ) : (
             <table className="w-full text-xs border-collapse">
@@ -458,7 +530,7 @@ function FundFlowModal({ onClose }: { onClose: () => void }) {
               <tbody>
                 {filteredItems.map((item, idx) => {
                   const netflow = item.netflow ?? 0;
-                  const pct = Math.abs(netflow) / maxAbsNetflow;
+                  const barPct = Math.abs(netflow) / maxAbsNetflow;
                   const isPositive = netflow >= 0;
                   return (
                     <tr
@@ -478,12 +550,12 @@ function FundFlowModal({ onClose }: { onClose: () => void }) {
                             {isPositive ? (
                               <div
                                 className="h-full rounded-full ml-auto bg-[#e84444]"
-                                style={{ width: `${pct * 100}%` }}
+                                style={{ width: `${barPct * 100}%` }}
                               />
                             ) : (
                               <div
                                 className="h-full rounded-full bg-[#09d464]"
-                                style={{ width: `${pct * 100}%` }}
+                                style={{ width: `${barPct * 100}%` }}
                               />
                             )}
                           </div>
@@ -571,9 +643,6 @@ function FundFlowModal({ onClose }: { onClose: () => void }) {
             主力净流出
           </div>
           <span>共 {filteredItems.length} 个板块</span>
-          {tradeDate && (
-            <span className="text-[var(--accent)]">历史快照 {tradeDate}</span>
-          )}
           <span className="ml-auto">
             数据来源：同花顺数据中心 · 仅供参考，不构成投资建议
           </span>
@@ -590,6 +659,20 @@ function RotationModal({ onClose }: { onClose: () => void }) {
   const [sortBy, setSortBy] = useState<"name" | "recent">("recent");
   const [onlyIndustry, setOnlyIndustry] = useState(false);
   const [searchText, setSearchText] = useState("");
+
+  // 挂载时后台异步同步数据，不阻塞 UI
+  useEffect(() => {
+    // 申万板块 K 线
+    fetch(`${API}/api/sw-industry/sync-klines`, {
+      method: "POST",
+      cache: "no-store",
+    }).catch(() => {});
+    // 产业板块 K 线聚合计算
+    fetch(`${API}/api/board/calc-industry-kline`, {
+      method: "POST",
+      cache: "no-store",
+    }).catch(() => {});
+  }, []);
 
   useEffect(() => {
     setLoading(true);
@@ -774,9 +857,6 @@ function RotationModal({ onClose }: { onClose: () => void }) {
                               {board.tag}
                             </span>
                           )}
-                        </div>
-                        <div className="text-[10px] text-[var(--text-tertiary)]">
-                          {board.code}
                         </div>
                       </td>
                       {board.data.map((v, i) => (
@@ -1147,7 +1227,8 @@ export default function SwIndustryPage() {
           )
         : boards;
 
-  const BOARD_COLS: { key: SortKey; label: string; align?: string }[] = [
+  type ColKey = SortKey | "action";
+  const BOARD_COLS: { key: ColKey; label: string; align?: string }[] = [
     { key: "name", label: "板块名称" },
     { key: "changePct", label: "涨跌幅" },
     { key: "price", label: "最新价" },
@@ -1158,10 +1239,11 @@ export default function SwIndustryPage() {
     { key: "compCount", label: "成分数" },
   ];
 
-  const BOARD_COLS_WITH_ACTION = [
-    ...BOARD_COLS,
-    { key: "action" as SortKey, label: "操作", align: "center" },
-  ];
+  const BOARD_COLS_WITH_ACTION: {
+    key: ColKey;
+    label: string;
+    align?: string;
+  }[] = [...BOARD_COLS, { key: "action", label: "操作", align: "center" }];
 
   const CON_COLS: { key: ConsSortKey; label: string }[] = [
     { key: "name", label: "股票名称" },
@@ -1328,14 +1410,14 @@ export default function SwIndustryPage() {
                           : "cursor-pointer hover:text-[var(--text-primary)]",
                       )}
                       onClick={() =>
-                        col.key !== "action" && toggleSort(col.key)
+                        col.key !== "action" && toggleSort(col.key as SortKey)
                       }
                     >
                       <span className="inline-flex items-center">
                         {col.label}
                         {col.key !== "action" && (
                           <SortIcon
-                            col={col.key}
+                            col={col.key as SortKey}
                             active={sortKey}
                             order={sortOrder}
                           />
@@ -1384,13 +1466,13 @@ export default function SwIndustryPage() {
                       <td className="px-3 py-1.5 text-center text-[var(--text-tertiary)]">
                         {idx + 1}
                       </td>
-                      <td className="px-3 py-1.5 font-medium text-[var(--text-primary)] whitespace-nowrap">
+                      <td className="px-3 py-1.5 font-medium whitespace-nowrap">
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
                             router.push(`/sw/${b.code}`);
                           }}
-                          className="hover:text-[#3b82f6] hover:underline transition-colors"
+                          className="text-[#3b82f6] hover:underline transition-colors"
                         >
                           {b.name}
                         </button>

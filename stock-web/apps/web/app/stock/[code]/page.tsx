@@ -305,7 +305,7 @@ export default function StockDetailPage() {
   useEffect(() => {
     const period = PERIOD_MAP[activePeriod];
     if (!period) return;
-    fetch(`http://localhost:8000/api/kline/${code}?period=${period}&count=120`)
+    fetch(`http://localhost:8000/api/kline/${code}?period=${period}&count=110`)
       .then((r) => r.json())
       .then((data) => {
         if (Array.isArray(data) && data.length > 0) {

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from datetime import datetime
@@ -220,7 +220,7 @@ def get_industry_boards(
     boards = []
 
     for board_code, data in layer_stocks.items():
-        industry_id, layer = board_code.split("_", 1)
+        industry_id, layer = board_code.rsplit("_", 1)
         stock_codes = list(data["stocks"])
 
         if not stock_codes:
@@ -338,12 +338,43 @@ def calc_industry_board_kline(days: int = 60) -> int:
     5. 缓存到 stock_kline 表（code = {industry_id}_{layer}）
 
     Returns:
-        缓存的记录数
+        缓存的记录数，0 表示跳过（今日已算过）
     """
     from collections import defaultdict
     from sqlalchemy import text
     from db import StockKline
-    from datetime import timedelta
+    from datetime import timedelta, date as date_type
+
+    # 非交易日 或 今日已算过则跳过
+    from routers.industry import is_trading_day
+    db = SessionLocal()
+    try:
+        row = db.execute(text(
+            "SELECT MAX(trade_date) FROM stock_kline "
+            "WHERE period='daily' AND instr(code,'_')>0"
+        )).fetchone()
+        latest = row[0] if row and row[0] else None
+    finally:
+        db.close()
+
+    today_str = date_type.today().strftime("%Y-%m-%d")
+
+    if not is_trading_day():
+        # 非交易日：只要有数据且不超过 4 天（覆盖周末+节假日）就跳过
+        if latest:
+            try:
+                from datetime import timedelta
+                days_old = (date_type.today() - date_type.fromisoformat(latest)).days
+                if days_old <= 4:
+                    print(f"[calc_industry_kline] skipped — non-trading day, data is {days_old}d old ({latest})")
+                    return 0
+            except Exception:
+                pass
+    else:
+        # 交易日：今日已算过则跳过
+        if latest and latest >= today_str:
+            print(f"[calc_industry_kline] skipped — already up to date ({latest})")
+            return 0
 
     db = SessionLocal()
     try:
@@ -452,6 +483,16 @@ def calc_industry_board_kline(days: int = 60) -> int:
         db.close()
 
 
+@router.post("/calc-industry-kline")
+def trigger_calc_industry_kline(
+    background_tasks: BackgroundTasks,
+    days: int = Query(default=60, ge=14, le=120),
+):
+    """手动触发产业板块 K 线聚合计算（后台执行），供前端进入页面时调用"""
+    background_tasks.add_task(calc_industry_board_kline, days)
+    return {"message": f"产业板块K线计算已启动，days={days}"}
+
+
 @router.get("/industry-rotation")
 async def get_industry_rotation(
     days: int = Query(default=14, ge=5, le=60),
@@ -553,6 +594,18 @@ async def get_industry_rotation(
 
             sorted_dates = sorted(all_dates)[-days:]
 
+            # 数据陈旧（最新日期超过3天前）时触发后台重算
+            from datetime import date as _date
+            if sorted_dates:
+                try:
+                    latest_dt = _date.fromisoformat(sorted_dates[-1])
+                    if (_date.today() - latest_dt).days > 3:
+                        threading.Thread(
+                            target=calc_industry_board_kline, args=(days * 2,), daemon=True
+                        ).start()
+                except Exception:
+                    pass
+
             # 4. 查询当前涨跌幅（从 stock_quote 聚合计算）
             from db import StockQuote
 
@@ -582,7 +635,7 @@ async def get_industry_rotation(
 
             result_boards = []
             for board_code, data in layer_data.items():
-                industry_id, layer = board_code.split("_", 1)
+                industry_id, layer = board_code.rsplit("_", 1)
                 industry_name = data["name"]
                 layer_display = layer_name_map.get(layer, layer)
                 board_name = f"{industry_name}{layer_display}"
@@ -623,7 +676,7 @@ def get_industry_constituents(
     from db import StockQuote
 
     try:
-        industry_id, layer = board_code.split("_", 1)
+        industry_id, layer = board_code.rsplit("_", 1)
     except ValueError:
         return []
 
@@ -695,7 +748,7 @@ def delete_industry_board(
     from db import StockKline
 
     try:
-        industry_id, layer = board_code.split("_", 1)
+        industry_id, layer = board_code.rsplit("_", 1)
     except ValueError:
         from fastapi import HTTPException
 

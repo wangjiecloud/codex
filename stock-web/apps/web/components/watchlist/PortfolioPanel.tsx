@@ -43,6 +43,33 @@ interface HoldingStock {
 
 const API = "http://localhost:8000/api/portfolio";
 const PASSWORD = "111";
+const UNLOCK_KEY = "portfolio_unlocked_at";
+const UNLOCK_TTL = 8 * 60 * 60 * 1000; // 8 小时（毫秒）
+
+/** 检查 sessionStorage 中的解锁状态是否仍在有效期内 */
+function readUnlockSession(): boolean {
+  try {
+    const raw = sessionStorage.getItem(UNLOCK_KEY);
+    if (!raw) return false;
+    const ts = parseInt(raw, 10);
+    if (isNaN(ts)) return false;
+    return Date.now() - ts < UNLOCK_TTL;
+  } catch {
+    return false;
+  }
+}
+
+function writeUnlockSession() {
+  try {
+    sessionStorage.setItem(UNLOCK_KEY, String(Date.now()));
+  } catch {}
+}
+
+function clearUnlockSession() {
+  try {
+    sessionStorage.removeItem(UNLOCK_KEY);
+  } catch {}
+}
 
 /* ─────────────────────────────────────────────
    API helpers
@@ -979,7 +1006,7 @@ function SummaryBar({
 export function PortfolioPanel() {
   const [holdings, setHoldings] = useState<HoldingStock[]>([]);
   const [loading, setLoading] = useState(true);
-  const [unlocked, setUnlocked] = useState(false);
+  const [unlocked, setUnlocked] = useState(() => readUnlockSession());
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [pendingAction, setPendingAction] = useState<(() => void) | null>(null);
   const [showAddHolding, setShowAddHolding] = useState(false);
@@ -1000,6 +1027,17 @@ export function PortfolioPanel() {
         console.error("[portfolio] fetch failed:", e);
         setLoading(false);
       });
+  }, []);
+
+  // 每分钟检查解锁是否已过 8 小时，过期则自动重锁
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (!readUnlockSession()) {
+        clearUnlockSession();
+        setUnlocked(false);
+      }
+    }, 60 * 1000);
+    return () => clearInterval(timer);
   }, []);
 
   const fetchCurrentPrices = async (targets: HoldingStock[]) => {
@@ -1035,6 +1073,7 @@ export function PortfolioPanel() {
   };
 
   const handleUnlock = () => {
+    writeUnlockSession();
     setUnlocked(true);
     setShowPasswordModal(false);
     if (pendingAction) {
@@ -1044,6 +1083,7 @@ export function PortfolioPanel() {
   };
 
   const handleLock = () => {
+    clearUnlockSession();
     setUnlocked(false);
   };
 

@@ -146,8 +146,17 @@ export default function SwBoardDetailPage() {
 
   useEffect(() => {
     const period = PERIOD_MAP[activePeriod] ?? "daily";
+    // 日K~120根(约6月)，周K~104根(约2年)，月K~96根(约8年)
+    const countMap: Record<string, number> = {
+      daily: 120,
+      weekly: 104,
+      monthly: 96,
+    };
+    const count = countMap[period] ?? 120;
     setKlineLoading(true);
-    fetch(`${API}/api/sw-industry/kline/${code}?period=${period}&count=120`)
+    fetch(
+      `${API}/api/sw-industry/kline/${code}?period=${period}&count=${count}`,
+    )
       .then((r) => r.json())
       .then((data) => {
         if (Array.isArray(data) && data.length > 0) setKlineData(data);

@@ -1,9 +1,11 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy import text as sa_text
 from datetime import datetime, date, timedelta
 import threading
 import urllib3
+import requests as _req
 
 from db import (
     get_db,
@@ -345,6 +347,119 @@ def get_sw_industries(
     ]
 
 
+def _fetch_realtime_quotes(codes: list[str]) -> dict:
+    """从东方财富批量拉取实时行情，返回 {code: {...}} dict。
+    f2=最新价 f3=涨跌幅 f4=涨跌额 f5=成交量 f6=成交额 f15=最高 f16=最低
+    f17=今开 f18=昨收 f20=总市值 f23=市净率 f9=动态PE"""
+    if not codes:
+        return {}
+    # 东方财富 secid: 0.开头(深) 或 1.开头(沪)
+    def _secid(c: str) -> str:
+        return f"0.{c}" if c[0] in ("0", "3") else f"1.{c}"
+
+    secids = ",".join(_secid(c) for c in codes)
+    url = (
+        "https://push2.eastmoney.com/api/qt/ulist.np/get"
+        f"?fltt=2&invt=2&fields=f2,f3,f4,f5,f6,f9,f12,f14,f15,f16,f17,f18,f20,f23"
+        f"&secids={secids}"
+    )
+    try:
+        r = _req.get(url, headers=_HEADERS, timeout=10, verify=False)
+        items = r.json().get("data", {}).get("diff", []) or []
+    except Exception:
+        return {}
+
+    result = {}
+    for item in items:
+        code = str(item.get("f12", "")).strip()
+        if not code:
+            continue
+        result[code] = {
+            "price":      _safe_float(item.get("f2")),
+            "change":     _safe_float(item.get("f3")),     # 涨跌幅%
+            "change_amt": _safe_float(item.get("f4")),
+            "volume":     _safe_float(item.get("f5")),
+            "turnover":   _safe_float(item.get("f6")),
+            "high":       _safe_float(item.get("f15")),
+            "low":        _safe_float(item.get("f16")),
+            "open":       _safe_float(item.get("f17")),
+            "prev_close": _safe_float(item.get("f18")),
+            "market_cap": _safe_float(item.get("f20")),
+            "pb":         _safe_float(item.get("f23")),
+            "pe":         _safe_float(item.get("f9")),
+            "name":       str(item.get("f14", "")).strip(),
+        }
+    return result
+
+
+def _is_quote_stale(quotes: list) -> bool:
+    """判断行情数据是否是今天之前的旧数据（以 updated_at 判断）。
+    updated_at 存的是 UTC 时间，折算为北京时间（+8h）后与今天比较。"""
+    from datetime import timezone, timedelta as _td
+    cst = timezone(_td(hours=8))
+    today_cst = datetime.now(tz=cst).date().isoformat()
+    for q in quotes:
+        if q.updated_at:
+            # updated_at 是 naive UTC datetime
+            dt_cst = q.updated_at.replace(tzinfo=timezone.utc).astimezone(cst)
+            if dt_cst.date().isoformat() >= today_cst:
+                return False
+    return True
+
+
+def _refresh_quotes_for_codes(codes: list[str]):
+    """实时刷新一批股票的行情并写入 stock_quote 表。"""
+    live = _fetch_realtime_quotes(codes)
+    if not live:
+        return
+    db = SessionLocal()
+    try:
+        for code, d in live.items():
+            stmt = sqlite_insert(StockQuote).values(
+                code=code,
+                name=d["name"] or code,
+                price=d["price"],
+                change=d["change"],
+                change_amt=d["change_amt"],
+                open=d["open"],
+                prev_close=d["prev_close"],
+                high=d["high"],
+                low=d["low"],
+                volume=d["volume"],
+                turnover=d["turnover"],
+                market_cap=d["market_cap"],
+                pe=d["pe"],
+                pb=d["pb"],
+                turnover_rate=0.0,
+                amplitude=0.0,
+                updated_at=datetime.utcnow(),
+            )
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["code"],
+                set_={
+                    "price":      stmt.excluded.price,
+                    "change":     stmt.excluded.change,
+                    "change_amt": stmt.excluded.change_amt,
+                    "open":       stmt.excluded.open,
+                    "prev_close": stmt.excluded.prev_close,
+                    "high":       stmt.excluded.high,
+                    "low":        stmt.excluded.low,
+                    "volume":     stmt.excluded.volume,
+                    "turnover":   stmt.excluded.turnover,
+                    "market_cap": stmt.excluded.market_cap,
+                    "pe":         stmt.excluded.pe,
+                    "pb":         stmt.excluded.pb,
+                    "updated_at": stmt.excluded.updated_at,
+                },
+            )
+            db.execute(stmt)
+        db.commit()
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()
+
+
 @router.get("/constituents/{board_code}")
 def get_sw_constituents(
     board_code: str,
@@ -375,6 +490,17 @@ def get_sw_constituents(
     if codes:
         quotes = db.query(StockQuote).filter(StockQuote.code.in_(codes)).all()
         quote_map = {q.code: q for q in quotes}
+
+    # 检测行情是否是旧数据，是则实时刷新
+    if codes and _is_quote_stale(list(quote_map.values())):
+        _refresh_quotes_for_codes(codes)
+        # 重新读取刷新后的数据
+        db2 = SessionLocal()
+        try:
+            fresh = db2.query(StockQuote).filter(StockQuote.code.in_(codes)).all()
+            quote_map = {q.code: q for q in fresh}
+        finally:
+            db2.close()
 
     result = []
     for c in cons:
@@ -468,10 +594,14 @@ def _safe_float_kline(val, default=0.0) -> float:
         return default
 
 
-def _fetch_sw_kline(board_code: str, count: int) -> list[dict]:
+def _fetch_sw_kline(board_code: str, count: int, period: str = "daily") -> list[dict]:
     import akshare as ak
 
-    df = ak.index_hist_sw(symbol=board_code, period="day")
+    # 映射 DB period → akshare period
+    _ak_period_map = {"daily": "day", "weekly": "week", "monthly": "month"}
+    ak_period = _ak_period_map.get(period, "day")
+
+    df = ak.index_hist_sw(symbol=board_code, period=ak_period)
     if df is None or df.empty:
         return []
 
@@ -512,7 +642,7 @@ def _fetch_sw_kline(board_code: str, count: int) -> list[dict]:
 async def get_sw_kline(
     board_code: str,
     period: str = Query(default="daily"),
-    count: int = Query(default=120, ge=10, le=500),
+    count: int = Query(default=110, ge=10, le=500),
 ):
     from fastapi.concurrency import run_in_threadpool
 
@@ -531,7 +661,11 @@ async def get_sw_kline(
 
     rows = await run_in_threadpool(_read_cached)
 
-    if rows:
+    # 缓存阈值：日K>=100，周K>=20，月K>=10
+    _min_cache = {"daily": 100, "weekly": 20, "monthly": 10}
+    min_required = _min_cache.get(period, 20)
+
+    if len(rows) >= min_required:
         return [
             {
                 "time": r.trade_date,
@@ -548,7 +682,7 @@ async def get_sw_kline(
 
     def _fetch_and_cache():
         try:
-            bars = _fetch_sw_kline(board_code, count)
+            bars = _fetch_sw_kline(board_code, count, period)
         except Exception:
             bars = []
         if not bars:
@@ -701,62 +835,114 @@ async def get_sw_rotation(days: int = Query(default=14, ge=5, le=60)):
 
     result = await run_in_threadpool(_compute)
 
-    if not result["dates"]:
+    def _is_stale(dates: list) -> bool:
+        """检测数据是否陈旧：最新日期距今超过3个自然日（覆盖周末）"""
+        if not dates:
+            return True
+        from datetime import date as date_type
+        try:
+            latest = date_type.fromisoformat(dates[-1])
+            return (date_type.today() - latest).days > 3
+        except Exception:
+            return True
 
-        def _bg_sync():
-            db = SessionLocal()
-            try:
-                all_boards = (
-                    db.query(SwIndustry).order_by(SwIndustry.change_pct.desc()).all()
-                )
-                top20 = [b.code for b in all_boards[:20]]
-                extra = list(set(_INDUSTRY_SW_MAP.values()))
-                codes_to_sync = list(dict.fromkeys(top20 + extra))
-            finally:
-                db.close()
-            for code in codes_to_sync:
-                try:
-                    bars = _fetch_sw_kline(code, 60)
-                    if not bars:
-                        continue
-                    db2 = SessionLocal()
-                    try:
-                        for bar in bars:
-                            stmt = sqlite_insert(StockKline).values(
-                                code=code,
-                                period="daily",
-                                trade_date=bar["time"],
-                                open=bar["open"],
-                                high=bar["high"],
-                                low=bar["low"],
-                                close=bar["close"],
-                                volume=bar["volume"],
-                                turnover=0.0,
-                                turn_rate=0.0,
-                                change_pct=bar["changePct"],
-                                updated_at=datetime.utcnow(),
-                            )
-                            stmt = stmt.on_conflict_do_update(
-                                index_elements=["code", "period", "trade_date"],
-                                set_={
-                                    "open": stmt.excluded.open,
-                                    "high": stmt.excluded.high,
-                                    "low": stmt.excluded.low,
-                                    "close": stmt.excluded.close,
-                                    "volume": stmt.excluded.volume,
-                                    "change_pct": stmt.excluded.change_pct,
-                                    "updated_at": stmt.excluded.updated_at,
-                                },
-                            )
-                            db2.execute(stmt)
-                        db2.commit()
-                    except Exception:
-                        db2.rollback()
-                    finally:
-                        db2.close()
-                except Exception:
-                    continue
-
-        threading.Thread(target=_bg_sync, daemon=True).start()
+    if not result["dates"] or _is_stale(result["dates"]):
+        threading.Thread(target=_sync_rotation_klines, daemon=True).start()
 
     return result
+
+
+def _sync_rotation_klines():
+    """后台同步板块轮动所需的 K 线数据（top20 + 产业关联 + 所有申万二级，含日/周/月K）"""
+    from routers.industry import is_trading_day
+
+    # 1) 非交易日不同步
+    if not is_trading_day():
+        print("[sync_rotation_klines] skipped — not a trading day")
+        return
+
+    # 2) 今日已有最新数据则跳过（任取一条申万板块日K最新日期判断）
+    today_str = date.today().strftime("%Y-%m-%d")
+    db_check = SessionLocal()
+    try:
+        row = db_check.execute(
+            sa_text(
+                "SELECT MAX(trade_date) FROM stock_kline "
+                "WHERE period='daily' AND code LIKE '8%'"
+            )
+        ).fetchone()
+        latest = row[0] if row and row[0] else None
+    finally:
+        db_check.close()
+
+    if latest and latest >= today_str:
+        print(f"[sync_rotation_klines] skipped — already up to date ({latest})")
+        return
+
+    db = SessionLocal()
+    try:
+        all_boards = db.query(SwIndustry).order_by(SwIndustry.change_pct.desc()).all()
+        top20 = [b.code for b in all_boards[:20]]
+        extra = list(set(_INDUSTRY_SW_MAP.values()))
+        all_sw_codes = [b.code for b in all_boards]
+        codes_to_sync = list(dict.fromkeys(top20 + extra + all_sw_codes))
+    finally:
+        db.close()
+
+    # 各 period 对应的拉取根数
+    period_counts = [
+        ("daily",   60),
+        ("weekly",  104),   # 2年周K
+        ("monthly", 100),   # 约8年月K（akshare最多150根）
+    ]
+
+    for code in codes_to_sync:
+        for period, count in period_counts:
+            try:
+                bars = _fetch_sw_kline(code, count, period)
+                if not bars:
+                    continue
+                db2 = SessionLocal()
+                try:
+                    for bar in bars:
+                        stmt = sqlite_insert(StockKline).values(
+                            code=code,
+                            period=period,
+                            trade_date=bar["time"],
+                            open=bar["open"],
+                            high=bar["high"],
+                            low=bar["low"],
+                            close=bar["close"],
+                            volume=bar["volume"],
+                            turnover=0.0,
+                            turn_rate=0.0,
+                            change_pct=bar["changePct"],
+                            updated_at=datetime.utcnow(),
+                        )
+                        stmt = stmt.on_conflict_do_update(
+                            index_elements=["code", "period", "trade_date"],
+                            set_={
+                                "open": stmt.excluded.open,
+                                "high": stmt.excluded.high,
+                                "low": stmt.excluded.low,
+                                "close": stmt.excluded.close,
+                                "volume": stmt.excluded.volume,
+                                "change_pct": stmt.excluded.change_pct,
+                                "updated_at": stmt.excluded.updated_at,
+                            },
+                        )
+                        db2.execute(stmt)
+                    db2.commit()
+                except Exception:
+                    db2.rollback()
+                finally:
+                    db2.close()
+            except Exception:
+                continue
+
+
+@router.post("/sync-klines")
+def trigger_sync_klines():
+    """后台异步同步板块轮动 K 线（供前端进入页面时触发）"""
+    threading.Thread(target=_sync_rotation_klines, daemon=True).start()
+    return {"message": "kline sync started"}

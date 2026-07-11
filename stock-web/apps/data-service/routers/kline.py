@@ -108,10 +108,10 @@ def _fetch_and_cache_klines(code: str, period: str, count: int) -> list:
 async def get_kline(
     code: str,
     period: str = Query(default="daily"),
-    count: int = Query(default=120, ge=10, le=1000),
+    count: int = Query(default=110, ge=10, le=1000),
 ):
-    # 按周期决定默认返回条数：日K 120，周K 156（3年），月K 120（10年）
-    if count == 120:
+    # 按周期决定默认返回条数：日K 110（约5个月），周K 156（3年），月K 120（10年）
+    if count == 110:
         if period == "weekly":
             count = 156
         elif period == "monthly":
@@ -132,8 +132,8 @@ async def get_kline(
 
     rows = await run_in_threadpool(_read_cached)
 
-    # 缓存为空，或周K/月K缓存数据明显不足时，重新从 baostock 拉取
-    min_expected = {"daily": 60, "weekly": 100, "monthly": 60}.get(period, 60)
+    # 缓存不足时重新从 baostock 拉取：日K 要求至少 100 根（约5个月）
+    min_expected = {"daily": 100, "weekly": 100, "monthly": 60}.get(period, 60)
     if len(rows) < min_expected:
         return await run_in_threadpool(_fetch_and_cache_klines, code, period, count)
 

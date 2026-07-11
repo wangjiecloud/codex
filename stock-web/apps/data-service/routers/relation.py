@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
-from db import SessionLocal, StockMeta, StockRelation, StockGubaPost, StockGubaSync, get_db
+from db import SessionLocal, StockMeta, StockRelation, StockGubaPost, StockGubaSync, get_db, IndustryNode
 
 router = APIRouter()
 
@@ -25,9 +25,12 @@ router = APIRouter()
 _sync_status: dict = {
     "running": False,
     "code": "",
-    "done": 0,
-    "total": 0,
+    "done": 0,       # 产业层：已处理第几只股票
+    "total": 0,      # 产业层：共几只股票
+    "post_done": 0,  # 帖子层：当前股票已抓第几篇
+    "post_total": 0, # 帖子层：当前股票共几篇
     "message": "",
+    "mode": "stock",   # "industry" | "stock"
 }
 _sync_lock = threading.Lock()
 
@@ -108,6 +111,7 @@ def _fetch_posts(code: str, max_posts: int = 10000) -> list[dict]:
     page = 1
     per_page = 50
     consecutive_empty = 0
+    consecutive_error = 0  # 连续错误计数（区别于空页）
     while len(posts) < max_posts:
         try:
             url = (
@@ -120,7 +124,14 @@ def _fetch_posts(code: str, max_posts: int = 10000) -> list[dict]:
             )
             m = re.search(r"Q\((\{.*\})\)", r.text, re.DOTALL)
             if not m:
-                break
+                # 解析失败按错误处理，重试最多3次
+                consecutive_error += 1
+                if consecutive_error >= 3:
+                    print(f"[relation] fetch posts parse fail 3x, stop. page={page} code={code}")
+                    break
+                time.sleep(1)
+                continue
+            consecutive_error = 0
             d = json.loads(m.group(1))
             page_posts = d.get("re", [])
             if not page_posts:
@@ -143,7 +154,11 @@ def _fetch_posts(code: str, max_posts: int = 10000) -> list[dict]:
             time.sleep(0.3)
         except Exception as e:
             print(f"[relation] fetch posts page={page} code={code} error: {e}")
-            break
+            consecutive_error += 1
+            if consecutive_error >= 5:
+                print(f"[relation] fetch posts error 5x, stop. code={code}")
+                break
+            time.sleep(2)  # 出错后等待2秒再重试，不推进页码
     return posts[:max_posts]
 
 
@@ -195,12 +210,11 @@ def _sync_relation(code: str) -> dict:
         if sync_row and sync_row.done == 1:
             return {"status": "skipped", "code": code, "related": 0}
         # 获取已落库的 post_id 集合，避免重复请求
-        existing_ids: set[str] = {
-            r[0] for r in db.execute(
-                _text("SELECT post_id FROM stock_guba_post WHERE code=:c"),
-                {"c": code}
-            ).fetchall()
-        }
+        existing_rows = db.execute(
+            _text("SELECT post_id, title, content FROM stock_guba_post WHERE code=:c"),
+            {"c": code}
+        ).fetchall()
+        existing_ids: set[str] = {r[0] for r in existing_rows}
         name_to_code = _get_all_stock_names(db)
     finally:
         db.close()
@@ -208,27 +222,35 @@ def _sync_relation(code: str) -> dict:
     # ── 2. 拉取帖子列表 ──
     posts = _fetch_posts(code, max_posts=10000)
     total_posts = len(posts)
-    _sync_status["total"] = total_posts
+    _sync_status["post_total"] = total_posts
+    _sync_status["post_done"] = 0
     _sync_status["message"] = f"共获取 {total_posts} 篇帖子，开始逐帖抓取正文..."
 
     name_pattern = _build_name_pattern(name_to_code)
     co_counter: Counter = Counter()
+
+    # 断点续传：先把已落库帖子的正文共现统计进来
+    if existing_rows:
+        _sync_status["message"] = f"断点续传：重新统计 {len(existing_rows)} 篇已落库帖子的共现..."
+        for _, title_ex, content_ex in existing_rows:
+            found = _extract_codes_from_text(title_ex or "", name_to_code, name_pattern)
+            if content_ex:
+                found |= _extract_codes_from_text(content_ex, name_to_code, name_pattern)
+            found.discard(code)
+            for c in found:
+                co_counter[c] += 1
+
     batch: list[dict] = []  # 待批量写入的帖子
 
     for i, post in enumerate(posts):
-        _sync_status["done"] = i
+        _sync_status["post_done"] = i
         _sync_status["message"] = f"[{i+1}/{total_posts}] 抓取正文 {code} post={post['post_id']}"
         pid = post["post_id"]
         title = post["title"]
         pub_time = post.get("pub_time", "")
 
-        # 已落库的直接读（不重复请求网络）
+        # 已落库的跳过（共现已在上面统计过）
         if pid in existing_ids:
-            # 从内存里拿不到 content，统计共现只能靠 title
-            found = _extract_codes_from_text(title, name_to_code, name_pattern)
-            found.discard(code)
-            for c in found:
-                co_counter[c] += 1
             continue
 
         # 拉取正文
@@ -314,6 +336,10 @@ def _sync_relation(code: str) -> dict:
     finally:
         db.close()
 
+    # 重置帖子层计数（当前股票处理完毕）
+    _sync_status["post_done"] = total_posts
+    _sync_status["post_total"] = total_posts
+
     return {"status": "done", "code": code, "related": len(co_counter)}
 
 
@@ -329,7 +355,10 @@ def _sync_all_relations():
             "code": "",
             "done": 0,
             "total": 0,
+            "post_done": 0,
+            "post_total": 0,
             "message": "初始化，获取股票列表...",
+            "mode": "stock",
         }
 
     try:
@@ -395,7 +424,10 @@ async def get_sync_status():
         "code": _sync_status["code"],
         "done": _sync_status["done"],
         "total": _sync_status["total"],
+        "post_done": _sync_status.get("post_done", 0),
+        "post_total": _sync_status.get("post_total", 0),
         "message": _sync_status["message"],
+        "mode": _sync_status.get("mode", "stock"),
     }
 
 
@@ -409,6 +441,73 @@ async def sync_all_relation():
     return {"status": "started"}
 
 
+@router.post("/sync/industry/{industry_id}")
+async def sync_industry_relation(industry_id: str):
+    """触发指定产业内所有 A 股的股吧帖子关联关系爬取（复用 _sync_status，进度可通过 /status 轮询）"""
+    with _sync_lock:
+        if _sync_status["running"]:
+            return {"status": "already_running", "code": _sync_status.get("code", "")}
+
+    def _run():
+        global _sync_status
+        # 读取产业内所有 A 股代码
+        db = SessionLocal()
+        try:
+            nodes = (
+                db.query(IndustryNode)
+                .filter(IndustryNode.industry_id == industry_id)
+                .all()
+            )
+            codes: list[str] = []
+            for node in nodes:
+                for c in json.loads(node.stocks or "[]"):
+                    if c and c not in codes:
+                        codes.append(c)
+        finally:
+            db.close()
+
+        if not codes:
+            with _sync_lock:
+                _sync_status["message"] = f"[产业同步] {industry_id} 无 A 股节点，已跳过"
+                _sync_status["running"] = False
+            return
+
+        total = len(codes)
+        with _sync_lock:
+            _sync_status.update({
+                "running": True,
+                "code": "",
+                "done": 0,
+                "total": total,
+                "post_done": 0,
+                "post_total": 0,
+                "message": f"[产业同步] {industry_id} 共 {total} 只，开始同步...",
+                "mode": "industry",
+            })
+
+        try:
+            for i, code in enumerate(codes):
+                _sync_status["code"] = code
+                _sync_status["done"] = i
+                _sync_status["message"] = f"[产业同步] [{i+1}/{total}] 正在分析 {code}..."
+                try:
+                    result = _sync_relation(code)
+                    if result.get("status") == "skipped":
+                        _sync_status["message"] = f"[产业同步] [{i+1}/{total}] {code} 已完成，跳过"
+                except Exception as e:
+                    print(f"[relation] industry sync error code={code}: {e}")
+                time.sleep(0.2)
+
+            _sync_status["done"] = total
+            _sync_status["message"] = f"[产业同步] {industry_id} 完成，共处理 {total} 只股票"
+        finally:
+            _sync_status["running"] = False
+            _sync_status["mode"] = "stock"
+
+    threading.Thread(target=_run, daemon=True).start()
+    return {"status": "started", "industry_id": industry_id}
+
+
 @router.post("/sync/{code}")
 async def sync_relation(code: str):
     """触发爬取指定单只股票的关联关系（后台任务）"""
@@ -419,7 +518,7 @@ async def sync_relation(code: str):
     def _run():
         global _sync_status
         with _sync_lock:
-            _sync_status = {"running": True, "code": code, "done": 0, "total": -1, "message": f"正在获取 {code} 帖子列表..."}
+            _sync_status = {"running": True, "code": code, "done": 0, "total": -1, "post_done": 0, "post_total": 0, "message": f"正在获取 {code} 帖子列表...", "mode": "stock"}
         try:
             result = _sync_relation(code)
             _sync_status["message"] = f"{code} 完成，发现 {result.get('related', 0)} 只关联"

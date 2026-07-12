@@ -95,3 +95,5 @@ CHANGELOG.ignore.md
 __pycache__/
 *.pyc
 stock-web/apps/data-service/stock_data.db-wal
+stock-web/apps/data-service/stock_data.db-shm
+stock-web/apps/data-service/stock_data.db.bak*

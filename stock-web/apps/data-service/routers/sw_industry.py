@@ -635,7 +635,7 @@ def _fetch_sw_kline(board_code: str, count: int, period: str = "daily") -> list[
         prev_close = close
 
     bars.sort(key=lambda x: x["time"])
-    return bars[-count:]
+    return bars  # 返回全量，由调用方决定截取条数
 
 
 @router.get("/kline/{board_code}")
@@ -649,23 +649,29 @@ async def get_sw_kline(
     def _read_cached():
         db = SessionLocal()
         try:
-            return (
+            total = (
+                db.query(StockKline)
+                .filter(StockKline.code == board_code, StockKline.period == period)
+                .count()
+            )
+            rows = (
                 db.query(StockKline)
                 .filter(StockKline.code == board_code, StockKline.period == period)
                 .order_by(StockKline.trade_date.desc())
                 .limit(count)
                 .all()
             )
+            return total, rows
         finally:
             db.close()
 
-    rows = await run_in_threadpool(_read_cached)
+    total, rows = await run_in_threadpool(_read_cached)
 
-    # 缓存阈值：日K>=100，周K>=20，月K>=10
-    _min_cache = {"daily": 100, "weekly": 20, "monthly": 10}
-    min_required = _min_cache.get(period, 20)
+    # 用 DB 总条数判断缓存是否足够，避免 limit(count) 误判
+    _min_cache = {"daily": 100, "weekly": 100, "monthly": 100}
+    min_required = _min_cache.get(period, 100)
 
-    if len(rows) >= min_required:
+    if total >= min_required:
         return [
             {
                 "time": r.trade_date,
@@ -682,7 +688,7 @@ async def get_sw_kline(
 
     def _fetch_and_cache():
         try:
-            bars = _fetch_sw_kline(board_code, count, period)
+            bars = _fetch_sw_kline(board_code, count, period)  # 返回全量
         except Exception:
             bars = []
         if not bars:
@@ -722,7 +728,8 @@ async def get_sw_kline(
             db.rollback()
         finally:
             db.close()
-        return bars
+        # 写入全量后，返回最新 count 条
+        return bars[-count:]
 
     return await run_in_threadpool(_fetch_and_cache)
 
@@ -772,12 +779,8 @@ async def get_sw_rotation(days: int = Query(default=14, ge=5, le=60)):
                 db.query(SwIndustry).order_by(SwIndustry.change_pct.desc()).all()
             )
 
-            top20_codes = [b.code for b in all_boards[:20]]
-
-            industry_codes = list(set(_INDUSTRY_SW_MAP.values()))
-            extra_codes = [c for c in industry_codes if c not in top20_codes]
-
-            selected_codes = top20_codes + extra_codes
+            # 全量展示所有申万二级板块
+            selected_codes = [b.code for b in all_boards]
             boards_meta = {b.code: b for b in all_boards}
 
             today = date_type.today()
@@ -852,48 +855,67 @@ async def get_sw_rotation(days: int = Query(default=14, ge=5, le=60)):
     return result
 
 
-def _sync_rotation_klines():
+def _sync_rotation_klines(force: bool = False):
     """后台同步板块轮动所需的 K 线数据（top20 + 产业关联 + 所有申万二级，含日/周/月K）"""
     from routers.industry import is_trading_day
 
-    # 1) 非交易日不同步
-    if not is_trading_day():
+    # 1) 非交易日不同步（force 模式跳过此判断，允许补历史数据）
+    if not force and not is_trading_day():
         print("[sync_rotation_klines] skipped — not a trading day")
         return
 
     # 2) 今日已有最新数据则跳过（任取一条申万板块日K最新日期判断）
-    today_str = date.today().strftime("%Y-%m-%d")
-    db_check = SessionLocal()
-    try:
-        row = db_check.execute(
-            sa_text(
-                "SELECT MAX(trade_date) FROM stock_kline "
-                "WHERE period='daily' AND code LIKE '8%'"
-            )
-        ).fetchone()
-        latest = row[0] if row and row[0] else None
-    finally:
-        db_check.close()
+    if not force:
+        today_str = date.today().strftime("%Y-%m-%d")
+        db_check = SessionLocal()
+        try:
+            row = db_check.execute(
+                sa_text(
+                    "SELECT MAX(trade_date) FROM stock_kline "
+                    "WHERE period='daily' AND code LIKE '8%'"
+                )
+            ).fetchone()
+            latest = row[0] if row and row[0] else None
+        finally:
+            db_check.close()
 
-    if latest and latest >= today_str:
-        print(f"[sync_rotation_klines] skipped — already up to date ({latest})")
-        return
+        if latest and latest >= today_str:
+            print(f"[sync_rotation_klines] skipped — already up to date ({latest})")
+            return
 
     db = SessionLocal()
     try:
         all_boards = db.query(SwIndustry).order_by(SwIndustry.change_pct.desc()).all()
-        top20 = [b.code for b in all_boards[:20]]
-        extra = list(set(_INDUSTRY_SW_MAP.values()))
         all_sw_codes = [b.code for b in all_boards]
-        codes_to_sync = list(dict.fromkeys(top20 + extra + all_sw_codes))
+        if force:
+            # force 模式：找出日K数据落后的板块单独补，速度更快
+            from sqlalchemy import text as _text
+            rows = db.execute(
+                _text(
+                    "SELECT code, MAX(trade_date) as latest FROM stock_kline "
+                    "WHERE period='daily' AND code LIKE '8%' GROUP BY code"
+                )
+            ).fetchall()
+            latest_map = {r[0]: r[1] for r in rows}
+            # 取全量最新日期，只同步落后的板块
+            global_latest = max(latest_map.values()) if latest_map else "1970-01-01"
+            codes_to_sync = [c for c in all_sw_codes if latest_map.get(c, "1970-01-01") < global_latest]
+            # 没有或极少落后时同步全部（首次 force）
+            if not codes_to_sync:
+                codes_to_sync = all_sw_codes
+            print(f"[sync_rotation_klines] force mode: {len(codes_to_sync)} stale codes to sync")
+        else:
+            top20 = [b.code for b in all_boards[:20]]
+            extra = list(set(_INDUSTRY_SW_MAP.values()))
+            codes_to_sync = list(dict.fromkeys(top20 + extra + all_sw_codes))
     finally:
         db.close()
 
-    # 各 period 对应的拉取根数
-    period_counts = [
+    # force 模式只补日K（快）；常规模式补全三周期
+    period_counts = [("daily", 10)] if force else [
         ("daily",   60),
-        ("weekly",  104),   # 2年周K
-        ("monthly", 100),   # 约8年月K（akshare最多150根）
+        ("weekly",  104),
+        ("monthly", 100),
     ]
 
     for code in codes_to_sync:
@@ -942,7 +964,7 @@ def _sync_rotation_klines():
 
 
 @router.post("/sync-klines")
-def trigger_sync_klines():
-    """后台异步同步板块轮动 K 线（供前端进入页面时触发）"""
-    threading.Thread(target=_sync_rotation_klines, daemon=True).start()
-    return {"message": "kline sync started"}
+def trigger_sync_klines(force: bool = Query(default=False)):
+    """后台异步同步板块轮动 K 线（供前端进入页面时触发）\n\nforce=true 时跳过「今日已更新」判断，强制补拉最新数据。"""
+    threading.Thread(target=_sync_rotation_klines, args=(force,), daemon=True).start()
+    return {"message": "kline sync started", "force": force}

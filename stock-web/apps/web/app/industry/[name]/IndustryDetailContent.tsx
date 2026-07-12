@@ -1907,31 +1907,31 @@ function ProcessFlowView({
                         });
                         const renderNode = (nd: ComponentNode) => {
                           const isSel = selectedId === nd.id;
-                           return (
+                          return (
                             <button
-                               key={nd.id}
-                               onClick={() => onSelect(nd.id)}
-                               style={{
-                                 display: "flex",
-                                 flexDirection: "column",
-                                 alignItems: "flex-start",
-                                 gap: 4,
-                                 padding: "10px 14px",
-                                 borderRadius: 8,
-                                 background: isSel
-                                   ? `${lc.accent}22`
-                                   : `${lc.accent}08`,
-                                 border: `1.5px solid ${isSel ? lc.accent : lc.border}`,
-                                 cursor: "pointer",
-                                 minWidth: 120,
-                                 flexShrink: 0,
-                                 transition: "all 0.18s ease",
-                                 boxShadow: isSel
-                                   ? `0 0 16px ${lc.accent}44, inset 0 0 8px ${lc.accent}18`
-                                   : "none",
-                                 transform: isSel ? "translateY(-2px)" : "none",
-                               }}
-                             >
+                              key={nd.id}
+                              onClick={() => onSelect(nd.id)}
+                              style={{
+                                display: "flex",
+                                flexDirection: "column",
+                                alignItems: "flex-start",
+                                gap: 4,
+                                padding: "10px 14px",
+                                borderRadius: 8,
+                                background: isSel
+                                  ? `${lc.accent}22`
+                                  : `${lc.accent}08`,
+                                border: `1.5px solid ${isSel ? lc.accent : lc.border}`,
+                                cursor: "pointer",
+                                minWidth: 120,
+                                flexShrink: 0,
+                                transition: "all 0.18s ease",
+                                boxShadow: isSel
+                                  ? `0 0 16px ${lc.accent}44, inset 0 0 8px ${lc.accent}18`
+                                  : "none",
+                                transform: isSel ? "translateY(-2px)" : "none",
+                              }}
+                            >
                               <div
                                 style={{
                                   display: "flex",
@@ -5945,7 +5945,9 @@ export default function IndustryCanvasPage() {
   useEffect(() => {
     const tab = searchParams.get("tab") as ViewTab | null;
     const nodeId = searchParams.get("node");
-    if (!tab || nodes.length === 0) return;
+    const layer = searchParams.get("layer");
+    if (nodes.length === 0) return;
+    if (!tab && !nodeId && !layer) return;
 
     if (tab === "chain" || tab === "anatomy") {
       setActiveTab(tab);
@@ -5953,6 +5955,22 @@ export default function IndustryCanvasPage() {
     if (nodeId) {
       setSelectedId(nodeId);
       setPanelVisible(true);
+    } else if (layer) {
+      // 锚定到该 layer 的第一个节点
+      const targetNode = nodes.find((n) => n.data.layer === layer);
+      if (targetNode) {
+        setActiveTab("chain");
+        setSelectedId(targetNode.id);
+        setPanelVisible(true);
+        setTimeout(() => {
+          const element = document.querySelector(
+            `[data-id="${targetNode.id}"]`,
+          );
+          if (element) {
+            element.scrollIntoView({ behavior: "smooth", block: "center" });
+          }
+        }, 300);
+      }
     }
 
     const newUrl = window.location.pathname;

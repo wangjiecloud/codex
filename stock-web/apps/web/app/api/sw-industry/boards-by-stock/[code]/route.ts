@@ -4,18 +4,14 @@ const DATA_SERVICE_URL =
   process.env.DATA_SERVICE_URL || "http://localhost:8000";
 
 export async function GET(
-  req: NextRequest,
+  _req: NextRequest,
   { params }: { params: Promise<{ code: string }> },
 ) {
   const { code } = await params;
-  const { searchParams } = new URL(req.url);
-  const period = searchParams.get("period") || "daily";
-  const count = searchParams.get("count") || searchParams.get("limit") || "200";
-
   try {
     const res = await fetch(
-      `${DATA_SERVICE_URL}/api/kline/${code}?period=${period}&count=${count}`,
-      { cache: "no-store" },
+      `${DATA_SERVICE_URL}/api/sw-industry/boards-by-stock/${code}`,
+      { next: { revalidate: 3600 } },
     );
     if (!res.ok) {
       return NextResponse.json(

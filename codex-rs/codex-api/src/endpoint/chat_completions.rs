@@ -192,7 +192,10 @@ fn to_chat_request(req: &ResponsesApiRequest) -> ChatCompletionsRequest {
         convert_response_item(item, &mut messages);
     }
 
-    // Filter tools to `function` type only
+    // Filter tools to `function` type only.
+    // Supports two wire formats:
+    //   1. Responses API (flat): { "type": "function", "name": "...", "description": "...", "parameters": {...} }
+    //   2. Chat Completions (nested): { "type": "function", "function": { "name": "...", ... } }
     let tools: Option<Vec<ChatTool>> = req.tools.as_ref().and_then(|tools| {
         let filtered: Vec<ChatTool> = tools
             .iter()
@@ -202,21 +205,37 @@ fn to_chat_request(req: &ResponsesApiRequest) -> ChatCompletionsRequest {
                     trace!("chat_completions: dropping non-function tool type={kind}");
                     return None;
                 }
-                let func = t.get("function")?;
+                // Support both Responses API flat format and Chat Completions nested format.
+                // In Responses API format, "name"/"description"/"parameters" are at the top level.
+                // In Chat Completions format, they are nested under a "function" key.
+                let (name, description, parameters, strict) =
+                    if let Some(func) = t.get("function") {
+                        // Chat Completions nested format
+                        (
+                            func.get("name").and_then(Value::as_str).unwrap_or("").to_string(),
+                            func.get("description").and_then(Value::as_str).map(str::to_string),
+                            func.get("parameters").cloned(),
+                            func.get("strict").and_then(Value::as_bool),
+                        )
+                    } else {
+                        // Responses API flat format
+                        (
+                            t.get("name").and_then(Value::as_str).unwrap_or("").to_string(),
+                            t.get("description").and_then(Value::as_str).map(str::to_string),
+                            t.get("parameters").cloned(),
+                            t.get("strict").and_then(Value::as_bool),
+                        )
+                    };
+                if name.is_empty() {
+                    return None;
+                }
                 Some(ChatTool {
                     r#type: "function".to_string(),
                     function: ChatToolFunction {
-                        name: func
-                            .get("name")
-                            .and_then(Value::as_str)
-                            .unwrap_or("")
-                            .to_string(),
-                        description: func
-                            .get("description")
-                            .and_then(Value::as_str)
-                            .map(str::to_string),
-                        parameters: func.get("parameters").cloned(),
-                        strict: func.get("strict").and_then(Value::as_bool),
+                        name,
+                        description,
+                        parameters,
+                        strict,
                     },
                 })
             })

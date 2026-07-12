@@ -1,14 +1,15 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-from datetime import datetime
+from datetime import datetime, date, timedelta
 import threading
 import time
 import requests
+import pandas as pd
 
 import akshare as ak
 
-from db import get_db, SessionLocal, GlobalMarketIndex
+from db import get_db, SessionLocal, GlobalMarketIndex, GlobalIndexKline
 
 router = APIRouter()
 
@@ -19,9 +20,9 @@ _REGION_MAP: dict[str, str] = {
     "000688": "cn",
     "000300": "cn",
     "399005": "cn",
-    "HSI": "cn",
-    "HSCEI": "cn",
-    "HSCCI": "cn",
+    "HSI": "hk",
+    "HSCEI": "hk",
+    "HSTECH": "hk",
     "DJIA": "us",
     "SPX": "us",
     "NDX": "us",
@@ -29,24 +30,11 @@ _REGION_MAP: dict[str, str] = {
     "GDAXI": "eu",
     "FCHI": "eu",
     "SX5E": "eu",
-    "MIB": "eu",
-    "IBEX": "eu",
-    "AEX": "eu",
-    "SSMI": "eu",
     "N225": "asia",
     "KS11": "asia",
-    "KOSPI200": "asia",
     "TWII": "asia",
     "AS51": "asia",
     "SENSEX": "asia",
-    "JKSE": "asia",
-    "KLSE": "asia",
-    "STI": "asia",
-    "VNINDEX": "asia",
-    "PSI": "asia",
-    "AORD": "asia",
-    "NZ50": "asia",
-    "SET": "asia",
     "UDI": "other",
     "CRB": "other",
     "BDI": "other",
@@ -56,7 +44,6 @@ FEATURED_CODES = [
     "000001",
     "399001",
     "399006",
-    "000688",
     "000300",
     "HSI",
     "HSCEI",
@@ -73,8 +60,27 @@ FEATURED_CODES = [
     "UDI",
 ]
 
+# 复盘 tab 需要同步的全球指数 K 线（仅非A股，A 股大盘指数走 baostock）
+REVIEW_INDEX_CODES = [
+    # 港股
+    "HSI", "HSCEI", "HSTECH",
+    # 美股
+    "DJIA", "SPX", "NDX",
+    # 日本/韩国
+    "N225", "KS11",
+]
+
 _sync_lock = threading.Lock()
 _is_syncing = False
+
+# 全球指数K线同步锁
+_kline_sync_lock = threading.Lock()
+_kline_is_syncing = False
+
+_EM_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Referer": "https://quote.eastmoney.com/",
+}
 
 
 def _safe_float(val, default: float = 0.0) -> float:
@@ -84,6 +90,284 @@ def _safe_float(val, default: float = 0.0) -> float:
     except Exception:
         return default
 
+
+# ─────────────────── 新浪财经 K 线抓取 ───────────────────
+
+# 新浪财经接口映射：code -> (接口类型, 新浪symbol)
+_SINA_INDEX_MAP: dict[str, tuple[str, str]] = {
+    # 港股：ak.stock_hk_index_daily_sina(symbol)
+    "HSI":    ("hk",     "HSI"),
+    "HSCEI":  ("hk",     "HSCEI"),
+    "HSTECH": ("hk",     "HSTECH"),
+    # 美股：ak.index_us_stock_sina(symbol)
+    "DJIA":   ("us",     ".DJI"),
+    "SPX":    ("us",     ".INX"),
+    "NDX":    ("us",     ".NDX"),
+    # 日本/韩国：ak.index_global_hist_sina(symbol) 用中文名
+    "N225":   ("global", "日经225指数"),
+    "KS11":   ("global", "首尔综合指数"),
+}
+
+
+def _fetch_sina_daily(code: str) -> pd.DataFrame | None:
+    """
+    从新浪财经抓取全球指数日K数据，返回标准化 DataFrame。
+    列：date(str YYYY-MM-DD), open, high, low, close, volume
+    """
+    entry = _SINA_INDEX_MAP.get(code)
+    if not entry:
+        return None
+    kind, symbol = entry
+
+    for attempt in range(3):
+        try:
+            if kind == "hk":
+                df = ak.stock_hk_index_daily_sina(symbol=symbol)
+                # 列名：date, open, high, low, close, volume
+                df = df.rename(columns={
+                    "date": "date", "open": "open", "high": "high",
+                    "low": "low", "close": "close", "volume": "volume"
+                })
+            elif kind == "us":
+                df = ak.index_us_stock_sina(symbol=symbol)
+                # 列名：date, open, high, low, close, volume
+                df = df.rename(columns={
+                    "date": "date", "open": "open", "high": "high",
+                    "low": "low", "close": "close", "volume": "volume"
+                })
+            else:  # global
+                df = ak.index_global_hist_sina(symbol=symbol)
+                # 列名：日期, 开盘, 收盘, 最高, 最低, 成交量
+                df = df.rename(columns={
+                    "日期": "date", "开盘": "open", "收盘": "close",
+                    "最高": "high", "最低": "low", "成交量": "volume"
+                })
+
+            # 统一日期格式为字符串 YYYY-MM-DD
+            df["date"] = pd.to_datetime(df["date"]).dt.strftime("%Y-%m-%d")
+            for col in ["open", "high", "low", "close"]:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+            df["volume"] = pd.to_numeric(df.get("volume", 0), errors="coerce").fillna(0)
+            df = df.dropna(subset=["close"]).sort_values("date").reset_index(drop=True)
+            return df
+
+        except Exception as e:
+            if attempt < 2:
+                time.sleep(2)
+            else:
+                print(f"[global_kline] sina fetch failed for {code}: {e}")
+                return None
+    return None
+
+
+def _resample_to_period(df: pd.DataFrame, period: str) -> pd.DataFrame:
+    """将日K DataFrame 聚合为周K或月K。"""
+    if period == "daily":
+        return df
+
+    df = df.copy()
+    df["date_dt"] = pd.to_datetime(df["date"])
+    df = df.set_index("date_dt")
+
+    freq = "W" if period == "weekly" else "ME"
+    resampled = df.resample(freq).agg(
+        open=("open", "first"),
+        high=("high", "max"),
+        low=("low", "min"),
+        close=("close", "last"),
+        volume=("volume", "sum"),
+    ).dropna(subset=["close"]).reset_index()
+    resampled["date"] = resampled["date_dt"].dt.strftime("%Y-%m-%d")
+    return resampled[["date", "open", "high", "low", "close", "volume"]]
+
+
+def _compute_change_pct(df: pd.DataFrame) -> pd.DataFrame:
+    """计算涨跌幅（与前一个 close 对比）。"""
+    df = df.copy()
+    df["change_pct"] = df["close"].pct_change() * 100
+    df["change_pct"] = df["change_pct"].fillna(0.0).round(4)
+    return df
+
+
+def _fetch_sina_kline(code: str, period: str, count: int) -> list[dict]:
+    """
+    通过新浪财经抓取全球指数 K 线。
+    返回格式: [{"time": "YYYY-MM-DD", "open", "close", "high", "low", "volume", "change_pct"}, ...]
+    period: "daily"/"weekly"/"monthly"
+    """
+    df = _fetch_sina_daily(code)
+    if df is None or df.empty:
+        return []
+
+    df = _resample_to_period(df, period)
+    df = _compute_change_pct(df)
+
+    result = []
+    for _, row in df.tail(count).iterrows():
+        result.append({
+            "time": str(row["date"]),
+            "open": _safe_float(row["open"]),
+            "high": _safe_float(row["high"]),
+            "low": _safe_float(row["low"]),
+            "close": _safe_float(row["close"]),
+            "volume": _safe_float(row["volume"]),
+            "change_pct": _safe_float(row.get("change_pct", 0.0)),
+        })
+    return result
+
+
+# ─────────────────── 数据库写入 ───────────────────
+
+def _save_global_klines(code: str, period: str, bars: list[dict]) -> int:
+    """将全球指数 K 线写入 global_index_kline 表，返回写入条数"""
+    if not bars:
+        return 0
+    db = SessionLocal()
+    try:
+        count = 0
+        for bar in bars:
+            stmt = sqlite_insert(GlobalIndexKline).values(
+                code=code,
+                period=period,
+                trade_date=bar["time"],
+                open=bar["open"],
+                high=bar["high"],
+                low=bar["low"],
+                close=bar["close"],
+                volume=bar["volume"],
+                change_pct=bar["change_pct"],
+                updated_at=datetime.utcnow(),
+            )
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["code", "period", "trade_date"],
+                set_={
+                    "open": stmt.excluded.open,
+                    "high": stmt.excluded.high,
+                    "low": stmt.excluded.low,
+                    "close": stmt.excluded.close,
+                    "volume": stmt.excluded.volume,
+                    "change_pct": stmt.excluded.change_pct,
+                    "updated_at": stmt.excluded.updated_at,
+                },
+            )
+            db.execute(stmt)
+            count += 1
+        db.commit()
+        return count
+    except Exception as e:
+        db.rollback()
+        print(f"[global_kline] save failed for {code}/{period}: {e}")
+        return 0
+    finally:
+        db.close()
+
+
+def fetch_index_kline(code: str, period: str, count: int) -> list[dict]:
+    """
+    抓取并缓存单个全球指数 K 线，返回格式与 stock_kline 一致（供 kline.py 调用）。
+    优先从数据库读取，若不足则触发同步。
+    """
+    # 先尝试从 DB 读取
+    db = SessionLocal()
+    try:
+        rows = (
+            db.query(GlobalIndexKline)
+            .filter(
+                GlobalIndexKline.code == code,
+                GlobalIndexKline.period == period,
+            )
+            .order_by(GlobalIndexKline.trade_date.asc())
+            .all()
+        )
+        if len(rows) >= count // 2:
+            return [
+                {
+                    "time": r.trade_date,
+                    "open": r.open,
+                    "high": r.high,
+                    "low": r.low,
+                    "close": r.close,
+                    "volume": r.volume,
+                    "turnRate": 0.0,
+                    "changePct": r.change_pct,
+                }
+                for r in rows[-count:]
+            ]
+    finally:
+        db.close()
+
+    # DB 数据不足，实时抓取
+    bars = _fetch_sina_kline(code, period, count)
+    if bars:
+        _save_global_klines(code, period, bars)
+
+    return [
+        {
+            "time": b["time"],
+            "open": b["open"],
+            "high": b["high"],
+            "low": b["low"],
+            "close": b["close"],
+            "volume": b["volume"],
+            "turnRate": 0.0,
+            "changePct": b["change_pct"],
+        }
+        for b in bars
+    ]
+
+
+def sync_all_review_index_klines() -> int:
+    """
+    定时任务入口：同步所有复盘指数的日/周/月 K 线。
+    """
+    global _kline_is_syncing
+    with _kline_sync_lock:
+        if _kline_is_syncing:
+            return 0
+        _kline_is_syncing = True
+
+    total = 0
+    try:
+        for code in REVIEW_INDEX_CODES:
+            if code not in _SINA_INDEX_MAP:
+                print(f"[global_kline] no sina mapping for {code}, skip")
+                continue
+            # 先抓日K，再聚合
+            df_daily = _fetch_sina_daily(code)
+            if df_daily is None or df_daily.empty:
+                print(f"[global_kline] {code}: no daily data, skip")
+                continue
+            print(f"[global_kline] {code}: got {len(df_daily)} daily bars from sina")
+
+            for period, count in [("daily", 500), ("weekly", 260), ("monthly", 120)]:
+                try:
+                    df_p = _resample_to_period(df_daily, period)
+                    df_p = _compute_change_pct(df_p)
+                    bars = []
+                    for _, row in df_p.tail(count).iterrows():
+                        bars.append({
+                            "time": str(row["date"]),
+                            "open": _safe_float(row["open"]),
+                            "high": _safe_float(row["high"]),
+                            "low": _safe_float(row["low"]),
+                            "close": _safe_float(row["close"]),
+                            "volume": _safe_float(row["volume"]),
+                            "change_pct": _safe_float(row.get("change_pct", 0.0)),
+                        })
+                    n = _save_global_klines(code, period, bars)
+                    total += n
+                    print(f"[global_kline] {code}/{period}: saved {n} bars")
+                except Exception as e:
+                    print(f"[global_kline] sync error {code}/{period}: {e}")
+            time.sleep(1)  # 避免请求过快
+        print(f"[global_kline] sync_all done, total {total} bars saved")
+    finally:
+        with _kline_sync_lock:
+            _kline_is_syncing = False
+    return total
+
+
+# ─────────────────── 原有全球快照同步 ───────────────────
 
 def sync_global_indices() -> int:
     global _is_syncing
@@ -150,7 +434,6 @@ def sync_global_indices() -> int:
                     count += 1
                 db.commit()
                 from routers.system import sched_log
-
                 sched_log(
                     "success",
                     f"全球市场指数同步完成，共 {count} 条",
@@ -166,7 +449,6 @@ def sync_global_indices() -> int:
                     time.sleep(1 + db_attempt * 0.5)
                     continue
                 from routers.system import sched_log
-
                 sched_log("error", f"全球市场指数同步DB错误: {e}", source="scheduler")
                 return 0
             finally:
@@ -174,7 +456,6 @@ def sync_global_indices() -> int:
                     db.close()
     except Exception as e:
         from routers.system import sched_log
-
         sched_log("error", f"全球市场指数同步失败: {e}", source="scheduler")
         return 0
     finally:
@@ -224,12 +505,7 @@ def get_featured_indices(db: Session = Depends(get_db)):
     return result
 
 
-_EM_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Referer": "https://www.eastmoney.com/",
-}
-
-_CN_INDEX_SECIDS = "1.000001,0.399001,0.399006,1.000688,0.899050"
+_CN_INDEX_SECIDS = "1.000001,0.399001,0.399006,1.000300,0.899050"
 _CN_INDEX_FIELDS = "f1,f2,f3,f4,f12,f14,f15,f16,f17,f18"
 
 
@@ -353,10 +629,17 @@ def get_market_overview():
 
 @router.get("/status")
 def get_sync_status():
-    return {"syncing": _is_syncing}
+    return {"syncing": _is_syncing, "klineSyncing": _kline_is_syncing}
 
 
 @router.post("/sync")
 def trigger_sync():
     threading.Thread(target=sync_global_indices, daemon=True).start()
     return {"message": "sync started"}
+
+
+@router.post("/sync-klines")
+def trigger_kline_sync():
+    """手动触发全球指数 K 线同步"""
+    threading.Thread(target=sync_all_review_index_klines, daemon=True).start()
+    return {"message": "kline sync started"}

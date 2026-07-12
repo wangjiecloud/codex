@@ -5,16 +5,16 @@ const DATA_SERVICE_URL =
 
 export async function GET(
   req: NextRequest,
-  { params }: { params: Promise<{ code: string }> },
+  { params }: { params: Promise<{ board_code: string }> },
 ) {
-  const { code } = await params;
+  const { board_code } = await params;
   const { searchParams } = new URL(req.url);
   const period = searchParams.get("period") || "daily";
-  const count = searchParams.get("count") || searchParams.get("limit") || "200";
+  const count = searchParams.get("count") || "200";
 
   try {
     const res = await fetch(
-      `${DATA_SERVICE_URL}/api/kline/${code}?period=${period}&count=${count}`,
+      `${DATA_SERVICE_URL}/api/sw-industry/kline/${board_code}?period=${period}&count=${count}`,
       { cache: "no-store" },
     );
     if (!res.ok) {

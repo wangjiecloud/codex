@@ -136,6 +136,36 @@ interface RotationData {
   boards: RotationBoard[];
 }
 
+/* 产业板块 code 格式：{industry_id}_{layer}，如 pcb_core / aigpu_upstream */
+const INDUSTRY_IDS = new Set([
+  "overview",
+  "aigpu",
+  "pcb",
+  "mlcc",
+  "memory",
+  "optics",
+  "fiber",
+  "liquidcool",
+  "aipower",
+  "coppercable",
+  "idc",
+  "glasssub",
+  "aiserver",
+  "semieq",
+]);
+
+/** 解析产业板块 code，返回 { industryId, layer } 或 null（非产业板块）*/
+function parseIndustryBoardCode(
+  code: string,
+): { industryId: string; layer: string } | null {
+  const lastUnderscore = code.lastIndexOf("_");
+  if (lastUnderscore === -1) return null;
+  const industryId = code.slice(0, lastUnderscore);
+  const layer = code.slice(lastUnderscore + 1);
+  if (!INDUSTRY_IDS.has(industryId)) return null;
+  return { industryId, layer };
+}
+
 function heatColor(v: number | null): string {
   if (v === null || v === undefined) return "var(--bg-tertiary)";
   const clamped = Math.max(-5, Math.min(5, v));
@@ -656,11 +686,40 @@ function RotationModal({ onClose }: { onClose: () => void }) {
   const [data, setData] = useState<RotationData | null>(null);
   const [loading, setLoading] = useState(true);
   const [days, setDays] = useState(14);
-  const [sortBy, setSortBy] = useState<"name" | "recent">("recent");
+  const [sortBy, setSortBy] = useState<"name" | "recent" | "cumulative">(
+    "recent",
+  );
+  const [rotationSortOrder, setRotationSortOrder] = useState<"desc" | "asc">(
+    "desc",
+  );
   const [onlyIndustry, setOnlyIndustry] = useState(false);
   const [searchText, setSearchText] = useState("");
+  const [syncing, setSyncingRotation] = useState(false);
 
-  // 挂载时后台异步同步数据，不阻塞 UI
+  const handleForceSync = async () => {
+    setSyncingRotation(true);
+    try {
+      await fetch(`${API}/api/sw-industry/sync-klines?force=true`, {
+        method: "POST",
+        cache: "no-store",
+      });
+      // 等待后台同步完成（force 模式只补日K，约15秒），再重新拉 rotation 数据
+      await new Promise((r) => setTimeout(r, 15000));
+      setLoading(true);
+      const endpoint = onlyIndustry
+        ? `${API}/api/board/industry-rotation?days=${days}`
+        : `${API}/api/sw-industry/rotation?days=${days}`;
+      const r = await fetch(endpoint);
+      const d = await r.json();
+      if (d && Array.isArray(d.boards)) setData(d);
+    } catch {
+      // ignore
+    } finally {
+      setSyncingRotation(false);
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
     // 申万板块 K 线
     fetch(`${API}/api/sw-industry/sync-klines`, {
@@ -701,7 +760,18 @@ function RotationModal({ onClose }: { onClose: () => void }) {
           })
           .sort((a, b) => {
             if (sortBy === "recent") {
-              return b.currentChangePct - a.currentChangePct;
+              return rotationSortOrder === "desc"
+                ? b.currentChangePct - a.currentChangePct
+                : a.currentChangePct - b.currentChangePct;
+            }
+            if (sortBy === "cumulative") {
+              const sumA =
+                a.data.reduce<number>((acc, v) => acc + (v ?? 0), 0) +
+                a.currentChangePct;
+              const sumB =
+                b.data.reduce<number>((acc, v) => acc + (v ?? 0), 0) +
+                b.currentChangePct;
+              return rotationSortOrder === "desc" ? sumB - sumA : sumA - sumB;
             }
             return a.name.localeCompare(b.name);
           })
@@ -719,35 +789,49 @@ function RotationModal({ onClose }: { onClose: () => void }) {
         style={{ width: "min(1100px, 95vw)", maxHeight: "88vh" }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center gap-3 px-5 py-3 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] flex-shrink-0">
-          <BarChart2 size={15} className="text-[var(--accent)]" />
-          <span className="text-[14px] font-bold text-[var(--text-primary)]">
-            板块轮动热力图
-          </span>
-          <span className="text-[11px] text-[var(--text-tertiary)]">
-            颜色越红=涨幅越大，越绿=跌幅越大
-          </span>
-          <input
-            type="text"
-            value={searchText}
-            onChange={(e) => setSearchText(e.target.value)}
-            placeholder="搜索板块..."
-            className="ml-3 px-2 py-0.5 rounded border border-[var(--border-color)] bg-[var(--bg-primary)] text-[11px] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] outline-none focus:border-[var(--accent)] transition-colors w-32"
-          />
-          <div className="ml-auto flex items-center gap-2">
-            <label className="flex items-center gap-1.5 cursor-pointer select-none mr-1">
+        <div className="flex flex-col gap-0 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] flex-shrink-0">
+          {/* 第一行：标题 + 搜索 + 关闭 */}
+          <div className="flex items-center gap-3 px-5 pt-3 pb-2">
+            <BarChart2 size={15} className="text-[var(--accent)]" />
+            <span className="text-[14px] font-bold text-[var(--text-primary)]">
+              板块轮动热力图
+            </span>
+            <span className="text-[11px] text-[var(--text-tertiary)] hidden sm:inline">
+              颜色越红=涨幅越大，越绿=跌幅越大
+            </span>
+            <input
+              type="text"
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+              placeholder="搜索板块..."
+              className="ml-auto px-2.5 py-1 rounded-md border border-[var(--border-color)] bg-[var(--bg-primary)] text-[11px] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] outline-none focus:border-[var(--accent)] transition-colors w-32"
+            />
+            <button
+              onClick={onClose}
+              className="p-1 rounded hover:bg-[var(--bg-hover)] text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors flex-shrink-0"
+            >
+              <X size={14} />
+            </button>
+          </div>
+          {/* 第二行：所有控件 */}
+          <div className="flex items-center gap-1.5 px-5 pb-2.5 flex-wrap">
+            {/* 仅产业板块 */}
+            <label className="flex items-center gap-1 cursor-pointer select-none">
               <input
                 type="checkbox"
                 checked={onlyIndustry}
                 onChange={(e) => setOnlyIndustry(e.target.checked)}
                 className="w-3 h-3 accent-[var(--accent)] cursor-pointer"
               />
-              <span className="text-[11px] text-[var(--text-secondary)]">
+              <span className="text-[11px] text-[var(--text-secondary)] whitespace-nowrap">
                 仅产业板块
               </span>
             </label>
-            <div className="w-px h-3 bg-[var(--border-color)]" />
-            <span className="text-[11px] text-[var(--text-tertiary)]">
+
+            <div className="w-px h-3 bg-[var(--border-color)] mx-1 flex-shrink-0" />
+
+            {/* 周期 */}
+            <span className="text-[11px] text-[var(--text-tertiary)] whitespace-nowrap">
               周期
             </span>
             {[7, 10, 14, 21].map((d) => (
@@ -755,25 +839,35 @@ function RotationModal({ onClose }: { onClose: () => void }) {
                 key={d}
                 onClick={() => setDays(d)}
                 className={cn(
-                  "px-2 py-0.5 rounded text-[11px] transition-colors",
+                  "px-2.5 py-0.5 rounded text-[11px] transition-colors whitespace-nowrap",
                   days === d
-                    ? "bg-[var(--accent)] text-black font-medium"
+                    ? "bg-[var(--accent)] text-black font-semibold"
                     : "text-[var(--text-tertiary)] hover:text-[var(--text-primary)] border border-[var(--border-color)]",
                 )}
               >
                 {d}天
               </button>
             ))}
-            <div className="w-px h-3 bg-[var(--border-color)] mx-1" />
-            <span className="text-[11px] text-[var(--text-tertiary)]">
+
+            <div className="w-px h-3 bg-[var(--border-color)] mx-1 flex-shrink-0" />
+
+            {/* 排序 */}
+            <span className="text-[11px] text-[var(--text-tertiary)] whitespace-nowrap">
               排序
             </span>
             <button
-              onClick={() => setSortBy("recent")}
+              onClick={() => {
+                if (sortBy === "recent") {
+                  setRotationSortOrder((o) => (o === "desc" ? "asc" : "desc"));
+                } else {
+                  setSortBy("recent");
+                  setRotationSortOrder("desc");
+                }
+              }}
               className={cn(
-                "px-2 py-0.5 rounded text-[11px] transition-colors",
+                "px-2.5 py-0.5 rounded text-[11px] transition-colors whitespace-nowrap",
                 sortBy === "recent"
-                  ? "bg-[var(--accent)] text-black font-medium"
+                  ? "bg-[var(--accent)] text-black font-semibold"
                   : "text-[var(--text-tertiary)] hover:text-[var(--text-primary)] border border-[var(--border-color)]",
               )}
             >
@@ -782,19 +876,28 @@ function RotationModal({ onClose }: { onClose: () => void }) {
             <button
               onClick={() => setSortBy("name")}
               className={cn(
-                "px-2 py-0.5 rounded text-[11px] transition-colors",
+                "px-2.5 py-0.5 rounded text-[11px] transition-colors whitespace-nowrap",
                 sortBy === "name"
-                  ? "bg-[var(--accent)] text-black font-medium"
+                  ? "bg-[var(--accent)] text-black font-semibold"
                   : "text-[var(--text-tertiary)] hover:text-[var(--text-primary)] border border-[var(--border-color)]",
               )}
             >
               板块名称
             </button>
+
+            {/* 补全数据 — 推到最右 */}
             <button
-              onClick={onClose}
-              className="ml-2 p-1 rounded hover:bg-[var(--bg-hover)] text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors"
+              onClick={handleForceSync}
+              disabled={syncing}
+              className={cn(
+                "ml-auto flex items-center gap-1 px-2.5 py-0.5 rounded border text-[11px] transition-colors whitespace-nowrap flex-shrink-0",
+                syncing
+                  ? "border-[var(--accent)]/40 text-[var(--accent)] opacity-70 cursor-not-allowed"
+                  : "border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--accent)] hover:border-[var(--accent)]/50",
+              )}
             >
-              <X size={14} />
+              <RefreshCw size={11} className={cn(syncing && "animate-spin")} />
+              {syncing ? "同步中..." : "补全数据"}
             </button>
           </div>
         </div>
@@ -820,7 +923,7 @@ function RotationModal({ onClose }: { onClose: () => void }) {
             <div className="overflow-x-auto">
               <table
                 className="border-collapse text-xs"
-                style={{ minWidth: dates.length * 52 + 200 }}
+                style={{ minWidth: dates.length * 52 + 260 }}
               >
                 <thead>
                   <tr>
@@ -839,63 +942,143 @@ function RotationModal({ onClose }: { onClose: () => void }) {
                     <th className="px-3 py-1.5 text-center font-medium whitespace-nowrap text-[10px]">
                       <span className="text-[var(--accent)]">今日实时</span>
                     </th>
+                    <th
+                      className="px-3 py-1.5 text-center font-medium whitespace-nowrap text-[10px] cursor-pointer select-none hover:text-[var(--text-primary)] transition-colors"
+                      onClick={() => {
+                        if (sortBy === "cumulative") {
+                          setRotationSortOrder((o) =>
+                            o === "desc" ? "asc" : "desc",
+                          );
+                        } else {
+                          setSortBy("cumulative");
+                          setRotationSortOrder("desc");
+                        }
+                      }}
+                    >
+                      <span
+                        className={cn(
+                          "inline-flex items-center gap-0.5",
+                          sortBy === "cumulative"
+                            ? "text-[var(--accent)]"
+                            : "text-[var(--text-secondary)]",
+                        )}
+                      >
+                        累计涨幅
+                        {sortBy === "cumulative" ? (
+                          rotationSortOrder === "desc" ? (
+                            <ChevronDown
+                              size={10}
+                              className="text-[var(--accent)]"
+                            />
+                          ) : (
+                            <ChevronUp
+                              size={10}
+                              className="text-[var(--accent)]"
+                            />
+                          )
+                        ) : (
+                          <ArrowUpDown size={10} className="opacity-40" />
+                        )}
+                      </span>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
-                  {sortedBoards.map((board) => (
-                    <tr
-                      key={board.code}
-                      className="hover:bg-[var(--bg-hover)] transition-colors"
-                    >
-                      <td className="sticky left-0 z-10 bg-[var(--bg-primary)] px-3 py-1 whitespace-nowrap">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-[12px] text-[var(--text-primary)] font-medium">
-                            {board.name}
-                          </span>
-                          {board.tag && (
-                            <span className="text-[9px] px-1 py-0.5 rounded bg-[var(--accent)]/15 text-[var(--accent)] leading-none">
-                              {board.tag}
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                      {board.data.map((v, i) => (
-                        <td key={i} className="px-0.5 py-0.5">
-                          <div
-                            className="rounded flex items-center justify-center font-mono"
-                            style={{
-                              background: heatColor(v),
-                              width: 44,
-                              height: 26,
-                              fontSize: 10,
-                              color:
-                                v === null ? "var(--text-tertiary)" : "#fff",
-                              opacity: v === null ? 0.4 : 1,
-                            }}
-                          >
-                            {v === null
-                              ? "--"
-                              : `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`}
+                  {sortedBoards.map((board) => {
+                    const industryInfo = parseIndustryBoardCode(board.code);
+                    return (
+                      <tr
+                        key={board.code}
+                        className="hover:bg-[var(--bg-hover)] transition-colors"
+                      >
+                        <td className="sticky left-0 z-10 bg-[var(--bg-primary)] px-3 py-1 whitespace-nowrap">
+                          <div className="flex items-center gap-1.5">
+                            {industryInfo ? (
+                              <button
+                                className="text-[12px] text-[var(--text-primary)] font-medium hover:text-[var(--accent)] transition-colors text-left"
+                                onClick={() =>
+                                  window.open(
+                                    `/industry/${industryInfo.industryId}?tab=chain&layer=${industryInfo.layer}`,
+                                    "_blank",
+                                  )
+                                }
+                              >
+                                {board.name}
+                              </button>
+                            ) : (
+                              <span className="text-[12px] text-[var(--text-primary)] font-medium">
+                                {board.name}
+                              </span>
+                            )}
+                            {board.tag && (
+                              <span className="text-[9px] px-1 py-0.5 rounded bg-[var(--accent)]/15 text-[var(--accent)] leading-none">
+                                {board.tag}
+                              </span>
+                            )}
                           </div>
                         </td>
-                      ))}
-                      <td className="px-3 py-1 text-center">
-                        <span
-                          className={cn(
-                            "text-[11px] font-mono font-semibold",
-                            board.currentChangePct > 0
-                              ? "text-[#e84444]"
-                              : board.currentChangePct < 0
-                                ? "text-[#09d464]"
-                                : "text-[var(--text-secondary)]",
-                          )}
-                        >
-                          {board.currentChangePct > 0 ? "+" : ""}
-                          {board.currentChangePct.toFixed(2)}%
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
+                        {board.data.map((v, i) => (
+                          <td key={i} className="px-0.5 py-0.5">
+                            <div
+                              className="rounded flex items-center justify-center font-mono"
+                              style={{
+                                background: heatColor(v),
+                                width: 44,
+                                height: 26,
+                                fontSize: 10,
+                                color:
+                                  v === null ? "var(--text-tertiary)" : "#fff",
+                                opacity: v === null ? 0.4 : 1,
+                              }}
+                            >
+                              {v === null
+                                ? "--"
+                                : `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`}
+                            </div>
+                          </td>
+                        ))}
+                        <td className="px-3 py-1 text-center">
+                          <span
+                            className={cn(
+                              "text-[11px] font-mono font-semibold",
+                              board.currentChangePct > 0
+                                ? "text-[#e84444]"
+                                : board.currentChangePct < 0
+                                  ? "text-[#09d464]"
+                                  : "text-[var(--text-secondary)]",
+                            )}
+                          >
+                            {board.currentChangePct > 0 ? "+" : ""}
+                            {board.currentChangePct.toFixed(2)}%
+                          </span>
+                        </td>
+                        <td className="px-3 py-1 text-center">
+                          {(() => {
+                            const sum =
+                              board.data.reduce<number>(
+                                (acc, v) => acc + (v ?? 0),
+                                0,
+                              ) + board.currentChangePct;
+                            return (
+                              <span
+                                className={cn(
+                                  "text-[11px] font-mono font-semibold",
+                                  sum > 0
+                                    ? "text-[#e84444]"
+                                    : sum < 0
+                                      ? "text-[#09d464]"
+                                      : "text-[var(--text-secondary)]",
+                                )}
+                              >
+                                {sum > 0 ? "+" : ""}
+                                {sum.toFixed(2)}%
+                              </span>
+                            );
+                          })()}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

@@ -152,6 +152,21 @@ def startup():
 
     threading.Thread(target=_warmup_caches, daemon=True).start()
 
+    # 启动时后台异步同步全球指数 K 线（如果数据库中缺少数据）
+    def _maybe_sync_global_klines():
+        from db import SessionLocal, GlobalIndexKline
+        db = SessionLocal()
+        try:
+            count = db.query(GlobalIndexKline).count()
+        finally:
+            db.close()
+        if count < 100:  # 数据不足时触发全量同步
+            print(f"[startup] global_index_kline has only {count} rows, triggering sync")
+            global_market.sync_all_review_index_klines()
+        else:
+            print(f"[startup] global_index_kline has {count} rows, skip sync")
+    threading.Thread(target=_maybe_sync_global_klines, daemon=True).start()
+
     _scheduler.add_job(
         industry.sync_all_data,
         trigger="cron",
@@ -208,6 +223,16 @@ def startup():
         hour=16,
         minute=0,
         id="fund_flow_snapshot",
+        replace_existing=True,
+    )
+
+    # 每天18:00同步全球指数 K 线（收盘后港股/美股/日韩等已更新当日数据）
+    _scheduler.add_job(
+        global_market.sync_all_review_index_klines,
+        trigger="cron",
+        hour=18,
+        minute=0,
+        id="global_index_kline_sync",
         replace_existing=True,
     )
 

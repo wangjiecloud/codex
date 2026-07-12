@@ -640,6 +640,24 @@ class Memo(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class GlobalIndexKline(Base):
+    """全球主要指数 K 线历史数据（日/周/月）"""
+
+    __tablename__ = "global_index_kline"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    code = Column(String(20), index=True)        # 指数代码，如 HSI / NDX / N225
+    period = Column(String(10))                  # "daily" | "weekly" | "monthly"
+    trade_date = Column(String(10))              # "YYYY-MM-DD"
+    open = Column(_P)
+    high = Column(_P)
+    low = Column(_P)
+    close = Column(_P)
+    volume = Column(Float, default=0.0)
+    change_pct = Column(_P, default=0.0)
+    updated_at = Column(DateTime, default=datetime.utcnow)
+    __table_args__ = (UniqueConstraint("code", "period", "trade_date"),)
+
+
 def get_db():
     db = SessionLocal()
     try:

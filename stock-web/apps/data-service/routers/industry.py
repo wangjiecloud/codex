@@ -440,6 +440,7 @@ def _sync_all_quotes():
             stmt = stmt.on_conflict_do_update(
                 index_elements=["code"],
                 set_={
+                    "name": stmt.excluded.name,
                     "price": stmt.excluded.price,
                     "change": stmt.excluded.change,
                     "change_amt": stmt.excluded.change_amt,
@@ -526,6 +527,24 @@ def _sync_klines(code: str, period: str = "daily"):
 
     from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 
+    # 需要触发 reset_bs 的瞬态网络错误关键词
+    _TRANSIENT_ERRORS = (
+        "bad file descriptor",
+        "utf-8",
+        "utf8",
+        "decompression",
+        "codec",
+        "connection",
+        "broken pipe",
+        "reset by peer",
+        "timed out",
+        "接收数据异常",
+    )
+
+    def _is_transient(e: Exception) -> bool:
+        msg = str(e).lower()
+        return any(kw in msg for kw in _TRANSIENT_ERRORS)
+
     def _fetch_rows():
         bs_period = "d" if period == "daily" else ("w" if period == "weekly" else "m")
         bs = get_bs()
@@ -553,74 +572,82 @@ def _sync_klines(code: str, period: str = "daily"):
                 rows.append(r)
         return rows
 
-    with ThreadPoolExecutor(max_workers=1) as ex:
-        fut = ex.submit(_fetch_rows)
-        try:
-            rows = fut.result(timeout=30)
-        except FuturesTimeout:
-            print(f"[sync_klines] {code} timed out, skipping")
-            reset_bs()
-            from routers.system import record_failed_stock
-
-            record_failed_stock(code, get_stock_name(code), "超时", "kline")
-            return
-        except Exception as e:
-            print(f"[sync_klines] {code} fetch error: {e}")
-            reset_bs()
-            from routers.system import record_failed_stock
-
-            record_failed_stock(code, get_stock_name(code), str(e), "kline")
-            return
+    rows = None
+    fetch_attempts = 3
+    for fetch_attempt in range(fetch_attempts):
+        with ThreadPoolExecutor(max_workers=1) as ex:
+            fut = ex.submit(_fetch_rows)
+            try:
+                rows = fut.result(timeout=30)
+                break  # 成功则退出重试
+            except FuturesTimeout:
+                print(f"[sync_klines] {code} timed out (attempt {fetch_attempt + 1}/{fetch_attempts})")
+                reset_bs()
+                if fetch_attempt < fetch_attempts - 1:
+                    time.sleep(2 * (fetch_attempt + 1))
+                    continue
+                from routers.system import record_failed_stock
+                record_failed_stock(code, get_stock_name(code), "超时", "kline")
+                return
+            except Exception as e:
+                if _is_transient(e) and fetch_attempt < fetch_attempts - 1:
+                    print(f"[sync_klines] {code} transient error (attempt {fetch_attempt + 1}/{fetch_attempts}): {e}, retrying...")
+                    reset_bs()
+                    time.sleep(2 * (fetch_attempt + 1))
+                    continue
+                print(f"[sync_klines] {code} fetch error: {e}")
+                reset_bs()
+                from routers.system import record_failed_stock
+                record_failed_stock(code, get_stock_name(code), str(e), "kline")
+                return
 
     if not rows:
         return
 
     db = SessionLocal()
     retry_count = 3
-    for db_attempt in range(retry_count):
-        try:
-            for r in rows:
-                stmt = sqlite_insert(StockKline).values(
-                    code=code,
-                    period=period,
-                    trade_date=r[0],
-                    open=round(_safe_float(r[2]), 4),
-                    high=round(_safe_float(r[3]), 4),
-                    low=round(_safe_float(r[4]), 4),
-                    close=round(_safe_float(r[5]), 4),
-                    volume=int(_safe_float(r[6])),
-                    turnover=_safe_float(r[7]),
-                    change_pct=round(_safe_float(r[9]), 4),
-                    updated_at=datetime.utcnow(),
-                )
-                stmt = stmt.on_conflict_do_update(
-                    index_elements=["code", "period", "trade_date"],
-                    set_={
-                        "open": stmt.excluded.open,
-                        "high": stmt.excluded.high,
-                        "low": stmt.excluded.low,
-                        "close": stmt.excluded.close,
-                        "volume": stmt.excluded.volume,
-                        "turnover": stmt.excluded.turnover,
-                        "change_pct": stmt.excluded.change_pct,
-                        "updated_at": stmt.excluded.updated_at,
-                    },
-                )
-                db.execute(stmt)
-            db.commit()
-            print(f"[sync_klines] {code} done, {len(rows)} bars saved")
-            break
-        except Exception as e:
-            db.rollback()
-            if db_attempt < retry_count - 1 and "database is locked" in str(e).lower():
-                import time
-
-                time.sleep(1 + db_attempt * 0.5)
-                continue
-            print(f"[sync_klines] {code} db error: {e}")
-        finally:
-            if db_attempt == retry_count - 1:
-                db.close()
+    try:
+        for db_attempt in range(retry_count):
+            try:
+                for r in rows:
+                    stmt = sqlite_insert(StockKline).values(
+                        code=code,
+                        period=period,
+                        trade_date=r[0],
+                        open=round(_safe_float(r[2]), 4),
+                        high=round(_safe_float(r[3]), 4),
+                        low=round(_safe_float(r[4]), 4),
+                        close=round(_safe_float(r[5]), 4),
+                        volume=int(_safe_float(r[6])),
+                        turnover=_safe_float(r[7]),
+                        change_pct=round(_safe_float(r[9]), 4),
+                        updated_at=datetime.utcnow(),
+                    )
+                    stmt = stmt.on_conflict_do_update(
+                        index_elements=["code", "period", "trade_date"],
+                        set_={
+                            "open": stmt.excluded.open,
+                            "high": stmt.excluded.high,
+                            "low": stmt.excluded.low,
+                            "close": stmt.excluded.close,
+                            "volume": stmt.excluded.volume,
+                            "turnover": stmt.excluded.turnover,
+                            "change_pct": stmt.excluded.change_pct,
+                            "updated_at": stmt.excluded.updated_at,
+                        },
+                    )
+                    db.execute(stmt)
+                db.commit()
+                print(f"[sync_klines] {code} done, {len(rows)} bars saved")
+                break
+            except Exception as e:
+                db.rollback()
+                if db_attempt < retry_count - 1 and "database is locked" in str(e).lower():
+                    time.sleep(1 + db_attempt * 0.5)
+                    continue
+                print(f"[sync_klines] {code} db error: {e}")
+    finally:
+        db.close()
 
 
 def _sync_fundamental(code: str):
@@ -657,33 +684,42 @@ def _sync_fundamental(code: str):
                 ensure_ascii=False,
             )
 
-            eps = _safe_float(profit_row[6]) if len(profit_row) > 6 else None
-            roe = _safe_float(profit_row[2]) if len(profit_row) > 2 else None
-            gross_margin = _safe_float(profit_row[4]) if len(profit_row) > 4 else None
-            net_profit = _safe_float(profit_row[5]) if len(profit_row) > 5 else None
+            # profit_data fields: [0]code [1]pubDate [2]statDate [3]roeAvg
+            #   [4]npMargin [5]gpMargin [6]netProfit [7]epsTTM [8]MBRevenue
+            #   [9]totalShare [10]liqaShare
+            # growth_data fields: [0]code [1]pubDate [2]statDate [3]YOYEquity
+            #   [4]YOYAsset [5]YOYNI [6]YOYEPSBasic [7]YOYPNI
+            # balance_data fields: [0]code [1]pubDate [2]statDate [3]currentRatio
+            #   [4]quickRatio [5]cashRatio [6]YOYLiability [7]liabilityToAsset
+            #   [8]assetToEquity
+            eps = _safe_float(profit_row[7]) if len(profit_row) > 7 else None          # epsTTM
+            roe = _safe_float(profit_row[3]) if len(profit_row) > 3 else None          # roeAvg
+            gross_margin = _safe_float(profit_row[4]) if len(profit_row) > 4 else None # npMargin（净利润率）
+            net_profit = _safe_float(profit_row[6]) if len(profit_row) > 6 else None   # netProfit
+            revenue = _safe_float(profit_row[8]) if len(profit_row) > 8 else None      # MBRevenue（营业收入）
             revenue_yoy = (
-                _safe_float(growth_row[6])
-                if growth_row and len(growth_row) > 6
+                _safe_float(growth_row[5])    # YOYNI（净利润同比，近似营收同比）
+                if growth_row and len(growth_row) > 5
                 else None
             )
             net_profit_yoy = (
-                _safe_float(growth_row[4])
-                if growth_row and len(growth_row) > 4
+                _safe_float(growth_row[7])    # YOYPNI（扣非净利润同比）
+                if growth_row and len(growth_row) > 7
                 else None
             )
             debt_ratio = (
-                _safe_float(balance_row[6])
-                if balance_row and len(balance_row) > 6
+                _safe_float(balance_row[7])   # liabilityToAsset（资产负债率）
+                if balance_row and len(balance_row) > 7
                 else None
             )
-            report_date = profit_row[0] if profit_row else ""
+            report_date = profit_row[2] if profit_row else ""  # statDate（报告期）
 
             stmt = sqlite_insert(StockFundamental).values(
                 code=code,
                 report_date=report_date,
                 eps=eps,
                 roe=roe,
-                revenue=None,
+                revenue=revenue,
                 revenue_yoy=revenue_yoy,
                 net_profit=net_profit,
                 net_profit_yoy=net_profit_yoy,

@@ -326,7 +326,7 @@ def get_industry_boards(
     return boards[:limit]
 
 
-def calc_industry_board_kline(days: int = 60) -> int:
+def calc_industry_board_kline(days: int = 60, force: bool = False) -> int:
     """
     计算产业板块的历史涨跌幅并缓存到 stock_kline 表
 
@@ -337,6 +337,10 @@ def calc_industry_board_kline(days: int = 60) -> int:
     4. 按日期聚合：计算当日所有成分股的平均涨跌幅
     5. 缓存到 stock_kline 表（code = {industry_id}_{layer}）
 
+    Args:
+        days:  回溯天数
+        force: True 时跳过"已是最新"检查，强制重新计算所有产业板块
+
     Returns:
         缓存的记录数，0 表示跳过（今日已算过）
     """
@@ -345,36 +349,68 @@ def calc_industry_board_kline(days: int = 60) -> int:
     from db import StockKline
     from datetime import timedelta, date as date_type
 
-    # 非交易日 或 今日已算过则跳过
-    from routers.industry import is_trading_day
-    db = SessionLocal()
-    try:
-        row = db.execute(text(
-            "SELECT MAX(trade_date) FROM stock_kline "
-            "WHERE period='daily' AND instr(code,'_')>0"
-        )).fetchone()
-        latest = row[0] if row and row[0] else None
-    finally:
-        db.close()
+    # 非交易日 或 今日已算过则跳过（force=True 时完全跳过此判断）
+    if not force:
+        from routers.industry import is_trading_day
+        today_str = date_type.today().strftime("%Y-%m-%d")
 
-    today_str = date_type.today().strftime("%Y-%m-%d")
+        # 先查出当前数据库中有哪些产业板块的最新日期
+        db_check = SessionLocal()
+        try:
+            rows = db_check.execute(text(
+                "SELECT code, MAX(trade_date) as latest FROM stock_kline "
+                "WHERE period='daily' AND instr(code,'_')>0 GROUP BY code"
+            )).fetchall()
+            existing_latest = {r[0]: r[1] for r in rows}
+        finally:
+            db_check.close()
 
-    if not is_trading_day():
-        # 非交易日：只要有数据且不超过 4 天（覆盖周末+节假日）就跳过
-        if latest:
+        if not is_trading_day():
+            # 非交易日：所有已有的板块数据都不超过 4 天，且没有"从未计算过"的板块 → 跳过
+            if existing_latest:
+                try:
+                    max_age = max(
+                        (date_type.today() - date_type.fromisoformat(v)).days
+                        for v in existing_latest.values()
+                    )
+                    # 还需要检查 industry_node 里是否有新产业还没有计算过
+                    db_check2 = SessionLocal()
+                    try:
+                        node_rows = db_check2.execute(text(
+                            "SELECT DISTINCT industry_id || '_' || layer as code FROM industry_node "
+                            "WHERE stocks IS NOT NULL AND stocks != '[]'"
+                        )).fetchall()
+                        all_board_codes = {r[0] for r in node_rows}
+                    finally:
+                        db_check2.close()
+
+                    missing_boards = all_board_codes - set(existing_latest.keys())
+                    if max_age <= 4 and not missing_boards:
+                        print(f"[calc_industry_kline] skipped — non-trading day, data is {max_age}d old, no missing boards")
+                        return 0
+                    if missing_boards:
+                        print(f"[calc_industry_kline] found {len(missing_boards)} new boards with no data, proceeding")
+                except Exception:
+                    pass
+        else:
+            # 交易日：所有板块今日都已算过，且没有新板块 → 跳过
+            db_check3 = SessionLocal()
             try:
-                from datetime import timedelta
-                days_old = (date_type.today() - date_type.fromisoformat(latest)).days
-                if days_old <= 4:
-                    print(f"[calc_industry_kline] skipped — non-trading day, data is {days_old}d old ({latest})")
-                    return 0
-            except Exception:
-                pass
+                node_rows = db_check3.execute(text(
+                    "SELECT DISTINCT industry_id || '_' || layer as code FROM industry_node "
+                    "WHERE stocks IS NOT NULL AND stocks != '[]'"
+                )).fetchall()
+                all_board_codes = {r[0] for r in node_rows}
+            finally:
+                db_check3.close()
+
+            missing_boards = all_board_codes - set(existing_latest.keys())
+            stale_boards = {c for c, d in existing_latest.items() if d < today_str}
+            if not missing_boards and not stale_boards:
+                print(f"[calc_industry_kline] skipped — all boards up to date ({today_str})")
+                return 0
     else:
-        # 交易日：今日已算过则跳过
-        if latest and latest >= today_str:
-            print(f"[calc_industry_kline] skipped — already up to date ({latest})")
-            return 0
+        print(f"[calc_industry_kline] force mode — skipping staleness check")
 
     db = SessionLocal()
     try:
@@ -487,10 +523,85 @@ def calc_industry_board_kline(days: int = 60) -> int:
 def trigger_calc_industry_kline(
     background_tasks: BackgroundTasks,
     days: int = Query(default=60, ge=14, le=120),
+    force: bool = Query(default=False),
 ):
-    """手动触发产业板块 K 线聚合计算（后台执行），供前端进入页面时调用"""
-    background_tasks.add_task(calc_industry_board_kline, days)
-    return {"message": f"产业板块K线计算已启动，days={days}"}
+    """手动触发产业板块 K 线聚合计算（后台执行），供前端进入页面时调用
+    
+    force=true 时强制重新计算，忽略"非交易日/已是最新"跳过检查
+    """
+    background_tasks.add_task(calc_industry_board_kline, days, force)
+    return {"message": f"产业板块K线计算已启动，days={days}, force={force}"}
+
+
+def _sync_missing_industry_stocks_klines():
+    """
+    检查所有产业节点成分股（A股），找出在 stock_kline 里完全没有日线数据的股票，
+    调用 _sync_klines 补全历史 K 线。用于新增产业后首次补全数据。
+    """
+    from sqlalchemy import text
+    from routers.industry import _sync_klines
+
+    db = SessionLocal()
+    try:
+        # 1. 取出所有产业节点里的 A 股
+        rows = db.execute(text(
+            "SELECT stocks FROM industry_node WHERE stocks IS NOT NULL AND stocks != '[]'"
+        )).fetchall()
+        all_stocks: set[str] = set()
+        for r in rows:
+            try:
+                stocks = eval(r[0]) if r[0] else []
+                for s in stocks:
+                    if _is_a_share(s):
+                        all_stocks.add(s)
+            except Exception:
+                pass
+
+        if not all_stocks:
+            return
+
+        # 2. 查出已经有日线 K 线的股票
+        placeholders = ",".join([f"'{s}'" for s in all_stocks])
+        existing = db.execute(text(
+            f"SELECT DISTINCT code FROM stock_kline "
+            f"WHERE period='daily' AND code IN ({placeholders})"
+        )).fetchall()
+        existing_codes = {r[0] for r in existing}
+
+        missing = all_stocks - existing_codes
+    finally:
+        db.close()
+
+    if not missing:
+        print(f"[sync_missing_industry_stocks] all {len(all_stocks)} stocks have klines, nothing to do")
+        return
+
+    print(f"[sync_missing_industry_stocks] {len(missing)} stocks missing klines, syncing...")
+    success_count = 0
+    fail_count = 0
+    for code in sorted(missing):
+        try:
+            _sync_klines(code, "daily")
+            success_count += 1
+        except Exception as e:
+            print(f"[sync_missing_industry_stocks] {code} error: {e}")
+            fail_count += 1
+            # 出错后多等一会，让 baostock 连接恢复
+            time.sleep(2.0)
+            continue
+        # 正常调用间隔 0.3s，避免单连接高频请求导致 baostock 错误
+        time.sleep(0.3)
+    print(f"[sync_missing_industry_stocks] done: success={success_count}, fail={fail_count}, total={len(missing)}")
+
+
+@router.post("/sync-industry-stocks")
+def trigger_sync_industry_stocks(background_tasks: BackgroundTasks):
+    """
+    补全产业板块成分股的历史 K 线（只同步从未有过 K 线的股票）。
+    新增产业后调用一次即可，完成后再调用 calc-industry-kline?force=true 生成板块聚合 K 线。
+    """
+    background_tasks.add_task(_sync_missing_industry_stocks_klines)
+    return {"message": "产业成分股 K 线补全任务已启动（后台执行）"}
 
 
 @router.get("/industry-rotation")

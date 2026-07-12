@@ -9,6 +9,7 @@ from db import (
     StockMeta,
     StockQuote,
     StockFundamental,
+    StockF10Snapshot,
     StockKline,
     IndustryNode,
     NewsFlash,
@@ -71,7 +72,7 @@ async def get_system_stats(db: Session = Depends(get_db)):
     total_stocks = db.query(func.count(StockMeta.code)).scalar() or 0
 
     total_quote_data = db.query(func.count(StockQuote.code)).scalar() or 0
-    total_fundamental_data = db.query(func.count(StockFundamental.code)).scalar() or 0
+    total_fundamental_data = db.query(func.count(StockF10Snapshot.code)).scalar() or 0
     total_stock_info_data = db.query(func.count(StockMeta.code)).scalar() or 0
     total_kline_data = db.query(func.count(StockKline.id)).scalar() or 0
     stocks_with_kline = (
@@ -86,7 +87,7 @@ async def get_system_stats(db: Session = Depends(get_db)):
         .scalar()
         or 0
     )
-    stocks_with_fundamental = db.query(func.count(StockFundamental.code)).scalar() or 0
+    stocks_with_fundamental = db.query(func.count(StockF10Snapshot.code)).scalar() or 0
 
     return {
         "totalStocks": total_stocks,
@@ -104,7 +105,7 @@ async def get_system_stats(db: Session = Depends(get_db)):
             "kline": stocks_with_kline,
         },
         "quoteLastSync": _get_last_sync(StockQuote),
-        "fundamentalLastSync": _get_last_sync(StockFundamental),
+        "fundamentalLastSync": _get_last_sync(StockF10Snapshot),
         "klineLastSync": _get_last_sync(StockKline),
         "stockInfoLastSync": _get_last_sync(StockMeta),
     }

@@ -640,6 +640,26 @@ class Memo(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class StockMinuteKline(Base):
+    """个股分时数据（每分钟 OHLCV，按 code+trade_date+minute_time 唯一）"""
+
+    __tablename__ = "stock_minute_kline"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    code = Column(String(10), index=True)        # 股票代码
+    trade_date = Column(String(10), index=True)  # 交易日 "YYYY-MM-DD"
+    minute_time = Column(String(5))              # 分钟时间 "HH:MM"（09:30~15:00）
+    open = Column(_P)
+    high = Column(_P)
+    low = Column(_P)
+    close = Column(_P)
+    volume = Column(Float, default=0.0)          # 成交量（手）
+    amount = Column(Float, default=0.0)          # 成交额（元）
+    avg_price = Column(_P, default=0.0)          # 均价
+    prev_close = Column(_P, default=0.0)         # 昨收（用于计算涨跌幅）
+    updated_at = Column(DateTime, default=datetime.utcnow)
+    __table_args__ = (UniqueConstraint("code", "trade_date", "minute_time"),)
+
+
 class GlobalIndexKline(Base):
     """全球主要指数 K 线历史数据（日/周/月）"""
 

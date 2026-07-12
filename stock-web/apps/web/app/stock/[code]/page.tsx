@@ -3,9 +3,22 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, ExternalLink, Plus, Star, X, Search } from "lucide-react";
-import { StockChart, generateMockData } from "@/components/stock/StockChart";
+import {
+  StockChart,
+  generateMockData,
+  KLineBar,
+} from "@/components/stock/StockChart";
+import MinuteChartModal from "@/components/stock/MinuteChartModal";
 import { AgentPanel } from "@/components/agents/AgentPanel";
 import { cn, getPriceColor, formatPercent } from "@/lib/utils";
+import {
+  PieChart,
+  Pie,
+  Cell,
+  Tooltip as ReTooltip,
+  ResponsiveContainer,
+  Legend,
+} from "recharts";
 
 interface QuoteData {
   name: string;
@@ -22,17 +35,6 @@ interface QuoteData {
   pe: number;
   pb: number;
   turnoverRate: number;
-}
-
-interface KLineBar {
-  time: string;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
-  volume: number;
-  turnRate?: number;
-  changePct?: number;
 }
 
 interface NewsItem {
@@ -78,6 +80,33 @@ interface FundamentalData {
   inventory_turnover?: string;
   ar_days?: string;
   updated_at?: string;
+}
+
+interface BusinessBreakdownItem {
+  name: string;
+  ratio: number;
+  revenue?: number;
+  yoy?: number;
+}
+
+interface IncomeHistoryItem {
+  report_date: string;
+  revenue?: number;
+  revenue_yoy?: number;
+  net_profit?: number;
+  net_profit_yoy?: number;
+  gross_margin?: number;
+  net_margin?: number;
+  roe_weighted?: number;
+  eps_basic?: number;
+}
+
+interface FinanceViewData {
+  updated_at?: string;
+  has_data: boolean;
+  business_breakdown: BusinessBreakdownItem[];
+  income_history: IncomeHistoryItem[];
+  syncing: boolean;
 }
 
 const DEFAULT_QUOTE: QuoteData = {
@@ -193,6 +222,45 @@ function formatAmount(amt: number): string {
   return amt.toFixed(0);
 }
 
+// ── 财务 Tab 辅助 ──────────────────────────────────────
+const PIE_COLORS = [
+  "#4f9cf5",
+  "#36bfa6",
+  "#f5a623",
+  "#e74c6f",
+  "#9b59b6",
+  "#2ecc71",
+  "#e67e22",
+  "#1abc9c",
+  "#e91e63",
+];
+
+function formatRevenue(val?: number | null): string {
+  if (val == null) return "--";
+  const abs = Math.abs(val);
+  if (abs >= 1e8) return (val / 1e8).toFixed(2) + "亿";
+  if (abs >= 1e4) return (val / 1e4).toFixed(2) + "万";
+  return val.toFixed(2);
+}
+
+function formatYoy(val?: number | null): string {
+  if (val == null) return "--";
+  return (val >= 0 ? "+" : "") + val.toFixed(2) + "%";
+}
+
+function formatPct(val?: number | null): string {
+  if (val == null) return "--";
+  return val.toFixed(2) + "%";
+}
+
+function getChangeColor(val?: number | null): string {
+  if (val == null) return "text-[var(--text-tertiary)]";
+  if (val > 0) return "text-[#f03e3e]"; // A股习惯：红涨
+  if (val < 0) return "text-[#16a34a]"; // 绿跌
+  return "text-[var(--text-secondary)]";
+}
+// ── /财务 Tab 辅助 ─────────────────────────────────────
+
 const INDUSTRY_LABELS: Record<string, string> = {
   overview: "AI算力全景",
   aigpu: "AI算力芯片",
@@ -236,7 +304,7 @@ export default function StockDetailPage() {
   );
   const [news, setNews] = useState<NewsItem[]>([]);
   const [activeIndicators, setActiveIndicators] = useState(["VOL", "MACD"]);
-  const [activeMAs, setActiveMAs] = useState<number[]>([5, 10, 20]);
+  const [activeMAs, setActiveMAs] = useState<number[]>([5, 10, 20, 30, 60]);
   const toggleMA = (period: number) => {
     setActiveMAs((prev) =>
       prev.includes(period)
@@ -257,6 +325,8 @@ export default function StockDetailPage() {
   const chartAreaRef = useRef<HTMLDivElement>(null);
   const [quoteLoading, setQuoteLoading] = useState(true);
   const [fundamental, setFundamental] = useState<FundamentalData | null>(null);
+  const [financeView, setFinanceView] = useState<FinanceViewData | null>(null);
+  const [financeLoading, setFinanceLoading] = useState(false);
   const [gubaNews, setGubaNews] = useState<GubaItem[]>([]);
   const [gubaNotice, setGubaNotice] = useState<GubaItem[]>([]);
   const [gubaLoading, setGubaLoading] = useState(false); // 首次加载（无数据时）
@@ -272,6 +342,60 @@ export default function StockDetailPage() {
   const searchRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // 分时图弹框状态
+  const [minuteModalOpen, setMinuteModalOpen] = useState(false);
+  const [minuteModalDate, setMinuteModalDate] = useState("");
+  const [minuteSyncing, setMinuteSyncing] = useState(false);
+  const [minuteSyncMsg, setMinuteSyncMsg] = useState<string | null>(null);
+
+  // 双击K线：打开分时弹框
+  const handleBarDoubleClick = useCallback((bar: KLineBar) => {
+    setMinuteModalDate(bar.time);
+    setMinuteModalOpen(true);
+  }, []);
+
+  // 同步分时数据按钮：同步自选股（watchlist）中所有A股当日分时数据到DB
+  const handleSyncMinute = useCallback(async () => {
+    if (minuteSyncing) return;
+    setMinuteSyncing(true);
+    setMinuteSyncMsg(null);
+    try {
+      // 收集 watchlist 中的 A 股 codes（加上当前股票）
+      const watchlistCodes = watchlist.map((s) => s.code);
+      const allCodes = Array.from(new Set([code, ...watchlistCodes])).filter(
+        (c) => /^[036]\d{5}$/.test(c),
+      );
+      const res = await fetch("/api/minute/sync-batch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ codes: allCodes }),
+      });
+      const json = await res.json();
+      if (res.ok) {
+        const { ok = 0, cached = 0, error = 0, total = 0 } = json;
+        const newCount = ok;
+        if (total === 0) {
+          setMinuteSyncMsg("无可同步股票");
+        } else if (error > 0) {
+          setMinuteSyncMsg(`同步完成：新增${newCount}条，${error}只失败`);
+        } else {
+          setMinuteSyncMsg(
+            cached === total
+              ? `${total}只已有缓存`
+              : `新增${newCount}只，共${total}只`,
+          );
+        }
+      } else {
+        setMinuteSyncMsg(json.detail ?? "同步失败");
+      }
+    } catch {
+      setMinuteSyncMsg("同步失败");
+    } finally {
+      setMinuteSyncing(false);
+      setTimeout(() => setMinuteSyncMsg(null), 4000);
+    }
+  }, [code, minuteSyncing, watchlist]);
 
   useEffect(() => {
     setWatchlist(getRecentlyViewed());
@@ -328,13 +452,17 @@ export default function StockDetailPage() {
   }, [code]);
 
   useEffect(() => {
-    fetch(`http://localhost:8000/api/fundamental/${code}`)
+    // 当切换到财务 tab 时：先从数据库加载 finance-view 数据，同时后台同步
+    if (activeTab !== "财务") return;
+    setFinanceLoading(true);
+    fetch(`http://localhost:8000/api/fundamental/${code}/finance-view`)
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
-        if (data?.data) setFundamental(data.data as FundamentalData);
+        if (data) setFinanceView(data as FinanceViewData);
       })
-      .catch(() => {});
-  }, [code]);
+      .catch(() => {})
+      .finally(() => setFinanceLoading(false));
+  }, [code, activeTab]);
 
   // 当切换到资讯/公告 tab 时：先读库展示已有数据，同时后台静默同步
   useEffect(() => {
@@ -590,6 +718,59 @@ export default function StockDetailPage() {
             {p}
           </button>
         ))}
+
+        {/* 同步分时按钮 */}
+        <div className="w-px h-4 bg-[var(--border-color)] mx-1 shrink-0" />
+        <button
+          onClick={handleSyncMinute}
+          disabled={minuteSyncing}
+          className={cn(
+            "flex items-center gap-1 px-2 py-1 rounded border whitespace-nowrap transition-colors shrink-0 text-[11px]",
+            minuteSyncing
+              ? "border-[var(--border-color)] text-[var(--text-tertiary)] opacity-60 cursor-wait"
+              : "border-[var(--border-color)] text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:border-[#f5a623]/50",
+          )}
+          title="同步自选股当日分时数据到数据库（每日收盘后自动执行，也可手动触发）"
+        >
+          {minuteSyncing ? (
+            <span
+              style={{
+                display: "inline-block",
+                width: 10,
+                height: 10,
+                border: "1.5px solid var(--border-color)",
+                borderTopColor: "#e84444",
+                borderRadius: "50%",
+                animation: "spin 0.8s linear infinite",
+              }}
+            />
+          ) : (
+            <svg
+              width="11"
+              height="11"
+              viewBox="0 0 12 12"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+            >
+              <path d="M10 6A4 4 0 1 1 6 2" strokeLinecap="round" />
+              <path d="M6 1v3l2-1.5L6 1z" fill="currentColor" stroke="none" />
+            </svg>
+          )}
+          同步分时
+        </button>
+        {minuteSyncMsg && (
+          <span
+            className={cn(
+              "text-[10px] shrink-0",
+              minuteSyncMsg.includes("失败")
+                ? "text-[#e84444]"
+                : "text-[#09d464]",
+            )}
+          >
+            {minuteSyncMsg}
+          </span>
+        )}
       </div>
 
       <div className="flex flex-1 overflow-hidden">
@@ -805,6 +986,7 @@ export default function StockDetailPage() {
                 containerHeight={
                   chartAreaHeight > 0 ? chartAreaHeight - 36 : undefined
                 }
+                onBarDoubleClick={handleBarDoubleClick}
               />
             </div>
           </div>
@@ -947,54 +1129,273 @@ export default function StockDetailPage() {
 
             {activeTab === "财务" && (
               <div
-                className="overflow-y-auto bg-[var(--bg-primary)] p-3"
+                className="overflow-y-auto bg-[var(--bg-primary)]"
                 style={{ height: `${bottomHeight}px` }}
               >
-                {!fundamental ? (
-                  <div className="text-center py-6 text-[var(--text-tertiary)] text-[11px]">
-                    暂无财务数据
+                {financeLoading && !financeView ? (
+                  <div className="flex items-center justify-center h-full text-[var(--text-tertiary)] text-[11px]">
+                    加载中...
+                  </div>
+                ) : !financeView || !financeView.has_data ? (
+                  <div className="flex flex-col items-center justify-center h-full gap-2 text-[var(--text-tertiary)]">
+                    <span className="text-[11px]">
+                      暂无财务数据，正在后台同步...
+                    </span>
+                    {financeView?.syncing && (
+                      <span className="text-[10px] opacity-60">
+                        首次加载约需 2-3 分钟，请稍后刷新
+                      </span>
+                    )}
                   </div>
                 ) : (
-                  <div className="space-y-3">
-                    <div className="text-[10px] text-[var(--text-tertiary)]">
-                      报告期: {fundamental.report_date || "--"}
-                      {fundamental.updated_at && (
-                        <span className="ml-3">
-                          更新: {fundamental.updated_at}
+                  <div className="flex gap-0 h-full">
+                    {/* 左侧：营收业务占比饼图 */}
+                    <div className="w-[240px] flex-shrink-0 border-r border-[var(--border-color)] flex flex-col">
+                      <div className="px-3 pt-2 pb-1">
+                        <span className="text-[10px] font-medium text-[var(--text-secondary)]">
+                          营收业务占比
                         </span>
+                        {financeView.updated_at && (
+                          <span className="ml-2 text-[9px] text-[var(--text-tertiary)]">
+                            {financeView.updated_at}
+                          </span>
+                        )}
+                      </div>
+                      {financeView.business_breakdown.length > 0 ? (
+                        <div className="flex-1 min-h-0 flex flex-col">
+                          {/* 饼图区域 */}
+                          <div className="flex-1 min-h-0">
+                            <ResponsiveContainer width="100%" height="100%">
+                              <PieChart>
+                                <Pie
+                                  data={financeView.business_breakdown}
+                                  cx="50%"
+                                  cy="50%"
+                                  innerRadius="40%"
+                                  outerRadius="68%"
+                                  dataKey="ratio"
+                                  nameKey="name"
+                                  paddingAngle={1}
+                                >
+                                  {financeView.business_breakdown.map(
+                                    (entry, index) => (
+                                      <Cell
+                                        key={`cell-${index}`}
+                                        fill={
+                                          PIE_COLORS[index % PIE_COLORS.length]
+                                        }
+                                      />
+                                    ),
+                                  )}
+                                </Pie>
+                                <ReTooltip
+                                  formatter={(value) => [
+                                    typeof value === "number"
+                                      ? `${value.toFixed(1)}%`
+                                      : `${value}%`,
+                                    "",
+                                  ]}
+                                  contentStyle={{
+                                    background: "var(--bg-secondary)",
+                                    border: "1px solid var(--border-color)",
+                                    borderRadius: 4,
+                                    fontSize: 10,
+                                    color: "var(--text-primary)",
+                                    padding: "4px 8px",
+                                  }}
+                                />
+                              </PieChart>
+                            </ResponsiveContainer>
+                          </div>
+                          {/* 自定义图例：名称左对齐 + 百分比右对齐 */}
+                          <div className="px-3 pb-2 space-y-[3px] flex-shrink-0">
+                            {financeView.business_breakdown.map(
+                              (item, index) => (
+                                <div
+                                  key={index}
+                                  className="flex items-center gap-1.5"
+                                >
+                                  <span
+                                    className="w-[6px] h-[6px] rounded-full flex-shrink-0"
+                                    style={{
+                                      background:
+                                        PIE_COLORS[index % PIE_COLORS.length],
+                                    }}
+                                  />
+                                  <span
+                                    className="flex-1 text-[9px] text-[var(--text-secondary)] truncate"
+                                    title={item.name}
+                                  >
+                                    {item.name}
+                                  </span>
+                                  <span
+                                    className="text-[9px] font-medium flex-shrink-0 tabular-nums"
+                                    style={{
+                                      color:
+                                        PIE_COLORS[index % PIE_COLORS.length],
+                                    }}
+                                  >
+                                    {Number(item.ratio).toFixed(1)}%
+                                  </span>
+                                </div>
+                              ),
+                            )}
+                          </div>
+                        </div>
+                      ) : (
+                        /* 饼图暂无数据时，显示最新期快照指标 */
+                        <div className="flex-1 px-3 py-2 space-y-1.5 overflow-auto">
+                          {financeView.income_history[0] &&
+                            (() => {
+                              const latest = financeView.income_history[0];
+                              const metrics: [string, string | undefined][] = [
+                                [
+                                  "毛利率",
+                                  latest.gross_margin != null
+                                    ? formatPct(latest.gross_margin)
+                                    : undefined,
+                                ],
+                                [
+                                  "净利率",
+                                  latest.net_margin != null
+                                    ? formatPct(latest.net_margin)
+                                    : undefined,
+                                ],
+                                [
+                                  "ROE",
+                                  latest.roe_weighted != null
+                                    ? formatPct(latest.roe_weighted)
+                                    : undefined,
+                                ],
+                                [
+                                  "EPS",
+                                  latest.eps_basic != null
+                                    ? latest.eps_basic.toFixed(3)
+                                    : undefined,
+                                ],
+                                [
+                                  "收入同比",
+                                  latest.revenue_yoy != null
+                                    ? formatYoy(latest.revenue_yoy)
+                                    : undefined,
+                                ],
+                                [
+                                  "利润同比",
+                                  latest.net_profit_yoy != null
+                                    ? formatYoy(latest.net_profit_yoy)
+                                    : undefined,
+                                ],
+                              ].filter(([, v]) => v != null) as [
+                                string,
+                                string,
+                              ][];
+                              return metrics.map(([label, val]) => (
+                                <div
+                                  key={label}
+                                  className="flex justify-between items-center border-b border-[var(--border-color)] pb-1"
+                                >
+                                  <span className="text-[9.5px] text-[var(--text-tertiary)]">
+                                    {label}
+                                  </span>
+                                  <span className="text-[10px] font-mono text-[var(--text-primary)]">
+                                    {val}
+                                  </span>
+                                </div>
+                              ));
+                            })()}
+                          <div className="pt-1 text-[9px] text-[var(--text-tertiary)] opacity-60 text-center">
+                            分项数据同步中...
+                          </div>
+                        </div>
                       )}
                     </div>
-                    <div className="grid grid-cols-2 gap-x-6 gap-y-1.5">
-                      {[
-                        ["营业总收入", fundamental.revenue],
-                        ["收入同比", fundamental.revenue_yoy],
-                        ["净利润", fundamental.net_profit],
-                        ["净利润同比", fundamental.net_profit_yoy],
-                        ["每股收益 EPS", fundamental.eps],
-                        ["每股净资产", fundamental.nav_per_share],
-                        ["净资产收益率 ROE", fundamental.roe],
-                        ["销售毛利率", fundamental.gross_margin],
-                        ["销售净利率", fundamental.net_margin],
-                        ["资产负债率", fundamental.debt_ratio],
-                        ["流动比率", fundamental.current_ratio],
-                        ["速动比率", fundamental.quick_ratio],
-                        ["存货周转率", fundamental.inventory_turnover],
-                        ["应收账款周转天数", fundamental.ar_days],
-                      ]
-                        .filter(([, v]) => v && v !== "--")
-                        .map(([label, val]) => (
-                          <div
-                            key={label}
-                            className="flex justify-between items-center border-b border-[var(--border-color)] pb-1"
-                          >
-                            <span className="text-[10px] text-[var(--text-tertiary)]">
-                              {label}
-                            </span>
-                            <span className="text-[11px] font-mono text-[var(--text-primary)]">
-                              {val}
-                            </span>
+
+                    {/* 右侧：近5年财报收入表格 */}
+                    <div className="flex-1 min-w-0 flex flex-col">
+                      <div className="px-3 pt-2 pb-1 flex-shrink-0">
+                        <span className="text-[10px] font-medium text-[var(--text-secondary)]">
+                          近期财报
+                        </span>
+                      </div>
+                      <div className="flex-1 overflow-auto">
+                        {financeView.income_history.length > 0 ? (
+                          <table className="w-full text-[9.5px] border-collapse">
+                            <thead>
+                              <tr className="sticky top-0 bg-[var(--bg-secondary)]">
+                                {[
+                                  "报告期",
+                                  "营业收入",
+                                  "收入同比",
+                                  "净利润",
+                                  "净利润同比",
+                                  "毛利率",
+                                  "ROE",
+                                  "EPS",
+                                ].map((h) => (
+                                  <th
+                                    key={h}
+                                    className="px-2 py-1 text-right first:text-left font-normal text-[var(--text-tertiary)] border-b border-[var(--border-color)] whitespace-nowrap"
+                                  >
+                                    {h}
+                                  </th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {financeView.income_history.map((row, i) => (
+                                <tr
+                                  key={row.report_date}
+                                  className={cn(
+                                    "border-b border-[var(--border-color)] hover:bg-[var(--bg-secondary)]/50 transition-colors",
+                                    i % 2 === 0 ? "" : "bg-[var(--bg-primary)]",
+                                  )}
+                                >
+                                  <td className="px-2 py-1 text-left text-[var(--text-secondary)] whitespace-nowrap font-mono">
+                                    {row.report_date}
+                                  </td>
+                                  <td className="px-2 py-1 text-right text-[var(--text-primary)] font-mono whitespace-nowrap">
+                                    {formatRevenue(row.revenue)}
+                                  </td>
+                                  <td
+                                    className={cn(
+                                      "px-2 py-1 text-right font-mono whitespace-nowrap",
+                                      getChangeColor(row.revenue_yoy),
+                                    )}
+                                  >
+                                    {formatYoy(row.revenue_yoy)}
+                                  </td>
+                                  <td className="px-2 py-1 text-right text-[var(--text-primary)] font-mono whitespace-nowrap">
+                                    {formatRevenue(row.net_profit)}
+                                  </td>
+                                  <td
+                                    className={cn(
+                                      "px-2 py-1 text-right font-mono whitespace-nowrap",
+                                      getChangeColor(row.net_profit_yoy),
+                                    )}
+                                  >
+                                    {formatYoy(row.net_profit_yoy)}
+                                  </td>
+                                  <td className="px-2 py-1 text-right text-[var(--text-primary)] font-mono whitespace-nowrap">
+                                    {formatPct(row.gross_margin)}
+                                  </td>
+                                  <td className="px-2 py-1 text-right text-[var(--text-primary)] font-mono whitespace-nowrap">
+                                    {formatPct(row.roe_weighted)}
+                                  </td>
+                                  <td className="px-2 py-1 text-right text-[var(--text-primary)] font-mono whitespace-nowrap">
+                                    {row.eps_basic != null
+                                      ? row.eps_basic.toFixed(3)
+                                      : "--"}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        ) : (
+                          <div className="flex items-center justify-center h-full text-[10px] text-[var(--text-tertiary)]">
+                            暂无历史数据
                           </div>
-                        ))}
+                        )}
+                      </div>
                     </div>
                   </div>
                 )}
@@ -1004,6 +1405,18 @@ export default function StockDetailPage() {
           {/* /bottom-collapse-wrapper */}
         </div>
       </div>
+
+      {/* 分时图弹框 */}
+      <MinuteChartModal
+        open={minuteModalOpen}
+        onClose={() => setMinuteModalOpen(false)}
+        code={code}
+        name={quote.name || undefined}
+        date={minuteModalDate}
+      />
+
+      {/* 旋转动画（同步分时按钮用） */}
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 }

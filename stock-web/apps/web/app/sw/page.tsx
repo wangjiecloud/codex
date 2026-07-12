@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowUpDown,
@@ -136,35 +136,274 @@ interface RotationData {
   boards: RotationBoard[];
 }
 
-/* 产业板块 code 格式：{industry_id}_{layer}，如 pcb_core / aigpu_upstream */
-const INDUSTRY_IDS = new Set([
-  "overview",
-  "aigpu",
-  "pcb",
-  "mlcc",
-  "memory",
-  "optics",
-  "fiber",
-  "liquidcool",
-  "aipower",
-  "coppercable",
-  "idc",
-  "glasssub",
-  "aiserver",
-  "semieq",
-]);
+/* 产业板块 code 格式：{industry_id}_{layer}，industry_id 本身可含下划线 */
+/* 合法 layer 取值：upstream / core / downstream / application */
+const VALID_LAYERS = new Set(["upstream", "core", "downstream", "application"]);
 
-/** 解析产业板块 code，返回 { industryId, layer } 或 null（非产业板块）*/
+/** 解析产业板块 code，返回 { industryId, layer } 或 null（非产业板块）
+ *  industry_id 本身可含下划线（如 as_satellite），因此从右侧分割 "_" */
 function parseIndustryBoardCode(
   code: string,
 ): { industryId: string; layer: string } | null {
   const lastUnderscore = code.lastIndexOf("_");
   if (lastUnderscore === -1) return null;
-  const industryId = code.slice(0, lastUnderscore);
   const layer = code.slice(lastUnderscore + 1);
-  if (!INDUSTRY_IDS.has(industryId)) return null;
+  if (!VALID_LAYERS.has(layer)) return null;
+  const industryId = code.slice(0, lastUnderscore);
+  if (!industryId) return null;
   return { industryId, layer };
 }
+
+/** L1 大类分组配置：大类名 -> 产业 ID 列表（按顺序） */
+const L1_GROUPS: { label: string; icon: string; industries: string[] }[] = [
+  {
+    label: "AI 基础设施",
+    icon: "🤖",
+    industries: [
+      "aigpu",
+      "memory",
+      "aiserver",
+      "idc",
+      "aipower",
+      "liquidcool",
+      "coppercable",
+      "optics",
+      "fiber",
+      "pcb",
+      "mlcc",
+      "glasssub",
+      "semieq",
+      "dc_overview",
+      "dc_chip",
+      "dc_cpu",
+      "dc_idc",
+      "dc_liquid",
+      "dc_memory",
+      "dc_optics",
+      "dc_power",
+      "dc_server",
+      "dc_switch",
+      "nvidia_chain",
+      "changxin_chain",
+    ],
+  },
+  {
+    label: "大模型与AI应用",
+    icon: "🧠",
+    industries: [
+      "llm_overview",
+      "llm_model",
+      "llm_infra",
+      "llm_framework",
+      "llm_data",
+      "llm_app_consumer",
+      "llm_app_enterprise",
+      "llm_vertical",
+      "llm_agent",
+    ],
+  },
+  {
+    label: "人形机器人",
+    icon: "🦾",
+    industries: [
+      "hm_overview",
+      "hm_brain",
+      "hm_body",
+      "hm_motor",
+      "hm_reducer",
+      "hm_actuator",
+      "hm_sensor",
+      "hm_screw",
+      "ir_overview",
+      "ir_controller",
+      "ir_integrator",
+      "ir_reducer",
+      "ir_servo",
+    ],
+  },
+  {
+    label: "低空经济",
+    icon: "✈️",
+    industries: [
+      "la_overview",
+      "la_uav",
+      "la_evtol",
+      "la_airtraffic",
+      "la_engine",
+      "la_materials",
+    ],
+  },
+  {
+    label: "航天卫星",
+    icon: "🛰️",
+    industries: [
+      "as_overview",
+      "as_satellite",
+      "as_satnav",
+      "as_satcom",
+      "as_rocket",
+      "as_payload",
+      "as_remote",
+      "as_ground",
+    ],
+  },
+  {
+    label: "通信网络",
+    icon: "📡",
+    industries: [
+      "tc_overview",
+      "tc_basestation",
+      "tc_antenna",
+      "tc_chip",
+      "tc_network",
+    ],
+  },
+  {
+    label: "航空与国防",
+    icon: "🚀",
+    industries: [
+      "avt_overview",
+      "avt_airframe",
+      "avt_avionics",
+      "avt_engine",
+      "avt_material",
+    ],
+  },
+  {
+    label: "储能",
+    icon: "🔋",
+    industries: [
+      "es_overview",
+      "es_battery",
+      "es_bms",
+      "es_ems",
+      "es_pcs",
+      "es_system",
+    ],
+  },
+  {
+    label: "生物医药",
+    icon: "💊",
+    industries: ["bp_overview", "bp_drug", "bp_biotech", "bp_device", "bp_cxo"],
+  },
+  {
+    label: "全景概览",
+    icon: "🌐",
+    industries: ["overview"],
+  },
+];
+
+/** 产业 ID -> L1 大类标签（动态生成） */
+const INDUSTRY_TO_L1: Record<string, string> = {};
+for (const g of L1_GROUPS) {
+  for (const id of g.industries) {
+    INDUSTRY_TO_L1[id] = g.label;
+  }
+}
+
+/** layer 显示名称 */
+const LAYER_LABELS: Record<string, string> = {
+  upstream: "上游",
+  core: "核心",
+  downstream: "下游",
+  application: "应用",
+};
+
+/** 产业 ID -> 显示名称（短名） */
+const INDUSTRY_DISPLAY: Record<string, string> = {
+  overview: "全景概览",
+  aigpu: "AI算力芯片",
+  pcb: "PCB印制电路板",
+  mlcc: "MLCC电容",
+  memory: "存储芯片",
+  optics: "光模块与CPO",
+  fiber: "光纤光缆",
+  liquidcool: "液冷散热",
+  aipower: "AI供配电",
+  coppercable: "高速铜连接",
+  idc: "智算中心IDC",
+  glasssub: "玻璃基板",
+  aiserver: "AI服务器",
+  semieq: "半导体设备",
+  // 算力基础设施子链
+  dc_overview: "数据中心全景",
+  dc_chip: "数据中心芯片",
+  dc_cpu: "CPU处理器",
+  dc_idc: "IDC运营",
+  dc_liquid: "液冷散热",
+  dc_memory: "数据中心存储",
+  dc_optics: "数据中心光模块",
+  dc_power: "数据中心供电",
+  dc_server: "服务器整机",
+  dc_switch: "交换机",
+  nvidia_chain: "英伟达产业链",
+  changxin_chain: "长鑫产业链",
+  // 大模型
+  llm_overview: "大模型全景",
+  llm_model: "基础大模型",
+  llm_infra: "模型基础设施",
+  llm_framework: "训练框架",
+  llm_data: "数据与标注",
+  llm_app_consumer: "消费端应用",
+  llm_app_enterprise: "企业端应用",
+  llm_vertical: "垂直大模型",
+  llm_agent: "AI Agent",
+  // 人形机器人
+  hm_overview: "人形机器人全景",
+  hm_brain: "控制大脑",
+  hm_body: "机体结构",
+  hm_motor: "电机",
+  hm_reducer: "减速器",
+  hm_actuator: "执行器",
+  hm_sensor: "传感器",
+  hm_screw: "丝杆",
+  ir_overview: "工业机器人全景",
+  ir_controller: "控制系统",
+  ir_integrator: "系统集成",
+  ir_reducer: "精密减速器",
+  ir_servo: "伺服系统",
+  // 低空经济
+  la_overview: "低空经济全景",
+  la_uav: "无人机",
+  la_evtol: "eVTOL飞行器",
+  la_airtraffic: "空中交通管理",
+  la_engine: "低空动力",
+  la_materials: "低空材料",
+  // 航天卫星
+  as_overview: "航天卫星全景",
+  as_satellite: "卫星平台",
+  as_satnav: "卫星导航",
+  as_satcom: "卫星通信",
+  as_rocket: "运载火箭",
+  as_payload: "卫星载荷",
+  as_remote: "遥感对地观测",
+  as_ground: "地面站系统",
+  // 通信
+  tc_overview: "通信全景",
+  tc_basestation: "基站设备",
+  tc_antenna: "天线/射频",
+  tc_chip: "通信芯片",
+  tc_network: "核心网",
+  // 航空国防
+  avt_overview: "航空全景",
+  avt_airframe: "机体结构",
+  avt_avionics: "航电系统",
+  avt_engine: "发动机",
+  avt_material: "航空材料",
+  // 储能
+  es_overview: "储能全景",
+  es_battery: "电芯",
+  es_bms: "BMS管理系统",
+  es_ems: "EMS能量管理",
+  es_pcs: "PCS变流器",
+  es_system: "储能系统集成",
+  // 生物医药
+  bp_overview: "生物医药全景",
+  bp_drug: "创新药",
+  bp_biotech: "生物技术",
+  bp_device: "医疗器械",
+  bp_cxo: "CXO",
+};
 
 function heatColor(v: number | null): string {
   if (v === null || v === undefined) return "var(--bg-tertiary)";
@@ -695,16 +934,62 @@ function RotationModal({ onClose }: { onClose: () => void }) {
   const [onlyIndustry, setOnlyIndustry] = useState(false);
   const [searchText, setSearchText] = useState("");
   const [syncing, setSyncingRotation] = useState(false);
+  // 三层折叠状态：key 为 L1 标签 / industryId / "industryId_layer"
+  const [expandedL1, setExpandedL1] = useState<Set<string>>(new Set());
+  const [expandedL2, setExpandedL2] = useState<Set<string>>(new Set());
+  const [expandedL3, setExpandedL3] = useState<Set<string>>(new Set());
+
+  function toggleL1(label: string) {
+    setExpandedL1((prev) => {
+      const next = new Set(prev);
+      if (next.has(label)) next.delete(label);
+      else next.add(label);
+      return next;
+    });
+  }
+  function toggleL2(industryId: string) {
+    setExpandedL2((prev) => {
+      const next = new Set(prev);
+      if (next.has(industryId)) next.delete(industryId);
+      else next.add(industryId);
+      return next;
+    });
+  }
+  function toggleL3(key: string) {
+    setExpandedL3((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
 
   const handleForceSync = async () => {
     setSyncingRotation(true);
     try {
-      await fetch(`${API}/api/sw-industry/sync-klines?force=true`, {
+      // Step 1: 同时触发申万 K 线同步 + 产业成分股缺失 K 线补全
+      await Promise.all([
+        fetch(`${API}/api/sw-industry/sync-klines?force=true`, {
+          method: "POST",
+          cache: "no-store",
+        }),
+        fetch(`${API}/api/board/sync-industry-stocks`, {
+          method: "POST",
+          cache: "no-store",
+        }),
+      ]);
+      // 等待成分股 K 线补全（新产业较多时可能需要更长时间）
+      await new Promise((r) => setTimeout(r, 30000));
+
+      // Step 2: 强制重算产业板块聚合 K 线
+      await fetch(`${API}/api/board/calc-industry-kline?force=true&days=60`, {
         method: "POST",
         cache: "no-store",
       });
-      // 等待后台同步完成（force 模式只补日K，约15秒），再重新拉 rotation 数据
+      // 等待聚合计算完成
       await new Promise((r) => setTimeout(r, 15000));
+
+      // Step 3: 重新拉取热力图数据
       setLoading(true);
       const endpoint = onlyIndustry
         ? `${API}/api/board/industry-rotation?days=${days}`
@@ -721,12 +1006,17 @@ function RotationModal({ onClose }: { onClose: () => void }) {
   };
 
   useEffect(() => {
-    // 申万板块 K 线
+    // 申万板块 K 线（常规补全）
     fetch(`${API}/api/sw-industry/sync-klines`, {
       method: "POST",
       cache: "no-store",
     }).catch(() => {});
-    // 产业板块 K 线聚合计算
+    // 产业板块成分股缺失 K 线补全（新增产业后会自动补）
+    fetch(`${API}/api/board/sync-industry-stocks`, {
+      method: "POST",
+      cache: "no-store",
+    }).catch(() => {});
+    // 产业板块 K 线聚合计算（含新产业检测）
     fetch(`${API}/api/board/calc-industry-kline`, {
       method: "POST",
       cache: "no-store",
@@ -749,35 +1039,171 @@ function RotationModal({ onClose }: { onClose: () => void }) {
       .finally(() => setLoading(false));
   }, [days, onlyIndustry]);
 
-  const sortedBoards =
-    data && Array.isArray(data.boards)
-      ? [...data.boards]
-          .filter((b) => !onlyIndustry || b.tag !== null)
-          .filter((b) => {
-            if (!searchText.trim()) return true;
-            const q = searchText.trim().toLowerCase();
-            return b.name.toLowerCase().includes(q);
-          })
-          .sort((a, b) => {
-            if (sortBy === "recent") {
-              return rotationSortOrder === "desc"
-                ? b.currentChangePct - a.currentChangePct
-                : a.currentChangePct - b.currentChangePct;
-            }
-            if (sortBy === "cumulative") {
-              const sumA =
-                a.data.reduce<number>((acc, v) => acc + (v ?? 0), 0) +
-                a.currentChangePct;
-              const sumB =
-                b.data.reduce<number>((acc, v) => acc + (v ?? 0), 0) +
-                b.currentChangePct;
-              return rotationSortOrder === "desc" ? sumB - sumA : sumA - sumB;
-            }
-            return a.name.localeCompare(b.name);
-          })
-      : [];
+  const allBoards = data && Array.isArray(data.boards) ? data.boards : [];
+
+  const sortedBoards = [...allBoards]
+    .filter((b) => !onlyIndustry || parseIndustryBoardCode(b.code) !== null)
+    .filter((b) => {
+      if (!searchText.trim()) return true;
+      const q = searchText.trim().toLowerCase();
+      return b.name.toLowerCase().includes(q);
+    })
+    .sort((a, b) => {
+      if (sortBy === "recent") {
+        return rotationSortOrder === "desc"
+          ? b.currentChangePct - a.currentChangePct
+          : a.currentChangePct - b.currentChangePct;
+      }
+      if (sortBy === "cumulative") {
+        const sumA =
+          a.data.reduce<number>((acc, v) => acc + (v ?? 0), 0) +
+          a.currentChangePct;
+        const sumB =
+          b.data.reduce<number>((acc, v) => acc + (v ?? 0), 0) +
+          b.currentChangePct;
+        return rotationSortOrder === "desc" ? sumB - sumA : sumA - sumB;
+      }
+      return a.name.localeCompare(b.name);
+    });
 
   const dates = data?.dates ?? [];
+
+  // ── 辅助：对一组 boards 聚合平均每日涨跌幅、今日实时、累计
+  function aggregateBoards(bds: RotationBoard[], dateCount: number) {
+    if (bds.length === 0) {
+      return {
+        data: Array(dateCount).fill(null) as (number | null)[],
+        currentChangePct: 0,
+        cumulative: 0,
+      };
+    }
+    const data: (number | null)[] = Array(dateCount).fill(null);
+    for (let i = 0; i < dateCount; i++) {
+      const vals = bds
+        .map((b) => b.data[i])
+        .filter((v) => v !== null && v !== undefined) as number[];
+      data[i] =
+        vals.length > 0 ? vals.reduce((s, v) => s + v, 0) / vals.length : null;
+    }
+    const currentChangePct =
+      bds.reduce((s, b) => s + b.currentChangePct, 0) / bds.length;
+    const cumulative =
+      bds.reduce(
+        (s, b) =>
+          s +
+          b.data.reduce<number>((a, v) => a + (v ?? 0), 0) +
+          b.currentChangePct,
+        0,
+      ) / bds.length;
+    return { data, currentChangePct, cumulative };
+  }
+
+  // 三层树形结构：仅产业板块模式下使用
+  // L1 -> L2(industryId) -> L3(layer) -> boards[]
+  type AggData = {
+    data: (number | null)[];
+    currentChangePct: number;
+    cumulative: number;
+  };
+  type L3Group = { layer: string; boards: RotationBoard[]; agg: AggData };
+  type L2Group = { industryId: string; layers: L3Group[]; agg: AggData };
+  type L1Group = {
+    label: string;
+    icon: string;
+    industries: L2Group[];
+    agg: AggData;
+  };
+
+  const industryTree: L1Group[] = [];
+  if (onlyIndustry) {
+    // 把 sortedBoards 按 industryId -> layer 分组
+    const byIndustry = new Map<string, Map<string, RotationBoard[]>>();
+    for (const board of sortedBoards) {
+      const info = parseIndustryBoardCode(board.code);
+      if (!info) continue;
+      if (!byIndustry.has(info.industryId))
+        byIndustry.set(info.industryId, new Map());
+      const byLayer = byIndustry.get(info.industryId)!;
+      if (!byLayer.has(info.layer)) byLayer.set(info.layer, []);
+      byLayer.get(info.layer)!.push(board);
+    }
+
+    const layerOrder = ["upstream", "core", "downstream", "application"];
+
+    for (const l1Config of L1_GROUPS) {
+      const l2Groups: L2Group[] = [];
+      for (const industryId of l1Config.industries) {
+        const byLayer = byIndustry.get(industryId);
+        if (!byLayer || byLayer.size === 0) continue;
+        const layers: L3Group[] = layerOrder
+          .filter((l) => byLayer.has(l))
+          .map((l) => {
+            const bds = byLayer.get(l)!;
+            return {
+              layer: l,
+              boards: bds,
+              agg: aggregateBoards(bds, dates.length),
+            };
+          });
+        // 追加未知 layer
+        for (const [l, bds] of byLayer) {
+          if (!layerOrder.includes(l))
+            layers.push({
+              layer: l,
+              boards: bds,
+              agg: aggregateBoards(bds, dates.length),
+            });
+        }
+        const allL2Boards = layers.flatMap((l) => l.boards);
+        l2Groups.push({
+          industryId,
+          layers,
+          agg: aggregateBoards(allL2Boards, dates.length),
+        });
+      }
+      // 兜底：追加不在 L1_GROUPS 里的产业
+      if (l1Config === L1_GROUPS[L1_GROUPS.length - 1]) {
+        for (const [industryId, byLayer] of byIndustry) {
+          if (INDUSTRY_TO_L1[industryId]) continue;
+          const layers: L3Group[] = layerOrder
+            .filter((l) => byLayer.has(l))
+            .map((l) => {
+              const bds = byLayer.get(l)!;
+              return {
+                layer: l,
+                boards: bds,
+                agg: aggregateBoards(bds, dates.length),
+              };
+            });
+          for (const [l, bds] of byLayer) {
+            if (!layerOrder.includes(l))
+              layers.push({
+                layer: l,
+                boards: bds,
+                agg: aggregateBoards(bds, dates.length),
+              });
+          }
+          const allL2Boards = layers.flatMap((l) => l.boards);
+          l2Groups.push({
+            industryId,
+            layers,
+            agg: aggregateBoards(allL2Boards, dates.length),
+          });
+        }
+      }
+      if (l2Groups.length > 0) {
+        const allL1Boards = l2Groups.flatMap((l2) =>
+          l2.layers.flatMap((l3) => l3.boards),
+        );
+        industryTree.push({
+          label: l1Config.label,
+          icon: l1Config.icon,
+          industries: l2Groups,
+          agg: aggregateBoards(allL1Boards, dates.length),
+        });
+      }
+    }
+  }
 
   return (
     <div
@@ -984,101 +1410,570 @@ function RotationModal({ onClose }: { onClose: () => void }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {sortedBoards.map((board) => {
-                    const industryInfo = parseIndustryBoardCode(board.code);
-                    return (
-                      <tr
-                        key={board.code}
-                        className="hover:bg-[var(--bg-hover)] transition-colors"
-                      >
-                        <td className="sticky left-0 z-10 bg-[var(--bg-primary)] px-3 py-1 whitespace-nowrap">
-                          <div className="flex items-center gap-1.5">
-                            {industryInfo ? (
-                              <button
-                                className="text-[12px] text-[var(--text-primary)] font-medium hover:text-[var(--accent)] transition-colors text-left"
-                                onClick={() =>
-                                  window.open(
-                                    `/industry/${industryInfo.industryId}?tab=chain&layer=${industryInfo.layer}`,
-                                    "_blank",
-                                  )
-                                }
-                              >
-                                {board.name}
-                              </button>
-                            ) : (
-                              <span className="text-[12px] text-[var(--text-primary)] font-medium">
-                                {board.name}
-                              </span>
-                            )}
-                            {board.tag && (
-                              <span className="text-[9px] px-1 py-0.5 rounded bg-[var(--accent)]/15 text-[var(--accent)] leading-none">
-                                {board.tag}
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                        {board.data.map((v, i) => (
-                          <td key={i} className="px-0.5 py-0.5">
-                            <div
-                              className="rounded flex items-center justify-center font-mono"
-                              style={{
-                                background: heatColor(v),
-                                width: 44,
-                                height: 26,
-                                fontSize: 10,
-                                color:
-                                  v === null ? "var(--text-tertiary)" : "#fff",
-                                opacity: v === null ? 0.4 : 1,
-                              }}
+                  {onlyIndustry
+                    ? // ── 三层折叠模式 ──
+                      industryTree.map((l1) => {
+                        const l1Open = expandedL1.has(l1.label);
+                        return (
+                          <React.Fragment key={`l1frag-${l1.label}`}>
+                            {/* ── L1 大类行 ── */}
+                            <tr
+                              className="cursor-pointer select-none"
+                              onClick={() => toggleL1(l1.label)}
                             >
-                              {v === null
-                                ? "--"
-                                : `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`}
-                            </div>
-                          </td>
-                        ))}
-                        <td className="px-3 py-1 text-center">
-                          <span
-                            className={cn(
-                              "text-[11px] font-mono font-semibold",
-                              board.currentChangePct > 0
-                                ? "text-[#e84444]"
-                                : board.currentChangePct < 0
-                                  ? "text-[#09d464]"
-                                  : "text-[var(--text-secondary)]",
-                            )}
+                              <td
+                                className="sticky left-0 z-10 px-3 py-1.5 whitespace-nowrap"
+                                style={{
+                                  background: "var(--bg-tertiary)",
+                                  borderTop: "1px solid var(--border-color)",
+                                }}
+                              >
+                                <div className="flex items-center gap-1.5">
+                                  <ChevronDown
+                                    size={13}
+                                    className={cn(
+                                      "flex-shrink-0 transition-transform",
+                                      l1Open
+                                        ? "text-[var(--accent)]"
+                                        : "text-[var(--text-tertiary)] -rotate-90",
+                                    )}
+                                  />
+                                  <span className="text-[11px]">{l1.icon}</span>
+                                  <span className="text-[12px] font-bold text-[var(--text-primary)]">
+                                    {l1.label}
+                                  </span>
+                                  <span className="text-[10px] text-[var(--text-tertiary)]">
+                                    {l1.industries.length} 个产业
+                                  </span>
+                                </div>
+                              </td>
+                              {dates.map((_, i) => {
+                                const v = l1.agg.data[i];
+                                return (
+                                  <td
+                                    key={i}
+                                    className="px-0.5 py-0.5"
+                                    style={{
+                                      background: "var(--bg-tertiary)",
+                                      borderTop:
+                                        "1px solid var(--border-color)",
+                                    }}
+                                  >
+                                    <div
+                                      className="rounded flex items-center justify-center font-mono"
+                                      style={{
+                                        background: heatColor(v),
+                                        width: 44,
+                                        height: 22,
+                                        fontSize: 9,
+                                        color:
+                                          v === null
+                                            ? "var(--text-tertiary)"
+                                            : "#fff",
+                                        opacity: v === null ? 0.4 : 0.85,
+                                      }}
+                                    >
+                                      {v === null
+                                        ? "·"
+                                        : `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`}
+                                    </div>
+                                  </td>
+                                );
+                              })}
+                              <td
+                                className="px-3 py-1 text-center"
+                                style={{
+                                  background: "var(--bg-tertiary)",
+                                  borderTop: "1px solid var(--border-color)",
+                                }}
+                              >
+                                <span
+                                  className={cn(
+                                    "text-[11px] font-mono font-bold",
+                                    l1.agg.currentChangePct > 0
+                                      ? "text-[#e84444]"
+                                      : l1.agg.currentChangePct < 0
+                                        ? "text-[#09d464]"
+                                        : "text-[var(--text-secondary)]",
+                                  )}
+                                >
+                                  {l1.agg.currentChangePct !== 0 &&
+                                    (l1.agg.currentChangePct > 0 ? "+" : "")}
+                                  {l1.agg.currentChangePct.toFixed(2)}%
+                                </span>
+                              </td>
+                              <td
+                                className="px-3 py-1 text-center"
+                                style={{
+                                  background: "var(--bg-tertiary)",
+                                  borderTop: "1px solid var(--border-color)",
+                                }}
+                              >
+                                <span
+                                  className={cn(
+                                    "text-[11px] font-mono font-bold",
+                                    l1.agg.cumulative > 0
+                                      ? "text-[#e84444]"
+                                      : l1.agg.cumulative < 0
+                                        ? "text-[#09d464]"
+                                        : "text-[var(--text-secondary)]",
+                                  )}
+                                >
+                                  {l1.agg.cumulative > 0 ? "+" : ""}
+                                  {l1.agg.cumulative.toFixed(2)}%
+                                </span>
+                              </td>
+                            </tr>
+
+                            {l1Open &&
+                              l1.industries.map((l2) => {
+                                const l2Open = expandedL2.has(l2.industryId);
+                                return (
+                                  <React.Fragment
+                                    key={`l2frag-${l2.industryId}`}
+                                  >
+                                    {/* ── L2 产业行 ── */}
+                                    <tr
+                                      className="cursor-pointer select-none"
+                                      onClick={() => toggleL2(l2.industryId)}
+                                    >
+                                      <td
+                                        className="sticky left-0 z-10 px-3 py-1 whitespace-nowrap"
+                                        style={{
+                                          background: "var(--bg-secondary)",
+                                        }}
+                                      >
+                                        <div className="flex items-center gap-1.5 pl-5">
+                                          <ChevronDown
+                                            size={11}
+                                            className={cn(
+                                              "flex-shrink-0 transition-transform",
+                                              l2Open
+                                                ? "text-[var(--accent)]"
+                                                : "text-[var(--text-tertiary)] -rotate-90",
+                                            )}
+                                          />
+                                          <span className="text-[11px] font-semibold text-[var(--text-primary)]">
+                                            {INDUSTRY_DISPLAY[l2.industryId] ??
+                                              l2.industryId}
+                                          </span>
+                                          <span className="text-[10px] text-[var(--text-tertiary)]">
+                                            {l2.layers.length} 层
+                                          </span>
+                                        </div>
+                                      </td>
+                                      {dates.map((_, i) => {
+                                        const v = l2.agg.data[i];
+                                        return (
+                                          <td
+                                            key={i}
+                                            className="px-0.5 py-0.5"
+                                            style={{
+                                              background: "var(--bg-secondary)",
+                                            }}
+                                          >
+                                            <div
+                                              className="rounded flex items-center justify-center font-mono"
+                                              style={{
+                                                background: heatColor(v),
+                                                width: 44,
+                                                height: 22,
+                                                fontSize: 9,
+                                                color:
+                                                  v === null
+                                                    ? "var(--text-tertiary)"
+                                                    : "#fff",
+                                                opacity: v === null ? 0.3 : 0.8,
+                                              }}
+                                            >
+                                              {v === null
+                                                ? "·"
+                                                : `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`}
+                                            </div>
+                                          </td>
+                                        );
+                                      })}
+                                      <td
+                                        className="px-3 py-1 text-center"
+                                        style={{
+                                          background: "var(--bg-secondary)",
+                                        }}
+                                      >
+                                        <span
+                                          className={cn(
+                                            "text-[11px] font-mono font-semibold",
+                                            l2.agg.currentChangePct > 0
+                                              ? "text-[#e84444]"
+                                              : l2.agg.currentChangePct < 0
+                                                ? "text-[#09d464]"
+                                                : "text-[var(--text-secondary)]",
+                                          )}
+                                        >
+                                          {l2.agg.currentChangePct !== 0 &&
+                                            (l2.agg.currentChangePct > 0
+                                              ? "+"
+                                              : "")}
+                                          {l2.agg.currentChangePct.toFixed(2)}%
+                                        </span>
+                                      </td>
+                                      <td
+                                        className="px-3 py-1 text-center"
+                                        style={{
+                                          background: "var(--bg-secondary)",
+                                        }}
+                                      >
+                                        <span
+                                          className={cn(
+                                            "text-[11px] font-mono font-semibold",
+                                            l2.agg.cumulative > 0
+                                              ? "text-[#e84444]"
+                                              : l2.agg.cumulative < 0
+                                                ? "text-[#09d464]"
+                                                : "text-[var(--text-secondary)]",
+                                          )}
+                                        >
+                                          {l2.agg.cumulative > 0 ? "+" : ""}
+                                          {l2.agg.cumulative.toFixed(2)}%
+                                        </span>
+                                      </td>
+                                    </tr>
+
+                                    {l2Open &&
+                                      l2.layers.map((l3) => {
+                                        const l3Key = `${l2.industryId}_${l3.layer}`;
+                                        const l3Open = expandedL3.has(l3Key);
+                                        return (
+                                          <React.Fragment
+                                            key={`l3frag-${l3Key}`}
+                                          >
+                                            {/* ── L3 层级行 ── */}
+                                            <tr
+                                              className="cursor-pointer select-none"
+                                              onClick={() => toggleL3(l3Key)}
+                                            >
+                                              <td className="sticky left-0 z-10 bg-[var(--bg-primary)] px-3 py-1 whitespace-nowrap">
+                                                <div className="flex items-center gap-1.5 pl-9">
+                                                  <ChevronDown
+                                                    size={10}
+                                                    className={cn(
+                                                      "flex-shrink-0 transition-transform",
+                                                      l3Open
+                                                        ? "text-[var(--accent)]"
+                                                        : "text-[var(--text-tertiary)] -rotate-90",
+                                                    )}
+                                                  />
+                                                  <span className="text-[10px] font-medium text-[var(--text-secondary)]">
+                                                    {LAYER_LABELS[l3.layer] ??
+                                                      l3.layer}
+                                                  </span>
+                                                  <span className="text-[9px] text-[var(--text-tertiary)]">
+                                                    {l3.boards.length} 个
+                                                  </span>
+                                                </div>
+                                              </td>
+                                              {dates.map((_, i) => {
+                                                const v = l3.agg.data[i];
+                                                return (
+                                                  <td
+                                                    key={i}
+                                                    className="px-0.5 py-0.5"
+                                                  >
+                                                    <div
+                                                      className="rounded flex items-center justify-center font-mono"
+                                                      style={{
+                                                        background:
+                                                          heatColor(v),
+                                                        width: 44,
+                                                        height: 20,
+                                                        fontSize: 9,
+                                                        color:
+                                                          v === null
+                                                            ? "var(--text-tertiary)"
+                                                            : "#fff",
+                                                        opacity:
+                                                          v === null
+                                                            ? 0.25
+                                                            : 0.7,
+                                                      }}
+                                                    >
+                                                      {v === null
+                                                        ? "·"
+                                                        : `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`}
+                                                    </div>
+                                                  </td>
+                                                );
+                                              })}
+                                              <td className="px-3 py-1 text-center">
+                                                <span
+                                                  className={cn(
+                                                    "text-[10px] font-mono",
+                                                    l3.agg.currentChangePct > 0
+                                                      ? "text-[#e84444]"
+                                                      : l3.agg
+                                                            .currentChangePct <
+                                                          0
+                                                        ? "text-[#09d464]"
+                                                        : "text-[var(--text-secondary)]",
+                                                  )}
+                                                >
+                                                  {l3.agg.currentChangePct !==
+                                                    0 &&
+                                                    (l3.agg.currentChangePct > 0
+                                                      ? "+"
+                                                      : "")}
+                                                  {l3.agg.currentChangePct.toFixed(
+                                                    2,
+                                                  )}
+                                                  %
+                                                </span>
+                                              </td>
+                                              <td className="px-3 py-1 text-center">
+                                                <span
+                                                  className={cn(
+                                                    "text-[10px] font-mono",
+                                                    l3.agg.cumulative > 0
+                                                      ? "text-[#e84444]"
+                                                      : l3.agg.cumulative < 0
+                                                        ? "text-[#09d464]"
+                                                        : "text-[var(--text-secondary)]",
+                                                  )}
+                                                >
+                                                  {l3.agg.cumulative > 0
+                                                    ? "+"
+                                                    : ""}
+                                                  {l3.agg.cumulative.toFixed(2)}
+                                                  %
+                                                </span>
+                                              </td>
+                                            </tr>
+
+                                            {/* L3 展开后的板块行 */}
+                                            {l3Open &&
+                                              l3.boards.map((board) => {
+                                                const industryInfo =
+                                                  parseIndustryBoardCode(
+                                                    board.code,
+                                                  );
+                                                return (
+                                                  <tr
+                                                    key={board.code}
+                                                    className="hover:bg-[var(--bg-hover)] transition-colors"
+                                                  >
+                                                    <td className="sticky left-0 z-10 bg-[var(--bg-primary)] px-3 py-1 whitespace-nowrap">
+                                                      <div className="flex items-center gap-1.5 pl-14">
+                                                        {industryInfo ? (
+                                                          <button
+                                                            className="text-[11px] text-[var(--text-primary)] hover:text-[var(--accent)] transition-colors text-left"
+                                                            onClick={(e) => {
+                                                              e.stopPropagation();
+                                                              window.open(
+                                                                `/industry/${industryInfo.industryId}?tab=chain&layer=${industryInfo.layer}`,
+                                                                "_blank",
+                                                              );
+                                                            }}
+                                                          >
+                                                            {board.name}
+                                                          </button>
+                                                        ) : (
+                                                          <span className="text-[11px] text-[var(--text-primary)]">
+                                                            {board.name}
+                                                          </span>
+                                                        )}
+                                                        {board.tag && (
+                                                          <span className="text-[9px] px-1 py-0.5 rounded bg-[var(--accent)]/15 text-[var(--accent)] leading-none">
+                                                            {board.tag}
+                                                          </span>
+                                                        )}
+                                                      </div>
+                                                    </td>
+                                                    {board.data.map((v, i) => (
+                                                      <td
+                                                        key={i}
+                                                        className="px-0.5 py-0.5"
+                                                      >
+                                                        <div
+                                                          className="rounded flex items-center justify-center font-mono"
+                                                          style={{
+                                                            background:
+                                                              heatColor(v),
+                                                            width: 44,
+                                                            height: 26,
+                                                            fontSize: 10,
+                                                            color:
+                                                              v === null
+                                                                ? "var(--text-tertiary)"
+                                                                : "#fff",
+                                                            opacity:
+                                                              v === null
+                                                                ? 0.4
+                                                                : 1,
+                                                          }}
+                                                        >
+                                                          {v === null
+                                                            ? "--"
+                                                            : `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`}
+                                                        </div>
+                                                      </td>
+                                                    ))}
+                                                    <td className="px-3 py-1 text-center">
+                                                      <span
+                                                        className={cn(
+                                                          "text-[11px] font-mono font-semibold",
+                                                          board.currentChangePct >
+                                                            0
+                                                            ? "text-[#e84444]"
+                                                            : board.currentChangePct <
+                                                                0
+                                                              ? "text-[#09d464]"
+                                                              : "text-[var(--text-secondary)]",
+                                                        )}
+                                                      >
+                                                        {board.currentChangePct >
+                                                        0
+                                                          ? "+"
+                                                          : ""}
+                                                        {board.currentChangePct.toFixed(
+                                                          2,
+                                                        )}
+                                                        %
+                                                      </span>
+                                                    </td>
+                                                    <td className="px-3 py-1 text-center">
+                                                      {(() => {
+                                                        const sum =
+                                                          board.data.reduce<number>(
+                                                            (acc, v) =>
+                                                              acc + (v ?? 0),
+                                                            0,
+                                                          ) +
+                                                          board.currentChangePct;
+                                                        return (
+                                                          <span
+                                                            className={cn(
+                                                              "text-[11px] font-mono font-semibold",
+                                                              sum > 0
+                                                                ? "text-[#e84444]"
+                                                                : sum < 0
+                                                                  ? "text-[#09d464]"
+                                                                  : "text-[var(--text-secondary)]",
+                                                            )}
+                                                          >
+                                                            {sum > 0 ? "+" : ""}
+                                                            {sum.toFixed(2)}%
+                                                          </span>
+                                                        );
+                                                      })()}
+                                                    </td>
+                                                  </tr>
+                                                );
+                                              })}
+                                          </React.Fragment>
+                                        );
+                                      })}
+                                  </React.Fragment>
+                                );
+                              })}
+                          </React.Fragment>
+                        );
+                      })
+                    : // ── 平铺模式（申万板块）──
+                      sortedBoards.map((board) => {
+                        const industryInfo = parseIndustryBoardCode(board.code);
+                        return (
+                          <tr
+                            key={board.code}
+                            className="hover:bg-[var(--bg-hover)] transition-colors"
                           >
-                            {board.currentChangePct > 0 ? "+" : ""}
-                            {board.currentChangePct.toFixed(2)}%
-                          </span>
-                        </td>
-                        <td className="px-3 py-1 text-center">
-                          {(() => {
-                            const sum =
-                              board.data.reduce<number>(
-                                (acc, v) => acc + (v ?? 0),
-                                0,
-                              ) + board.currentChangePct;
-                            return (
+                            <td className="sticky left-0 z-10 bg-[var(--bg-primary)] px-3 py-1 whitespace-nowrap">
+                              <div className="flex items-center gap-1.5">
+                                {industryInfo ? (
+                                  <button
+                                    className="text-[12px] text-[var(--text-primary)] font-medium hover:text-[var(--accent)] transition-colors text-left"
+                                    onClick={() =>
+                                      window.open(
+                                        `/industry/${industryInfo.industryId}?tab=chain&layer=${industryInfo.layer}`,
+                                        "_blank",
+                                      )
+                                    }
+                                  >
+                                    {board.name}
+                                  </button>
+                                ) : (
+                                  <span className="text-[12px] text-[var(--text-primary)] font-medium">
+                                    {board.name}
+                                  </span>
+                                )}
+                                {board.tag && (
+                                  <span className="text-[9px] px-1 py-0.5 rounded bg-[var(--accent)]/15 text-[var(--accent)] leading-none">
+                                    {board.tag}
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                            {board.data.map((v, i) => (
+                              <td key={i} className="px-0.5 py-0.5">
+                                <div
+                                  className="rounded flex items-center justify-center font-mono"
+                                  style={{
+                                    background: heatColor(v),
+                                    width: 44,
+                                    height: 26,
+                                    fontSize: 10,
+                                    color:
+                                      v === null
+                                        ? "var(--text-tertiary)"
+                                        : "#fff",
+                                    opacity: v === null ? 0.4 : 1,
+                                  }}
+                                >
+                                  {v === null
+                                    ? "--"
+                                    : `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`}
+                                </div>
+                              </td>
+                            ))}
+                            <td className="px-3 py-1 text-center">
                               <span
                                 className={cn(
                                   "text-[11px] font-mono font-semibold",
-                                  sum > 0
+                                  board.currentChangePct > 0
                                     ? "text-[#e84444]"
-                                    : sum < 0
+                                    : board.currentChangePct < 0
                                       ? "text-[#09d464]"
                                       : "text-[var(--text-secondary)]",
                                 )}
                               >
-                                {sum > 0 ? "+" : ""}
-                                {sum.toFixed(2)}%
+                                {board.currentChangePct > 0 ? "+" : ""}
+                                {board.currentChangePct.toFixed(2)}%
                               </span>
-                            );
-                          })()}
-                        </td>
-                      </tr>
-                    );
-                  })}
+                            </td>
+                            <td className="px-3 py-1 text-center">
+                              {(() => {
+                                const sum =
+                                  board.data.reduce<number>(
+                                    (acc, v) => acc + (v ?? 0),
+                                    0,
+                                  ) + board.currentChangePct;
+                                return (
+                                  <span
+                                    className={cn(
+                                      "text-[11px] font-mono font-semibold",
+                                      sum > 0
+                                        ? "text-[#e84444]"
+                                        : sum < 0
+                                          ? "text-[#09d464]"
+                                          : "text-[var(--text-secondary)]",
+                                    )}
+                                  >
+                                    {sum > 0 ? "+" : ""}
+                                    {sum.toFixed(2)}%
+                                  </span>
+                                );
+                              })()}
+                            </td>
+                          </tr>
+                        );
+                      })}
                 </tbody>
               </table>
             </div>
@@ -1126,6 +2021,32 @@ export default function SwIndustryPage() {
   const [showFundFlow, setShowFundFlow] = useState(false);
   const [onlyIndustryBoards, setOnlyIndustryBoards] = useState(false);
   const [deletingBoard, setDeletingBoard] = useState<string | null>(null);
+  // 板块列表三层折叠状态
+  const [listExpandedL1, setListExpandedL1] = useState<Set<string>>(new Set());
+  const [listExpandedL2, setListExpandedL2] = useState<Set<string>>(new Set());
+  const [listExpandedL3, setListExpandedL3] = useState<Set<string>>(new Set());
+
+  function toggleListL1(label: string) {
+    setListExpandedL1((prev) => {
+      const n = new Set(prev);
+      n.has(label) ? n.delete(label) : n.add(label);
+      return n;
+    });
+  }
+  function toggleListL2(id: string) {
+    setListExpandedL2((prev) => {
+      const n = new Set(prev);
+      n.has(id) ? n.delete(id) : n.add(id);
+      return n;
+    });
+  }
+  function toggleListL3(key: string) {
+    setListExpandedL3((prev) => {
+      const n = new Set(prev);
+      n.has(key) ? n.delete(key) : n.add(key);
+      return n;
+    });
+  }
 
   const [topHeight, setTopHeight] = useState(300);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -1304,11 +2225,21 @@ export default function SwIndustryPage() {
   const handleSync = async () => {
     setSyncing(true);
     try {
-      await fetch(`${API}/api/sw-industry/sync`, { method: "POST" });
-      setTimeout(() => {
-        fetchBoards();
-        setSyncing(false);
-      }, 4000);
+      if (onlyIndustryBoards) {
+        // 产业板块模式：同步成分股行情（stock_quote），完成后刷新产业板块列表
+        await fetch(`${API}/api/sync/quotes`, { method: "POST" });
+        setTimeout(() => {
+          fetchIndustryBoards();
+          setSyncing(false);
+        }, 5000);
+      } else {
+        // 申万模式：同步申万行业指数
+        await fetch(`${API}/api/sw-industry/sync`, { method: "POST" });
+        setTimeout(() => {
+          fetchBoards();
+          setSyncing(false);
+        }, 4000);
+      }
     } catch {
       setSyncing(false);
     }
@@ -1409,6 +2340,109 @@ export default function SwIndustryPage() {
             b.name.toLowerCase().includes(boardNameFilter.toLowerCase()),
           )
         : boards;
+
+  // 板块列表三层树形（仅 onlyIndustryBoards 模式）
+  type ListL3 = { layer: string; boards: SwBoard[]; avgChangePct: number };
+  type ListL2 = { industryId: string; layers: ListL3[]; avgChangePct: number };
+  type ListL1 = {
+    label: string;
+    icon: string;
+    industries: ListL2[];
+    avgChangePct: number;
+  };
+  const listTree: ListL1[] = [];
+  if (onlyIndustryBoards) {
+    const byIndustry = new Map<string, Map<string, SwBoard[]>>();
+    for (const b of filteredBoards) {
+      const info = parseIndustryBoardCode(b.code);
+      if (!info) continue;
+      if (!byIndustry.has(info.industryId))
+        byIndustry.set(info.industryId, new Map());
+      const byLayer = byIndustry.get(info.industryId)!;
+      if (!byLayer.has(info.layer)) byLayer.set(info.layer, []);
+      byLayer.get(info.layer)!.push(b);
+    }
+    const layerOrder = ["upstream", "core", "downstream", "application"];
+    for (const l1Config of L1_GROUPS) {
+      const l2Groups: ListL2[] = [];
+      for (const industryId of l1Config.industries) {
+        const byLayer = byIndustry.get(industryId);
+        if (!byLayer || byLayer.size === 0) continue;
+        const layers: ListL3[] = layerOrder
+          .filter((l) => byLayer.has(l))
+          .map((l) => {
+            const bds = byLayer.get(l)!;
+            return {
+              layer: l,
+              boards: bds,
+              avgChangePct:
+                bds.reduce((s, b) => s + b.changePct, 0) / bds.length,
+            };
+          });
+        for (const [l, bds] of byLayer) {
+          if (!layerOrder.includes(l))
+            layers.push({
+              layer: l,
+              boards: bds,
+              avgChangePct:
+                bds.reduce((s, b) => s + b.changePct, 0) / bds.length,
+            });
+        }
+        const allBds = layers.flatMap((l) => l.boards);
+        l2Groups.push({
+          industryId,
+          layers,
+          avgChangePct:
+            allBds.reduce((s, b) => s + b.changePct, 0) / allBds.length,
+        });
+      }
+      // 兜底
+      if (l1Config === L1_GROUPS[L1_GROUPS.length - 1]) {
+        for (const [industryId, byLayer] of byIndustry) {
+          if (INDUSTRY_TO_L1[industryId]) continue;
+          const layers: ListL3[] = layerOrder
+            .filter((l) => byLayer.has(l))
+            .map((l) => {
+              const bds = byLayer.get(l)!;
+              return {
+                layer: l,
+                boards: bds,
+                avgChangePct:
+                  bds.reduce((s, b) => s + b.changePct, 0) / bds.length,
+              };
+            });
+          for (const [l, bds] of byLayer) {
+            if (!layerOrder.includes(l))
+              layers.push({
+                layer: l,
+                boards: bds,
+                avgChangePct:
+                  bds.reduce((s, b) => s + b.changePct, 0) / bds.length,
+              });
+          }
+          const allBds = layers.flatMap((l) => l.boards);
+          l2Groups.push({
+            industryId,
+            layers,
+            avgChangePct:
+              allBds.reduce((s, b) => s + b.changePct, 0) / allBds.length,
+          });
+        }
+      }
+      if (l2Groups.length > 0) {
+        const allBds = l2Groups.flatMap((l2) =>
+          l2.layers.flatMap((l3) => l3.boards),
+        );
+        listTree.push({
+          label: l1Config.label,
+          icon: l1Config.icon,
+          industries: l2Groups,
+          avgChangePct:
+            allBds.reduce((s, b) => s + b.changePct, 0) / allBds.length,
+        });
+      }
+    }
+  }
 
   type ColKey = SortKey | "action";
   const BOARD_COLS: { key: ColKey; label: string; align?: string }[] = [
@@ -1627,92 +2661,361 @@ export default function SwIndustryPage() {
                     ))}
                   </tr>
                 ))}
-              {!loading &&
-                filteredBoards.map((b, idx) => {
-                  const isSelected = selectedBoard?.code === b.code;
-                  const isStockBoard = stockBoards.some(
-                    (sb) => sb.code === b.code,
-                  );
-                  return (
-                    <tr
-                      key={b.code}
-                      onClick={() => fetchConstituents(b)}
-                      className={cn(
-                        "cursor-pointer border-b border-[var(--border-color)] transition-colors",
-                        isSelected
-                          ? "bg-[var(--bg-hover)] border-l-2 border-l-[#e8a235]"
-                          : isStockBoard
-                            ? "bg-[#3b82f6]/5 border-l-2 border-l-[#3b82f6]"
-                            : "hover:bg-[var(--bg-hover)]",
-                      )}
-                    >
-                      <td className="px-3 py-1.5 text-center text-[var(--text-tertiary)]">
-                        {idx + 1}
-                      </td>
-                      <td className="px-3 py-1.5 font-medium whitespace-nowrap">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            router.push(`/sw/${b.code}`);
-                          }}
-                          className="text-[#3b82f6] hover:underline transition-colors"
+              {!loading && onlyIndustryBoards
+                ? // ── 产业板块三层折叠模式 ──
+                  listTree.map((l1) => {
+                    const l1Open = listExpandedL1.has(l1.label);
+                    const colSpan = BOARD_COLS_WITH_ACTION.length + 1;
+                    return (
+                      <React.Fragment key={`list-l1-${l1.label}`}>
+                        {/* L1 大类行 */}
+                        <tr
+                          className="cursor-pointer select-none"
+                          onClick={() => toggleListL1(l1.label)}
                         >
-                          {b.name}
-                        </button>
-                        <span className="ml-1.5 text-[10px] text-[var(--text-tertiary)]">
-                          {b.code}
-                        </span>
-                      </td>
-                      <td
+                          <td
+                            className="px-2 py-1.5 text-center text-[var(--text-tertiary)] text-[10px]"
+                            style={{
+                              background: "var(--bg-tertiary)",
+                              borderTop: "1px solid var(--border-color)",
+                            }}
+                          >
+                            {l1Open ? "▾" : "▸"}
+                          </td>
+                          <td
+                            className="px-3 py-1.5 font-bold text-[12px] text-[var(--text-primary)] whitespace-nowrap"
+                            style={{
+                              background: "var(--bg-tertiary)",
+                              borderTop: "1px solid var(--border-color)",
+                            }}
+                            colSpan={1}
+                          >
+                            <span className="mr-1.5">{l1.icon}</span>
+                            {l1.label}
+                            <span className="ml-2 text-[10px] font-normal text-[var(--text-tertiary)]">
+                              {l1.industries.length} 个产业
+                            </span>
+                          </td>
+                          <td
+                            className={cn(
+                              "px-3 py-1.5 font-mono font-bold text-[12px]",
+                              pct(l1.avgChangePct),
+                            )}
+                            style={{
+                              background: "var(--bg-tertiary)",
+                              borderTop: "1px solid var(--border-color)",
+                            }}
+                          >
+                            {sgn(l1.avgChangePct)}
+                            {l1.avgChangePct.toFixed(2)}%
+                          </td>
+                          {Array.from({ length: colSpan - 3 }).map((_, i) => (
+                            <td
+                              key={i}
+                              style={{
+                                background: "var(--bg-tertiary)",
+                                borderTop: "1px solid var(--border-color)",
+                              }}
+                            />
+                          ))}
+                        </tr>
+                        {l1Open &&
+                          l1.industries.map((l2) => {
+                            const l2Open = listExpandedL2.has(l2.industryId);
+                            return (
+                              <React.Fragment key={`list-l2-${l2.industryId}`}>
+                                {/* L2 产业行 */}
+                                <tr
+                                  className="cursor-pointer select-none border-b border-[var(--border-color)]"
+                                  onClick={() => toggleListL2(l2.industryId)}
+                                >
+                                  <td
+                                    className="px-2 py-1 text-center text-[var(--text-tertiary)] text-[10px]"
+                                    style={{
+                                      background: "var(--bg-secondary)",
+                                    }}
+                                  >
+                                    {l2Open ? "▾" : "▸"}
+                                  </td>
+                                  <td
+                                    className="px-3 py-1 font-semibold text-[11px] whitespace-nowrap"
+                                    style={{
+                                      background: "var(--bg-secondary)",
+                                    }}
+                                    colSpan={1}
+                                  >
+                                    <span className="pl-4 text-[var(--text-primary)]">
+                                      {INDUSTRY_DISPLAY[l2.industryId] ??
+                                        l2.industryId}
+                                    </span>
+                                    <span className="ml-2 text-[10px] font-normal text-[var(--text-tertiary)]">
+                                      {l2.layers.length} 层
+                                    </span>
+                                  </td>
+                                  <td
+                                    className={cn(
+                                      "px-3 py-1 font-mono font-semibold text-[11px]",
+                                      pct(l2.avgChangePct),
+                                    )}
+                                    style={{
+                                      background: "var(--bg-secondary)",
+                                    }}
+                                  >
+                                    {sgn(l2.avgChangePct)}
+                                    {l2.avgChangePct.toFixed(2)}%
+                                  </td>
+                                  {Array.from({ length: colSpan - 3 }).map(
+                                    (_, i) => (
+                                      <td
+                                        key={i}
+                                        style={{
+                                          background: "var(--bg-secondary)",
+                                        }}
+                                      />
+                                    ),
+                                  )}
+                                </tr>
+                                {l2Open &&
+                                  l2.layers.map((l3) => {
+                                    const l3Key = `${l2.industryId}_${l3.layer}`;
+                                    const l3Open = listExpandedL3.has(l3Key);
+                                    return (
+                                      <React.Fragment key={`list-l3-${l3Key}`}>
+                                        {/* L3 层级行 */}
+                                        <tr
+                                          className="cursor-pointer select-none border-b border-[var(--border-color)]"
+                                          onClick={() => toggleListL3(l3Key)}
+                                        >
+                                          <td className="px-2 py-1 text-center text-[var(--text-tertiary)] text-[10px]">
+                                            {l3Open ? "▾" : "▸"}
+                                          </td>
+                                          <td className="px-3 py-1 text-[10px] font-medium text-[var(--text-secondary)] whitespace-nowrap">
+                                            <span className="pl-8">
+                                              {LAYER_LABELS[l3.layer] ??
+                                                l3.layer}
+                                            </span>
+                                            <span className="ml-2 text-[9px] text-[var(--text-tertiary)]">
+                                              {l3.boards.length} 个板块
+                                            </span>
+                                          </td>
+                                          <td
+                                            className={cn(
+                                              "px-3 py-1 font-mono text-[10px]",
+                                              pct(l3.avgChangePct),
+                                            )}
+                                          >
+                                            {sgn(l3.avgChangePct)}
+                                            {l3.avgChangePct.toFixed(2)}%
+                                          </td>
+                                          {Array.from({
+                                            length: colSpan - 3,
+                                          }).map((_, i) => (
+                                            <td key={i} />
+                                          ))}
+                                        </tr>
+                                        {/* L3 展开后的具体板块行 */}
+                                        {l3Open &&
+                                          l3.boards.map((b) => {
+                                            const isSelected =
+                                              selectedBoard?.code === b.code;
+                                            const industryInfo =
+                                              parseIndustryBoardCode(b.code);
+                                            return (
+                                              <tr
+                                                key={b.code}
+                                                onClick={() =>
+                                                  fetchConstituents(b)
+                                                }
+                                                className={cn(
+                                                  "cursor-pointer border-b border-[var(--border-color)] transition-colors",
+                                                  isSelected
+                                                    ? "bg-[var(--bg-hover)] border-l-2 border-l-[#e8a235]"
+                                                    : "hover:bg-[var(--bg-hover)]",
+                                                )}
+                                              >
+                                                <td className="px-3 py-1.5 text-center text-[var(--text-tertiary)] text-[10px]" />
+                                                <td className="px-3 py-1.5 font-medium whitespace-nowrap">
+                                                  <span className="pl-12">
+                                                    {industryInfo ? (
+                                                      <button
+                                                        onClick={(e) => {
+                                                          e.stopPropagation();
+                                                          window.open(
+                                                            `/industry/${industryInfo.industryId}?tab=chain&layer=${industryInfo.layer}`,
+                                                            "_blank",
+                                                          );
+                                                        }}
+                                                        className="text-[#3b82f6] hover:underline transition-colors text-[11px]"
+                                                      >
+                                                        {b.name}
+                                                      </button>
+                                                    ) : (
+                                                      <button
+                                                        onClick={(e) => {
+                                                          e.stopPropagation();
+                                                          router.push(
+                                                            `/sw/${b.code}`,
+                                                          );
+                                                        }}
+                                                        className="text-[#3b82f6] hover:underline transition-colors text-[11px]"
+                                                      >
+                                                        {b.name}
+                                                      </button>
+                                                    )}
+                                                  </span>
+                                                  <span className="ml-1.5 text-[9px] text-[var(--text-tertiary)]">
+                                                    {b.code}
+                                                  </span>
+                                                </td>
+                                                <td
+                                                  className={cn(
+                                                    "px-3 py-1.5 font-mono font-semibold",
+                                                    pct(b.changePct),
+                                                  )}
+                                                >
+                                                  {sgn(b.changePct)}
+                                                  {fmt(b.changePct)}%
+                                                </td>
+                                                <td className="px-3 py-1.5 font-mono text-[var(--text-primary)]">
+                                                  {fmt(b.price, 2)}
+                                                </td>
+                                                <td className="px-3 py-1.5 text-[var(--text-secondary)]">
+                                                  {fmtNum(b.turnover)}
+                                                </td>
+                                                <td className="px-3 py-1.5 text-[var(--text-secondary)]">
+                                                  {fmtNum(b.volume)}
+                                                </td>
+                                                <td className="px-3 py-1.5 text-[var(--text-secondary)]">
+                                                  {fmt(b.peTtm, 1)}
+                                                </td>
+                                                <td className="px-3 py-1.5 text-[var(--text-secondary)]">
+                                                  {fmt(b.pb, 2)}
+                                                </td>
+                                                <td className="px-3 py-1.5 text-[var(--text-secondary)] text-center">
+                                                  {b.compCount || "--"}
+                                                </td>
+                                                <td className="px-3 py-1.5 text-center">
+                                                  <button
+                                                    onClick={(e) => {
+                                                      e.stopPropagation();
+                                                      handleDeleteBoard(
+                                                        b.code,
+                                                        b.name,
+                                                      );
+                                                    }}
+                                                    disabled={
+                                                      deletingBoard === b.code
+                                                    }
+                                                    className={cn(
+                                                      "p-1 rounded hover:bg-red-500/10 transition-colors",
+                                                      deletingBoard === b.code
+                                                        ? "opacity-50 cursor-not-allowed"
+                                                        : "text-[var(--text-tertiary)] hover:text-red-500",
+                                                    )}
+                                                    title="删除板块"
+                                                  >
+                                                    <Trash2 size={14} />
+                                                  </button>
+                                                </td>
+                                              </tr>
+                                            );
+                                          })}
+                                      </React.Fragment>
+                                    );
+                                  })}
+                              </React.Fragment>
+                            );
+                          })}
+                      </React.Fragment>
+                    );
+                  })
+                : // ── 平铺模式（申万 / 非产业模式）──
+                  !loading &&
+                  filteredBoards.map((b, idx) => {
+                    const isSelected = selectedBoard?.code === b.code;
+                    const isStockBoard = stockBoards.some(
+                      (sb) => sb.code === b.code,
+                    );
+                    return (
+                      <tr
+                        key={b.code}
+                        onClick={() => fetchConstituents(b)}
                         className={cn(
-                          "px-3 py-1.5 font-mono font-semibold",
-                          pct(b.changePct),
+                          "cursor-pointer border-b border-[var(--border-color)] transition-colors",
+                          isSelected
+                            ? "bg-[var(--bg-hover)] border-l-2 border-l-[#e8a235]"
+                            : isStockBoard
+                              ? "bg-[#3b82f6]/5 border-l-2 border-l-[#3b82f6]"
+                              : "hover:bg-[var(--bg-hover)]",
                         )}
                       >
-                        {sgn(b.changePct)}
-                        {fmt(b.changePct)}%
-                      </td>
-                      <td className="px-3 py-1.5 font-mono text-[var(--text-primary)]">
-                        {fmt(b.price, 2)}
-                      </td>
-                      <td className="px-3 py-1.5 text-[var(--text-secondary)]">
-                        {fmtNum(b.turnover)}
-                      </td>
-                      <td className="px-3 py-1.5 text-[var(--text-secondary)]">
-                        {fmtNum(b.volume)}
-                      </td>
-                      <td className="px-3 py-1.5 text-[var(--text-secondary)]">
-                        {fmt(b.peTtm, 1)}
-                      </td>
-                      <td className="px-3 py-1.5 text-[var(--text-secondary)]">
-                        {fmt(b.pb, 2)}
-                      </td>
-                      <td className="px-3 py-1.5 text-[var(--text-secondary)] text-center">
-                        {b.compCount || "--"}
-                      </td>
-                      {onlyIndustryBoards && (
-                        <td className="px-3 py-1.5 text-center">
+                        <td className="px-3 py-1.5 text-center text-[var(--text-tertiary)]">
+                          {idx + 1}
+                        </td>
+                        <td className="px-3 py-1.5 font-medium whitespace-nowrap">
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              handleDeleteBoard(b.code, b.name);
+                              router.push(`/sw/${b.code}`);
                             }}
-                            disabled={deletingBoard === b.code}
-                            className={cn(
-                              "p-1 rounded hover:bg-red-500/10 transition-colors",
-                              deletingBoard === b.code
-                                ? "opacity-50 cursor-not-allowed"
-                                : "text-[var(--text-tertiary)] hover:text-red-500",
-                            )}
-                            title="删除板块"
+                            className="text-[#3b82f6] hover:underline transition-colors"
                           >
-                            <Trash2 size={14} />
+                            {b.name}
                           </button>
+                          <span className="ml-1.5 text-[10px] text-[var(--text-tertiary)]">
+                            {b.code}
+                          </span>
                         </td>
-                      )}
-                    </tr>
-                  );
-                })}
+                        <td
+                          className={cn(
+                            "px-3 py-1.5 font-mono font-semibold",
+                            pct(b.changePct),
+                          )}
+                        >
+                          {sgn(b.changePct)}
+                          {fmt(b.changePct)}%
+                        </td>
+                        <td className="px-3 py-1.5 font-mono text-[var(--text-primary)]">
+                          {fmt(b.price, 2)}
+                        </td>
+                        <td className="px-3 py-1.5 text-[var(--text-secondary)]">
+                          {fmtNum(b.turnover)}
+                        </td>
+                        <td className="px-3 py-1.5 text-[var(--text-secondary)]">
+                          {fmtNum(b.volume)}
+                        </td>
+                        <td className="px-3 py-1.5 text-[var(--text-secondary)]">
+                          {fmt(b.peTtm, 1)}
+                        </td>
+                        <td className="px-3 py-1.5 text-[var(--text-secondary)]">
+                          {fmt(b.pb, 2)}
+                        </td>
+                        <td className="px-3 py-1.5 text-[var(--text-secondary)] text-center">
+                          {b.compCount || "--"}
+                        </td>
+                        {onlyIndustryBoards && (
+                          <td className="px-3 py-1.5 text-center">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteBoard(b.code, b.name);
+                              }}
+                              disabled={deletingBoard === b.code}
+                              className={cn(
+                                "p-1 rounded hover:bg-red-500/10 transition-colors",
+                                deletingBoard === b.code
+                                  ? "opacity-50 cursor-not-allowed"
+                                  : "text-[var(--text-tertiary)] hover:text-red-500",
+                              )}
+                              title="删除板块"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </td>
+                        )}
+                      </tr>
+                    );
+                  })}
             </tbody>
           </table>
         </div>

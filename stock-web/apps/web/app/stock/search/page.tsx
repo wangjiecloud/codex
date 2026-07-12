@@ -1171,6 +1171,7 @@ function AISearchPanel() {
                 errorMsg: "",
               }));
             } else if (ev.type === "empty") {
+              // 保留 sql 字段，方便排查为什么没有结果
               setState((s) => ({ ...s, status: "done", rows: [], total: 0 }));
             } else if (ev.type === "error") {
               setState((s) => ({
@@ -1362,15 +1363,39 @@ function AISearchPanel() {
 
       {/* 错误提示 */}
       {hasError && (
-        <div className="text-xs text-[#e84444] bg-[#e84444]/10 border border-[#e84444]/20 rounded-lg px-3 py-2">
-          {state.errorMsg}
+        <div className="space-y-2">
+          <div className="text-xs text-[#e84444] bg-[#e84444]/10 border border-[#e84444]/20 rounded-lg px-3 py-2">
+            {state.errorMsg}
+          </div>
+          {state.sql && (
+            <div className="bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg p-3">
+              <div className="text-[11px] text-[var(--text-tertiary)] mb-1.5 font-medium">
+                执行的 SQL：
+              </div>
+              <pre className="text-[11px] text-[var(--text-secondary)] whitespace-pre-wrap font-mono leading-relaxed">
+                {state.sql}
+              </pre>
+            </div>
+          )}
         </div>
       )}
 
       {/* 空结果 */}
       {isEmpty && (
-        <div className="text-sm text-[var(--text-tertiary)] py-4 text-center">
-          未找到符合条件的股票，请调整查询条件后重试
+        <div className="py-4">
+          <div className="text-sm text-[var(--text-tertiary)] text-center mb-3">
+            未找到符合条件的股票，请调整查询条件后重试
+          </div>
+          {state.sql && (
+            <div className="bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg p-3">
+              <div className="text-[11px] text-[var(--text-tertiary)] mb-1.5 font-medium">
+                执行的 SQL：
+              </div>
+              <pre className="text-[11px] text-[var(--text-secondary)] whitespace-pre-wrap font-mono leading-relaxed">
+                {state.sql}
+              </pre>
+            </div>
+          )}
         </div>
       )}
 

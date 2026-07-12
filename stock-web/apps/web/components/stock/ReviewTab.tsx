@@ -16,6 +16,7 @@ import {
   KLineBar,
   generateMockData,
 } from "@/components/stock/StockChart";
+import MinuteChartModal from "@/components/stock/MinuteChartModal";
 
 /* ─────────────────── 类型 ─────────────────── */
 type Period = "daily" | "weekly" | "monthly";
@@ -42,6 +43,8 @@ const INDEX_GROUPS: {
       { code: "399006", name: "创业板指", desc: "深交所创业" },
       { code: "000016", name: "上证50", desc: "沪市蓝筹" },
       { code: "000300", name: "沪深300", desc: "A股宽基" },
+      { code: "000680", name: "科创综指", desc: "科创板综合" },
+      { code: "000047", name: "上证全指", desc: "全市场A股" },
     ],
   },
   {
@@ -86,6 +89,8 @@ interface IndexCardProps {
   period: Period;
   /** 自定义 kline 接口路径前缀，默认 /api/stock/kline */
   klineApiBase?: string;
+  /** 是否启用双击K线查看分时图（仅A股个股支持） */
+  enableMinute?: boolean;
 }
 
 const PERIOD_COUNT: Record<Period, number> = {
@@ -94,19 +99,82 @@ const PERIOD_COUNT: Record<Period, number> = {
   monthly: 120,
 };
 
+const CARD_INDICATORS = ["VOL", "MACD", "KDJ", "BOLL", "RSI"];
+const CARD_MA_PERIODS = [5, 10, 20, 30, 60];
+
+function formatVolCard(v: number): string {
+  if (!v) return "--";
+  if (v >= 1e8) return (v / 1e8).toFixed(2) + "亿";
+  if (v >= 1e4) return (v / 1e4).toFixed(2) + "万";
+  return v.toFixed(0);
+}
+
+/* ── 指标切换栏（卡片和全屏共用） ── */
+function IndicatorBar({
+  activeIndicators,
+  onToggleIndicator,
+  activeMAs,
+  onToggleMA,
+}: {
+  activeIndicators: string[];
+  onToggleIndicator: (ind: string) => void;
+  activeMAs: number[];
+  onToggleMA: (p: number) => void;
+}) {
+  return (
+    <div className="flex items-center gap-1 px-3 py-1.5 border-b border-[var(--border-color)] bg-[var(--bg-deep)] overflow-x-auto shrink-0">
+      {CARD_INDICATORS.map((ind) => (
+        <button
+          key={ind}
+          onClick={() => onToggleIndicator(ind)}
+          className={cn(
+            "px-2 py-0.5 rounded text-[10px] whitespace-nowrap transition-colors",
+            activeIndicators.includes(ind)
+              ? "bg-[#f5a623]/20 text-[#f5a623] border border-[#f5a623]/40"
+              : "text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] border border-transparent hover:border-[var(--border-color)]",
+          )}
+        >
+          {ind}
+        </button>
+      ))}
+      <div className="w-px h-3 bg-[var(--border-color)] mx-0.5 shrink-0" />
+      {CARD_MA_PERIODS.map((p) => (
+        <button
+          key={`ma${p}`}
+          onClick={() => onToggleMA(p)}
+          className={cn(
+            "px-2 py-0.5 rounded text-[10px] whitespace-nowrap transition-colors",
+            activeMAs.includes(p)
+              ? "bg-[#f5a623]/20 text-[#f5a623] border border-[#f5a623]/40"
+              : "text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] border border-transparent hover:border-[var(--border-color)]",
+          )}
+        >
+          MA{p}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 /* ── 全屏图表容器：自动测量高度传给 StockChart ── */
 function FullscreenChart({
   data,
+  activeIndicators,
+  onToggleIndicator,
   activeMAs,
   onToggleMA,
   error,
   loading,
+  onBarDoubleClick,
 }: {
   data: KLineBar[];
+  activeIndicators: string[];
+  onToggleIndicator: (ind: string) => void;
   activeMAs: number[];
   onToggleMA: (p: number) => void;
   error: boolean;
   loading: boolean;
+  onBarDoubleClick?: (bar: KLineBar) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [height, setHeight] = useState(0);
@@ -125,23 +193,32 @@ function FullscreenChart({
   }, []);
 
   return (
-    <div ref={containerRef} className="flex-1 relative min-h-0">
-      {error && !loading && (
-        <div className="absolute inset-0 flex items-center justify-center z-10">
-          <span className="text-[13px] text-[var(--text-tertiary)]">
-            暂无 K 线数据
-          </span>
-        </div>
-      )}
-      {height > 0 && (
-        <StockChart
-          data={data}
-          activeIndicators={["VOL"]}
-          activeMAs={activeMAs}
-          onToggleMA={onToggleMA}
-          containerHeight={height}
-        />
-      )}
+    <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+      <IndicatorBar
+        activeIndicators={activeIndicators}
+        onToggleIndicator={onToggleIndicator}
+        activeMAs={activeMAs}
+        onToggleMA={onToggleMA}
+      />
+      <div ref={containerRef} className="flex-1 relative min-h-0">
+        {error && !loading && (
+          <div className="absolute inset-0 flex items-center justify-center z-10">
+            <span className="text-[13px] text-[var(--text-tertiary)]">
+              暂无 K 线数据
+            </span>
+          </div>
+        )}
+        {height > 0 && (
+          <StockChart
+            data={data}
+            activeIndicators={activeIndicators}
+            activeMAs={activeMAs}
+            onToggleMA={onToggleMA}
+            containerHeight={height}
+            onBarDoubleClick={onBarDoubleClick}
+          />
+        )}
+      </div>
     </div>
   );
 }
@@ -152,13 +229,22 @@ function IndexCard({
   desc,
   period,
   klineApiBase = "/api/stock/kline",
+  enableMinute = false,
 }: IndexCardProps) {
   const [data, setData] = useState<KLineBar[]>(() => generateMockData(code));
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [activeMAs, setActiveMAs] = useState<number[]>([5, 20]);
+  const [activeIndicators, setActiveIndicators] = useState<string[]>([
+    "VOL",
+    "MACD",
+  ]);
   const [fullscreen, setFullscreen] = useState(false);
   const [mounted, setMounted] = useState(false);
+
+  // 分时弹框状态
+  const [minuteOpen, setMinuteOpen] = useState(false);
+  const [minuteDate, setMinuteDate] = useState("");
 
   useEffect(() => {
     setMounted(true);
@@ -209,6 +295,50 @@ function IndexCard({
       prev.includes(p) ? prev.filter((x) => x !== p) : [...prev, p],
     );
   }, []);
+
+  const toggleIndicator = useCallback((ind: string) => {
+    setActiveIndicators((prev) =>
+      prev.includes(ind) ? prev.filter((x) => x !== ind) : [...prev, ind],
+    );
+  }, []);
+
+  const handleBarDoubleClick = useCallback(
+    (bar: KLineBar) => {
+      if (!enableMinute) return;
+      setMinuteDate(bar.time);
+      setMinuteOpen(true);
+    },
+    [enableMinute],
+  );
+
+  /* ── stats bar ── */
+  const statsBar =
+    latest && !loading ? (
+      <div className="flex items-center gap-3 px-3 py-1.5 border-b border-[var(--border-color)] bg-[var(--bg-deep)] text-[10px] shrink-0 overflow-x-auto">
+        {[
+          ["今开", latest.open > 0 ? latest.open.toFixed(2) : "--"],
+          ["最高", latest.high > 0 ? latest.high.toFixed(2) : "--"],
+          ["最低", latest.low > 0 ? latest.low.toFixed(2) : "--"],
+          ["成交量", formatVolCard(latest.volume)],
+          [
+            "换手率",
+            latest.turnRate != null && latest.turnRate > 0
+              ? latest.turnRate.toFixed(2) + "%"
+              : "--",
+          ],
+        ].map(([label, val]) => (
+          <div
+            key={label}
+            className="flex items-center gap-1 whitespace-nowrap shrink-0"
+          >
+            <span className="text-[var(--text-tertiary)]">{label}</span>
+            <span className="font-mono text-[var(--text-secondary)]">
+              {val}
+            </span>
+          </div>
+        ))}
+      </div>
+    ) : null;
 
   /* ── 共用头部 ── */
   const cardHeader = (isFs: boolean) => (
@@ -296,6 +426,13 @@ function IndexCard({
   const card = (
     <div className="flex flex-col rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)] overflow-hidden">
       {cardHeader(false)}
+      {statsBar}
+      <IndicatorBar
+        activeIndicators={activeIndicators}
+        onToggleIndicator={toggleIndicator}
+        activeMAs={activeMAs}
+        onToggleMA={toggleMA}
+      />
       <div className="relative" style={{ height: 320 }}>
         {error && !loading && (
           <div className="absolute inset-0 flex items-center justify-center">
@@ -306,10 +443,11 @@ function IndexCard({
         )}
         <StockChart
           data={data}
-          activeIndicators={["VOL"]}
+          activeIndicators={activeIndicators}
           activeMAs={activeMAs}
           onToggleMA={toggleMA}
           containerHeight={320}
+          onBarDoubleClick={enableMinute ? handleBarDoubleClick : undefined}
         />
       </div>
     </div>
@@ -321,12 +459,16 @@ function IndexCard({
       ? createPortal(
           <div className="fixed inset-0 z-[9999] flex flex-col bg-[var(--bg-primary)]">
             {cardHeader(true)}
+            {statsBar}
             <FullscreenChart
               data={data}
+              activeIndicators={activeIndicators}
+              onToggleIndicator={toggleIndicator}
               activeMAs={activeMAs}
               onToggleMA={toggleMA}
               error={error}
               loading={loading}
+              onBarDoubleClick={enableMinute ? handleBarDoubleClick : undefined}
             />
           </div>,
           document.body,
@@ -337,6 +479,15 @@ function IndexCard({
     <>
       {card}
       {modal}
+      {enableMinute && (
+        <MinuteChartModal
+          open={minuteOpen}
+          onClose={() => setMinuteOpen(false)}
+          code={code}
+          name={name}
+          date={minuteDate}
+        />
+      )}
     </>
   );
 }
@@ -350,6 +501,7 @@ interface CountryGroupProps {
   period: Period;
   extra?: IndexConfig[];
   klineApiBase?: string;
+  enableMinute?: boolean;
 }
 
 function CountryGroup({
@@ -360,6 +512,7 @@ function CountryGroup({
   period,
   extra,
   klineApiBase,
+  enableMinute = false,
 }: CountryGroupProps) {
   const [collapsed, setCollapsed] = useState(false);
   const allIndices = extra ? [...indices, ...extra] : indices;
@@ -397,6 +550,7 @@ function CountryGroup({
               desc={idx.desc}
               period={period}
               klineApiBase={klineApiBase}
+              enableMinute={enableMinute}
             />
           ))}
         </div>
@@ -625,7 +779,7 @@ export default function ReviewTab() {
             </span>
           </div>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {/* 个股自身 K 线图，排在首位 */}
+            {/* 个股自身 K 线图，排在首位，支持双击分时 */}
             <IndexCard
               key={`stock-self-${selectedStock.code}-${period}`}
               code={selectedStock.code}
@@ -633,6 +787,7 @@ export default function ReviewTab() {
               desc="个股"
               period={period}
               klineApiBase="/api/stock/kline"
+              enableMinute={true}
             />
             {sectorIndices.map((idx) => (
               <IndexCard
@@ -658,6 +813,7 @@ export default function ReviewTab() {
           flag={group.flag}
           indices={group.indices}
           period={period}
+          enableMinute={group.key === "cn"}
         />
       ))}
     </div>

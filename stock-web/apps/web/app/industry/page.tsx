@@ -13,6 +13,26 @@ import {
   Building2,
   Bot,
   Rocket,
+  Brain,
+  Server,
+  Plane,
+  Battery,
+  Activity,
+  Wifi,
+  Zap,
+  Radio,
+  Settings,
+  Monitor,
+  Drone,
+  FlaskConical,
+  Pill,
+  Stethoscope,
+  Dna,
+  Box,
+  Cog,
+  RadioTower,
+  Microchip,
+  PlaneTakeoff,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -28,19 +48,74 @@ interface Industry {
 }
 
 const ICONS: Record<string, React.ElementType> = {
+  // lowercase keys（旧格式兜底）
   cpu: Cpu,
   layers: Layers,
   factory: Factory,
+  // 数据库中存的图标名称（PascalCase）
+  Activity,
+  Battery,
+  Bot,
+  Box,
+  Brain,
+  Building2,
+  Cog,
+  Cpu,
+  Dna,
+  Drone,
+  Factory,
+  Flask: FlaskConical, // 数据库存的是 Flask，lucide 里是 FlaskConical
+  FlaskConical,
+  Layers,
+  Monitor,
+  Network,
+  Pill,
+  Plane,
+  Radio,
+  RadioTower,
+  Rocket,
+  Server,
+  Settings,
+  Stethoscope,
+  Tower: RadioTower, // 数据库存的是 Tower，lucide 里是 RadioTower
+  Chip: Microchip, // 数据库存的是 Chip，lucide 里是 Microchip
+  Microchip,
+  Wifi,
+  Zap,
 };
 
 export default function IndustryPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [activeTab, setActiveTab] = useState<
-    "ai_infra" | "company" | "humanoid" | "aerospace"
+    | "ai_infra"
+    | "company"
+    | "humanoid"
+    | "aerospace"
+    | "aviation"
+    | "dc_compute"
+    | "llm"
+    | "lowalt"
+    | "energy"
+    | "biopharma"
+    | "robot"
+    | "telecom"
   >(() => {
     const t = searchParams.get("tab");
-    if (t === "humanoid" || t === "aerospace" || t === "company") return t;
+    if (
+      t === "humanoid" ||
+      t === "aerospace" ||
+      t === "aviation" ||
+      t === "company" ||
+      t === "dc_compute" ||
+      t === "llm" ||
+      t === "lowalt" ||
+      t === "energy" ||
+      t === "biopharma" ||
+      t === "robot" ||
+      t === "telecom"
+    )
+      return t;
     return "ai_infra";
   });
   const [industries, setIndustries] = useState<Industry[]>([]);
@@ -54,6 +129,14 @@ export default function IndustryPage() {
   const companyList = industries.filter((i) => i.tab === "company");
   const humanoidList = industries.filter((i) => i.tab === "humanoid");
   const aerospaceList = industries.filter((i) => i.tab === "aerospace");
+  const aviationList = industries.filter((i) => i.tab === "aviation");
+  const dcComputeList = industries.filter((i) => i.tab === "dc_compute");
+  const llmList = industries.filter((i) => i.tab === "llm");
+  const lowaltList = industries.filter((i) => i.tab === "lowalt");
+  const energyList = industries.filter((i) => i.tab === "energy");
+  const biopharmaList = industries.filter((i) => i.tab === "biopharma");
+  const robotList = industries.filter((i) => i.tab === "robot");
+  const telecomList = industries.filter((i) => i.tab === "telecom");
 
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<
@@ -317,74 +400,55 @@ export default function IndustryPage() {
         </div>
       </div>
 
-      <div
-        className="flex items-center gap-1 mb-6 border-b"
-        style={{ borderColor: "var(--border-color)" }}
-      >
-        <button
-          onClick={() => setActiveTab("ai_infra")}
-          className={cn(
-            "flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-all",
-            activeTab === "ai_infra"
-              ? "border-[#f5a623] text-[#f5a623]"
-              : "border-transparent",
-          )}
-          style={{
-            color:
-              activeTab === "ai_infra" ? "#f5a623" : "var(--text-secondary)",
-          }}
-        >
-          <Cpu size={14} />
-          AI 基础设施
-        </button>
-        <button
-          onClick={() => setActiveTab("company")}
-          className={cn(
-            "flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-all",
-            activeTab === "company"
-              ? "border-[#f5a623] text-[#f5a623]"
-              : "border-transparent",
-          )}
-          style={{
-            color:
-              activeTab === "company" ? "#f5a623" : "var(--text-secondary)",
-          }}
-        >
-          <Building2 size={14} />
-          企业
-        </button>
-        <button
-          onClick={() => setActiveTab("humanoid")}
-          className={cn(
-            "flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-all",
-            activeTab === "humanoid"
-              ? "border-[#f5a623] text-[#f5a623]"
-              : "border-transparent",
-          )}
-          style={{
-            color:
-              activeTab === "humanoid" ? "#f5a623" : "var(--text-secondary)",
-          }}
-        >
-          <Bot size={14} />
-          人形机器人
-        </button>
-        <button
-          onClick={() => setActiveTab("aerospace")}
-          className={cn(
-            "flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-all",
-            activeTab === "aerospace"
-              ? "border-[#f5a623] text-[#f5a623]"
-              : "border-transparent",
-          )}
-          style={{
-            color:
-              activeTab === "aerospace" ? "#f5a623" : "var(--text-secondary)",
-          }}
-        >
-          <Rocket size={14} />
-          商业航天
-        </button>
+      {/* 产业 Tab 胶囊网格 */}
+      <div className="flex flex-wrap gap-2 mb-6">
+        {(
+          [
+            { key: "ai_infra", icon: <Cpu size={12} />, label: "AI基础设施" },
+            { key: "company", icon: <Building2 size={12} />, label: "企业" },
+            { key: "humanoid", icon: <Bot size={12} />, label: "人形机器人" },
+            { key: "aerospace", icon: <Rocket size={12} />, label: "商业航天" },
+            {
+              key: "aviation",
+              icon: <PlaneTakeoff size={12} />,
+              label: "国产大飞机",
+            },
+            {
+              key: "dc_compute",
+              icon: <Server size={12} />,
+              label: "国产算力基建",
+            },
+            { key: "llm", icon: <Brain size={12} />, label: "大模型" },
+            { key: "lowalt", icon: <Plane size={12} />, label: "低空经济" },
+            { key: "energy", icon: <Battery size={12} />, label: "新型储能" },
+            {
+              key: "biopharma",
+              icon: <Activity size={12} />,
+              label: "生物医药",
+            },
+            { key: "robot", icon: <Bot size={12} />, label: "工业机器人" },
+            { key: "telecom", icon: <Wifi size={12} />, label: "新型通信" },
+          ] as { key: string; icon: React.ReactNode; label: string }[]
+        ).map(({ key, icon, label }) => {
+          const active = activeTab === key;
+          return (
+            <button
+              key={key}
+              onClick={() => setActiveTab(key as typeof activeTab)}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium transition-all"
+              style={{
+                background: active ? "#f5a623" : "var(--bg-secondary)",
+                color: active ? "#fff" : "var(--text-secondary)",
+                border: active
+                  ? "1px solid #f5a623"
+                  : "1px solid var(--border-color)",
+              }}
+            >
+              {icon}
+              {label}
+            </button>
+          );
+        })}
       </div>
 
       {activeTab === "ai_infra" && (
@@ -484,7 +548,12 @@ export default function IndustryPage() {
                 <div className="flex items-start justify-between">
                   <div className="flex items-start gap-4 flex-1">
                     <div className="w-10 h-10 rounded-lg bg-[#f5a623]/10 flex items-center justify-center shrink-0 mt-0.5 text-xl">
-                      {company.icon}
+                      {ICONS[company.icon]
+                        ? React.createElement(ICONS[company.icon], {
+                            size: 20,
+                            className: "text-[#f5a623]",
+                          })
+                        : company.icon}
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-3 mb-1">
@@ -544,86 +613,135 @@ export default function IndustryPage() {
         </div>
       )}
 
-      {(activeTab === "humanoid" || activeTab === "aerospace") && (
+      {(activeTab === "humanoid" ||
+        activeTab === "aerospace" ||
+        activeTab === "aviation" ||
+        activeTab === "dc_compute" ||
+        activeTab === "llm" ||
+        activeTab === "lowalt" ||
+        activeTab === "energy" ||
+        activeTab === "biopharma" ||
+        activeTab === "robot" ||
+        activeTab === "telecom") && (
         <div className="space-y-3">
-          {(activeTab === "humanoid" ? humanoidList : aerospaceList).map(
-            (industry) => {
-              const Icon =
-                ICONS[industry.icon] ||
-                (activeTab === "humanoid" ? Bot : Rocket);
-              return (
-                <div
-                  key={industry.id}
-                  className="border rounded-xl overflow-hidden hover:border-[#f5a623]/30 transition-all group"
-                  style={{
-                    background: "var(--bg-secondary)",
-                    borderColor: "var(--border-color)",
-                  }}
+          {(activeTab === "humanoid"
+            ? humanoidList
+            : activeTab === "aerospace"
+              ? aerospaceList
+              : activeTab === "aviation"
+                ? aviationList
+                : activeTab === "dc_compute"
+                  ? dcComputeList
+                  : activeTab === "llm"
+                    ? llmList
+                    : activeTab === "lowalt"
+                      ? lowaltList
+                      : activeTab === "energy"
+                        ? energyList
+                        : activeTab === "biopharma"
+                          ? biopharmaList
+                          : activeTab === "robot"
+                            ? robotList
+                            : telecomList
+          ).map((industry) => {
+            const Icon =
+              ICONS[industry.icon] ||
+              (activeTab === "humanoid"
+                ? Bot
+                : activeTab === "aerospace"
+                  ? Rocket
+                  : activeTab === "aviation"
+                    ? PlaneTakeoff
+                    : activeTab === "dc_compute"
+                      ? Server
+                      : activeTab === "llm"
+                        ? Brain
+                        : activeTab === "lowalt"
+                          ? Plane
+                          : activeTab === "energy"
+                            ? Battery
+                            : activeTab === "biopharma"
+                              ? Activity
+                              : activeTab === "robot"
+                                ? Bot
+                                : Wifi);
+            return (
+              <div
+                key={industry.id}
+                className="border rounded-xl overflow-hidden hover:border-[#f5a623]/30 transition-all group"
+                style={{
+                  background: "var(--bg-secondary)",
+                  borderColor: "var(--border-color)",
+                }}
+              >
+                <button
+                  onClick={() => router.push(`/industry/${industry.id}`)}
+                  className="w-full p-5 text-left"
                 >
-                  <button
-                    onClick={() => router.push(`/industry/${industry.id}`)}
-                    className="w-full p-5 text-left"
-                  >
-                    <div className="flex items-start justify-between">
-                      <div className="flex items-start gap-4 flex-1">
-                        <div className="w-10 h-10 rounded-lg bg-[#f5a623]/10 flex items-center justify-center shrink-0 mt-0.5 text-xl">
-                          {industry.icon}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-3 mb-1">
-                            <h3
-                              className="font-medium"
-                              style={{ color: "var(--text-primary)" }}
-                            >
-                              {industry.name}
-                            </h3>
-                            <span
-                              className="text-xs"
-                              style={{ color: "var(--text-tertiary)" }}
-                            >
-                              产业链企业 {industry.companyCount} 家 · 上次分析{" "}
-                              {industry.lastAnalyzed}
-                            </span>
-                          </div>
-                          <p
-                            className="text-sm leading-relaxed mb-3 line-clamp-2"
-                            style={{ color: "var(--text-secondary)" }}
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-start gap-4 flex-1">
+                      <div className="w-10 h-10 rounded-lg bg-[#f5a623]/10 flex items-center justify-center shrink-0 mt-0.5 text-xl">
+                        {ICONS[industry.icon]
+                          ? React.createElement(ICONS[industry.icon], {
+                              size: 20,
+                              className: "text-[#f5a623]",
+                            })
+                          : industry.icon}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-3 mb-1">
+                          <h3
+                            className="font-medium"
+                            style={{ color: "var(--text-primary)" }}
                           >
-                            {industry.description}
-                          </p>
-                          <div className="flex items-center gap-2">
+                            {industry.name}
+                          </h3>
+                          <span
+                            className="text-xs"
+                            style={{ color: "var(--text-tertiary)" }}
+                          >
+                            产业链企业 {industry.companyCount} 家 · 上次分析{" "}
+                            {industry.lastAnalyzed}
+                          </span>
+                        </div>
+                        <p
+                          className="text-sm leading-relaxed mb-3 line-clamp-2"
+                          style={{ color: "var(--text-secondary)" }}
+                        >
+                          {industry.description}
+                        </p>
+                        <div className="flex items-center gap-2">
+                          <span
+                            className="text-xs"
+                            style={{ color: "var(--text-tertiary)" }}
+                          >
+                            代表企业：
+                          </span>
+                          {industry.representatives.slice(0, 4).map((r) => (
                             <span
-                              className="text-xs"
-                              style={{ color: "var(--text-tertiary)" }}
+                              key={r}
+                              className="text-xs px-2 py-0.5 rounded"
+                              style={{
+                                color: "var(--text-secondary)",
+                                background: "var(--bg-tertiary)",
+                              }}
                             >
-                              代表企业：
+                              {r}
                             </span>
-                            {industry.representatives.slice(0, 4).map((r) => (
-                              <span
-                                key={r}
-                                className="text-xs px-2 py-0.5 rounded"
-                                style={{
-                                  color: "var(--text-secondary)",
-                                  background: "var(--bg-tertiary)",
-                                }}
-                              >
-                                {r}
-                              </span>
-                            ))}
-                          </div>
+                          ))}
                         </div>
                       </div>
-                      <ChevronRight
-                        size={18}
-                        className="ml-4 mt-1 transition-colors group-hover:text-[#f5a623]"
-                        style={{ color: "var(--text-tertiary)" }}
-                      />
                     </div>
-                  </button>
-                </div>
-              );
-            },
-          )}
+                    <ChevronRight
+                      size={18}
+                      className="ml-4 mt-1 transition-colors group-hover:text-[#f5a623]"
+                      style={{ color: "var(--text-tertiary)" }}
+                    />
+                  </div>
+                </button>
+              </div>
+            );
+          })}
         </div>
       )}
 

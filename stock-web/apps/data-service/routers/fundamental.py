@@ -164,14 +164,34 @@ def _scrape_f10_full(code: str) -> dict:
         result["report_period"]       = _ex(r"(\d{4}-\d{2}-\d{2})", zyzb_text)
 
         # ─────────────────────────────────
-        # 2. 财务分析 cwfx — 财务三表 + 指标多维度
+        # 2. 财务分析 cwfx — 财务三表 + 指标多维度 + 历史多期
         # ─────────────────────────────────
         logger.info(f"[F10] {code} 抓取 cwfx")
         page.goto(base + "cwfx", wait_until="domcontentloaded")
         page.wait_for_timeout(6000)
 
-        # 按报告期（默认）
-        result["cwfx_by_period"] = _get_content(page, 60)
+        # 按报告期（默认）—— 含多期历史数据，用于解析近5年财报
+        cwfx_by_period_text = _get_content(page, 60)
+        result["cwfx_by_period"] = cwfx_by_period_text
+
+        # 尝试切换"按年度"获取年报级别数据（更规整，方便解析年收入/净利润）
+        try:
+            data_tabs = page.query_selector_all("ul.dataTab li")
+            for dt in data_tabs[:4]:
+                t = dt.inner_text().strip()
+                if t == "按年度":
+                    dt.click()
+                    page.wait_for_timeout(2000)
+                    result["cwfx_by_year"] = _get_content(page, 60)
+                    break
+            # 切回按报告期
+            for dt in page.query_selector_all("ul.dataTab li")[:4]:
+                if dt.inner_text().strip() == "按报告期":
+                    dt.click()
+                    page.wait_for_timeout(1000)
+                    break
+        except Exception as e:
+            logger.warning(f"cwfx 年度切换失败: {e}")
 
         # 三张报表：资产负债表、利润表、现金流量表
         financial_statements = {}
@@ -238,34 +258,139 @@ def _scrape_f10_full(code: str) -> dict:
         result["jyfx_text"] = _get_content(page, 60)
         result["rd_expense_ratio"] = _ex(r"研发投入占营收比\s+(\d+\.?\d*)%", result["jyfx_text"])
 
-        # 主营构成按产品/行业/地区
+        # 主营构成按产品/行业/地区 — 保存原始文本 + 尝试解析表格行
         jyfx_categories = {}
+        jyfx_table_rows = {}   # 结构化表格行数据，最终用于饼图
+
         try:
             # 先切换到表格模式
             tabs = page.query_selector_all("ul.zygcfx-tab li")
             if tabs:
                 tabs[0].click()
                 page.wait_for_timeout(1000)
-            for cat in ["按产品", "按行业", "按地区"]:
-                el = page.get_by_text(cat, exact=True)
-                if el.count() > 0:
-                    el.first.click()
-                    page.wait_for_timeout(1500)
-                    jyfx_categories[cat] = _get_content(page, 60)
+
+            jyfx_full_text = _get_content(page, 60)
+            jyfx_categories["full_text"] = jyfx_full_text
+
+            # ── 策略1：直接解析主营构成 table 元素（不依赖 tab 按钮点击）──
+            # 找含 "按产品分类" 或 "主营构成+收入比例" 的表格，解析产品维度数据
+            # 不回落到「按行业」「按地区」，避免引入申万行业分类词汇污染饼图
+            product_rows = []
+            try:
+                tables = page.query_selector_all("table")
+                breakdown_table_text = ""
+                for tbl in tables:
+                    txt = tbl.inner_text()
+                    if "按产品分类" in txt or ("主营构成" in txt and "收入比例" in txt):
+                        breakdown_table_text = txt
+                        break
+
+                if breakdown_table_text:
+                    jyfx_categories["按产品"] = breakdown_table_text
+                    current_cat = None
+                    for line in breakdown_table_text.split("\n"):
+                        line = line.strip()
+                        if not line:
+                            continue
+                        parts = [p.strip() for p in line.split("\t")]
+                        # 识别分类标题行
+                        if parts[0] in ("按产品分类", "按行业分类", "按地区分类"):
+                            current_cat = parts[0]
+                            # 同行可能带第一条产品数据
+                            if len(parts) >= 4 and current_cat == "按产品分类":
+                                name = parts[1]
+                                rev_str = parts[2]
+                                ratio_str = parts[3]
+                                if "%" in ratio_str and len(name) >= 2:
+                                    ratio_val = _to_float(ratio_str)
+                                    if ratio_val and 0 < ratio_val <= 100:
+                                        product_rows.append({
+                                            "name": name,
+                                            "revenue": _to_float(rev_str),
+                                            "ratio": ratio_val,
+                                            "gross_margin": _to_float(parts[8]) if len(parts) > 8 else None,
+                                        })
+                            continue
+                        # 只收集「按产品分类」下的行
+                        if current_cat != "按产品分类":
+                            continue
+                        if len(parts) >= 3:
+                            name = parts[0]
+                            if re.search(r"主营构成|收入比例|成本比例|利润比例|报告期|合计|小计", name):
+                                continue
+                            if len(name) < 2 or len(name) > 30:
+                                continue
+                            rev_str = parts[1]
+                            ratio_str = parts[2]
+                            if "%" in ratio_str:
+                                ratio_val = _to_float(ratio_str)
+                                if ratio_val and 0 < ratio_val <= 100:
+                                    product_rows.append({
+                                        "name": name,
+                                        "revenue": _to_float(rev_str),
+                                        "ratio": ratio_val,
+                                        "gross_margin": _to_float(parts[8]) if len(parts) > 8 else None,
+                                    })
+            except Exception as e_tbl:
+                logger.warning(f"[F10] {code} jyfx table解析失败: {e_tbl}")
+
+            if product_rows:
+                jyfx_table_rows["按产品"] = product_rows
+                logger.info(f"[F10] {code} jyfx 按产品 解析到 {len(product_rows)} 行")
+
+            # ── 策略2：从"业务竞争力"各业务 tab 点击，解析 "年报：X业务总营收Y亿" ──
+            if not jyfx_table_rows:
+                try:
+                    li_elements = page.query_selector_all("li")
+                    business_lis = []
+                    for li in li_elements:
+                        txt = li.inner_text().strip()
+                        try:
+                            parent_text = li.evaluate(
+                                "el => el.parentElement?.parentElement?.innerText?.substring(0,80) || ''"
+                            )
+                        except Exception:
+                            parent_text = ""
+                        if "业务竞争力" in parent_text and len(txt) < 25 and txt and "\n" not in txt:
+                            business_lis.append((txt, li))
+
+                    if business_lis:
+                        busi_breakdown = []
+                        for bname, li_el in business_lis:
+                            try:
+                                li_el.click()
+                                page.wait_for_timeout(1200)
+                                btext = _get_content(page, 60)
+                                # 匹配 "年报：X业务总营收Y亿元，同比Z%"
+                                m = re.search(
+                                    r"\d{4}年报：.{0,20}?业务总营收(\d+\.?\d*)亿元[，,]同比([+-]?\d+\.?\d*)%",
+                                    btext
+                                )
+                                if m:
+                                    busi_breakdown.append({
+                                        "name": bname,
+                                        "revenue": _to_float(m.group(1) + "亿"),
+                                        "yoy": float(m.group(2)),
+                                    })
+                                    logger.info(f"[F10] {code} 业务{bname}: {m.group(1)}亿")
+                            except Exception as be:
+                                logger.warning(f"[F10] {code} 业务tab {bname} 点击失败: {be}")
+
+                        if busi_breakdown:
+                            total_rev = sum(r.get("revenue") or 0 for r in busi_breakdown)
+                            if total_rev > 0:
+                                for r in busi_breakdown:
+                                    r["ratio"] = round((r.get("revenue") or 0) / total_rev * 100, 2)
+                            jyfx_table_rows["业务竞争力"] = busi_breakdown
+                            logger.info(f"[F10] {code} 业务竞争力解析到 {len(busi_breakdown)} 条")
+                except Exception as e2:
+                    logger.warning(f"[F10] {code} 业务竞争力抓取失败: {e2}")
+
         except Exception as e:
             logger.warning(f"jyfx 主营构成抓取失败: {e}")
-        result["jyfx_categories"] = jyfx_categories
 
-        # 研发投入/研发人员切换
-        try:
-            chart_tabs = page.query_selector_all(".chart-tab, [class*='chart-tab'] li")
-            for ct in chart_tabs[:4]:
-                t = ct.inner_text().strip()
-                if t:
-                    ct.click()
-                    page.wait_for_timeout(1000)
-        except Exception:
-            pass
+        result["jyfx_categories"] = jyfx_categories
+        result["jyfx_table_rows"] = jyfx_table_rows
 
         # ─────────────────────────────────
         # 5. 盈利预测 ylyc — 机构预测/评级
@@ -409,6 +534,417 @@ def _scrape_f10_full(code: str) -> dict:
 # ──────────────────────────────────────────────
 # 数据解析 & 持久化
 # ──────────────────────────────────────────────
+
+def _parse_jyfx_breakdown(jyfx_table_rows: dict) -> list[dict]:
+    """
+    从 jyfx_table_rows（结构化主营构成）中提取营收占比，
+    只使用「按产品」分类，对应东方财富 F10 jyfx 页「主营构成 → 按产品」tab 的数据。
+    不回落到「按行业」「按地区」「业务竞争力」，避免引入错误的行业分类数据。
+    返回适合饼图展示的数组：
+    [{"name": "精矿及粉末产品", "ratio": 31.6, "revenue": 5573000000.0}, ...]
+    """
+    rows = jyfx_table_rows.get("按产品", [])
+    if not rows:
+        return []
+    # 按 ratio 降序，最多返回 8 条
+    sorted_rows = sorted(rows, key=lambda r: r.get("ratio") or 0, reverse=True)
+    # 如果占比之和不接近 100，归一化
+    total = sum(r.get("ratio") or 0 for r in sorted_rows)
+    if total > 0 and abs(total - 100) > 5:
+        for r in sorted_rows:
+            r["ratio"] = round((r.get("ratio") or 0) / total * 100, 2)
+    return sorted_rows[:8]
+
+
+def _parse_cwfx_history(code: str, cwfx_by_period: str, cwfx_by_year: str = "") -> list[dict]:
+    """
+    从 cwfx 财务分析文本中解析多期历史财务数据，用于填充 stock_f10_financial_history 表。
+
+    东方财富 cwfx 实际文本格式（利润表按报告期）：
+      利润表  2026-03-31  2025-12-31  2025-09-30  2025-06-30  2025-03-31
+      营业总收入  70.07亿  176.4亿  127.6亿  78.49亿  33.94亿
+      归属净利润  9.903亿  13.92亿  ...
+
+    指标行用多个空格/tab 分隔，日期格式有两种：
+      - 完整：2026-03-31
+      - 短格式：26-03-31（需补全为 2026-03-31）
+    """
+    rows_by_date: dict[str, dict] = {}
+
+    def _normalize_date(d: str) -> str:
+        """把 26-03-31 格式补全为 2026-03-31"""
+        m = re.match(r"^(\d{2})-(\d{2})-(\d{2})$", d)
+        if m:
+            yy = int(m.group(1))
+            year = 2000 + yy if yy <= 50 else 1900 + yy
+            return f"{year}-{m.group(2)}-{m.group(3)}"
+        return d
+
+    def _parse_block(text: str):
+        if not text:
+            return
+        lines = [l.strip() for l in text.split("\n") if l.strip()]
+
+        # 字段映射：指标关键词 → 数据库字段名
+        # 注意：较长/更精确的关键字必须放在前面，防止短关键字先匹配（如"营业总收入"
+        # 在前缀匹配时会误命中"营业总收入同比增长(%)"）
+        field_map = {
+            "营业总收入同比增长": "revenue_yoy",     # ← 必须在 "营业总收入" 前面
+            "归属净利润同比增长": "net_profit_yoy",  # ← 必须在 "归属净利润" 前面
+            "扣非净利润同比增长": None,              # 忽略，不入库
+            "营业总收入滚动环比增长": None,           # 忽略，不入库
+            "归属净利润滚动环比增长": None,           # 忽略，不入库
+            "扣非净利润滚动环比增长": None,           # 忽略，不入库
+            "营业总收入":         "revenue",
+            "营业收入":           "revenue",
+            "归属净利润":         "net_profit",
+            "净利润":             "net_profit",
+            "扣非净利润":         "deducted_profit",
+            "毛利润":             "gross_profit",
+            "毛利率":             "gross_margin",
+            "净利率":             "net_margin",
+            "净资产收益率(加权)": "roe_weighted",
+            "净资产收益率":       "roe_weighted",
+            "资产负债率":         "debt_ratio",
+            "每股收益":           "eps_basic",
+            "基本每股收益":       "eps_basic",
+            "每股净资产":         "nav_per_share",
+        }
+        # 精确匹配优先（避免"净利率"匹配到"净利润"）
+        exact_fields = {
+            "营业总收入": "revenue",
+            "营业收入":   "revenue",
+            "归属净利润": "net_profit",
+        }
+
+        # ── 预扫描：找第一个日期行，用于文件开头没有日期行时的兜底 ──
+        first_date_cols: list[str] = []
+        for line in lines:
+            dates_full = re.findall(r"\d{4}-\d{2}-\d{2}", line)
+            dates_short = re.findall(r"\b(\d{2})-(\d{2})-(\d{2})\b", line)
+            if len(dates_full) >= 2:
+                first_date_cols = dates_full
+                break
+            if not dates_full and len(dates_short) >= 2:
+                new_dates = []
+                for yy, mm, dd in dates_short:
+                    y = 2000 + int(yy) if int(yy) <= 50 else 1900 + int(yy)
+                    new_dates.append(f"{y}-{mm}-{dd}")
+                if new_dates:
+                    first_date_cols = new_dates
+                    break
+
+        # 初始化所有日期 key（后面遇到日期行时也会 re-init）
+        for d in first_date_cols:
+            if d not in rows_by_date:
+                rows_by_date[d] = {"code": code, "report_date": d}
+
+        # 文件开头可能有成长性指标行（在第一个日期行之前），用 first_date_cols 先顶上
+        date_cols: list[str] = first_date_cols[:]
+
+        for line in lines:
+            # ── 1. 检测日期行（形如 "利润表  2026-03-31  2025-12-31 ..."）
+            dates_full = re.findall(r"\d{4}-\d{2}-\d{2}", line)
+            dates_short = re.findall(r"\b(\d{2})-(\d{2})-(\d{2})\b", line)
+
+            if len(dates_full) >= 2:
+                date_cols = dates_full
+                for d in date_cols:
+                    if d not in rows_by_date:
+                        rows_by_date[d] = {"code": code, "report_date": d}
+                continue
+
+            if not dates_full and len(dates_short) >= 2:
+                new_dates = []
+                for yy, mm, dd in dates_short:
+                    y = 2000 + int(yy) if int(yy) <= 50 else 1900 + int(yy)
+                    new_dates.append(f"{y}-{mm}-{dd}")
+                date_cols = new_dates
+                for d in date_cols:
+                    if d not in rows_by_date:
+                        rows_by_date[d] = {"code": code, "report_date": d}
+                continue
+
+            if not date_cols:
+                continue
+
+            # ── 2. 检测指标行（含具体数值，用 tab 或多空格分隔）
+            parts = re.split(r"\t|  +", line)
+            if len(parts) < 2:
+                continue
+
+            indicator = parts[0].strip()
+            indicator_clean = re.sub(r"\([^)]*\)", "", indicator).strip()
+
+            matched_field = None
+            explicitly_ignored = False
+            # 精确匹配
+            for kw, field in exact_fields.items():
+                if indicator_clean == kw or indicator == kw:
+                    matched_field = field
+                    break
+            # 前缀匹配（较长关键字在前，确保"营业总收入同比增长"优先于"营业总收入"）
+            if not matched_field:
+                for kw, field in field_map.items():
+                    if indicator_clean.startswith(kw) or indicator.startswith(kw):
+                        if field is None:
+                            # 明确标记为忽略的行（如"同比增长"类的百分比行不入库）
+                            explicitly_ignored = True
+                        else:
+                            matched_field = field
+                        break
+
+            if explicitly_ignored or not matched_field:
+                continue
+
+            # 提取数值列，对齐 date_cols
+            val_parts = parts[1:]
+            for j, d in enumerate(date_cols):
+                if j >= len(val_parts):
+                    break
+                raw = val_parts[j].strip()
+                if not raw or raw in ("--", "—", ""):
+                    continue
+                v = _to_float(raw)
+                if v is not None:
+                    existing = rows_by_date.get(d, {})
+                    # 已有数据则不覆盖（保留更早解析的值）
+                    if matched_field not in existing or existing.get(matched_field) is None:
+                        rows_by_date.setdefault(d, {"code": code, "report_date": d})[matched_field] = v
+
+    _parse_block(cwfx_by_period)
+    _parse_block(cwfx_by_year)
+
+    # 过滤：只保留有 revenue 或 net_profit 的记录，且在近5年内
+    cutoff_year = datetime.utcnow().year - 5
+    result = []
+    for d, row in rows_by_date.items():
+        try:
+            row_year = int(d[:4])
+        except Exception:
+            continue
+        if row_year < cutoff_year:
+            continue
+        if row.get("revenue") or row.get("net_profit"):
+            result.append(row)
+
+    result.sort(key=lambda r: r.get("report_date", ""), reverse=True)
+    return result[:20]
+
+
+def _build_history_from_statements(code: str) -> list[dict]:
+    """
+    直接从数据库 stock_f10_financial_statement 中解析多期财务历史数据。
+    用于 /finance-view 接口在 stock_f10_financial_history 为空时的兜底逻辑。
+
+    三步策略：
+    1. 从 income 文本解析 revenue/net_profit 绝对值（杜邦分析区块含亿元数字）
+    2. 从 cwfx_summary 文本（cwfx 成长性摘要）解析 revenue_yoy/net_profit_yoy/roe_weighted
+    3. 从 balance_sheet 文本补充 gross_margin/net_margin/debt_ratio 等盈利能力指标
+    """
+    db = SessionLocal()
+    try:
+        stmts = db.query(StockF10FinancialStatement).filter_by(code=code).all()
+    finally:
+        db.close()
+
+    # 当同一个 (statement_type, tab_label) 有多条记录时，取最新的
+    stmt_map: dict[tuple, str] = {}
+    for s in sorted(stmts, key=lambda x: x.updated_at or ""):
+        stmt_map[(s.statement_type, s.tab_label)] = s.content_text or ""
+
+    combined_result: dict[str, dict] = {}
+
+    # ── 第一步：income 文本 → 提取 revenue/net_profit 绝对值 ──
+    for tab in ["按报告期", "按年度"]:
+        text = stmt_map.get(("income", tab), "")
+        if not text:
+            continue
+        rows = _parse_cwfx_history(code, text)  # 内部已过滤有 revenue/net_profit 的记录
+        for row in rows:
+            d = row["report_date"]
+            if d not in combined_result:
+                combined_result[d] = dict(row)
+            else:
+                for k, v in row.items():
+                    if v is not None and combined_result[d].get(k) is None:
+                        combined_result[d][k] = v
+
+    # ── 第二步：cwfx_summary 文本 → 提取 revenue_yoy/net_profit_yoy/roe_weighted ──
+    # cwfx_summary 是 cwfx 首屏的成长性/盈利能力分析摘要（含同比增长行）
+    for tab in ["按报告期", "按年度"]:
+        text = stmt_map.get(("cwfx_summary", tab), "")
+        if not text:
+            # 旧版兜底：balance_sheet 文本开头可能有同比增长行
+            text = stmt_map.get(("balance_sheet", tab), "")
+        if not text:
+            continue
+        rows_raw = _parse_cwfx_history_relaxed(code, text)
+        for row in rows_raw:
+            d = row["report_date"]
+            supplement_fields = {"revenue_yoy", "net_profit_yoy", "roe_weighted", "gross_margin", "net_margin", "debt_ratio"}
+            if d in combined_result:
+                for k in supplement_fields:
+                    v = row.get(k)
+                    if v is not None and combined_result[d].get(k) is None:
+                        combined_result[d][k] = v
+            else:
+                # cwfx_summary 里可能有 income 没有的期次（如中间季度）
+                row_filtered = {k: v for k, v in row.items() if v is not None}
+                if len(row_filtered) > 2:  # 至少有2个有效字段才加入
+                    combined_result[d] = row_filtered
+
+    # ── 第三步：balance_sheet 文本 → 补充 gross_margin/net_margin/debt_ratio ──
+    for tab in ["按报告期", "按年度"]:
+        text = stmt_map.get(("balance_sheet", tab), "")
+        if not text:
+            continue
+        rows_raw = _parse_cwfx_history_relaxed(code, text)
+        for row in rows_raw:
+            d = row["report_date"]
+            supplement_fields = {"gross_margin", "net_margin", "debt_ratio", "roe_weighted"}
+            if d in combined_result:
+                for k in supplement_fields:
+                    v = row.get(k)
+                    if v is not None and combined_result[d].get(k) is None:
+                        combined_result[d][k] = v
+
+    result = list(combined_result.values())
+    result.sort(key=lambda r: r.get("report_date", ""), reverse=True)
+    return result[:20]
+
+
+def _parse_cwfx_history_relaxed(code: str, text: str) -> list[dict]:
+    """
+    宽松版 cwfx 解析：不要求记录含 revenue/net_profit，
+    专门用于从 balance_sheet 文本提取 revenue_yoy/net_profit_yoy/roe_weighted 等指标。
+    """
+    import re as _re
+    rows_by_date: dict[str, dict] = {}
+
+    def _normalize_date(d: str) -> str:
+        m = _re.match(r"^(\d{2})-(\d{2})-(\d{2})$", d)
+        if m:
+            yy = int(m.group(1))
+            year = 2000 + yy if yy <= 50 else 1900 + yy
+            return f"{year}-{m.group(2)}-{m.group(3)}"
+        return d
+
+    field_map = {
+        "营业总收入同比增长": "revenue_yoy",
+        "归属净利润同比增长": "net_profit_yoy",
+        "扣非净利润同比增长": None,
+        "营业总收入滚动环比增长": None,
+        "归属净利润滚动环比增长": None,
+        "扣非净利润滚动环比增长": None,
+        "净资产收益率(加权)": "roe_weighted",
+        "净资产收益率": "roe_weighted",
+        "毛利率": "gross_margin",
+        "净利率": "net_margin",
+        "资产负债率": "debt_ratio",
+    }
+
+    if not text:
+        return []
+
+    lines = [l.strip() for l in text.split("\n") if l.strip()]
+
+    # 预扫描找第一个日期行
+    first_date_cols: list[str] = []
+    for line in lines:
+        dates_full = _re.findall(r"\d{4}-\d{2}-\d{2}", line)
+        dates_short = _re.findall(r"\b(\d{2})-(\d{2})-(\d{2})\b", line)
+        if len(dates_full) >= 2:
+            first_date_cols = dates_full
+            break
+        if not dates_full and len(dates_short) >= 2:
+            new_dates = []
+            for yy, mm, dd in dates_short:
+                y = 2000 + int(yy) if int(yy) <= 50 else 1900 + int(yy)
+                new_dates.append(f"{y}-{mm}-{dd}")
+            if new_dates:
+                first_date_cols = new_dates
+                break
+
+    for d in first_date_cols:
+        if d not in rows_by_date:
+            rows_by_date[d] = {"code": code, "report_date": d}
+
+    date_cols: list[str] = first_date_cols[:]
+
+    for line in lines:
+        dates_full = _re.findall(r"\d{4}-\d{2}-\d{2}", line)
+        dates_short = _re.findall(r"\b(\d{2})-(\d{2})-(\d{2})\b", line)
+
+        if len(dates_full) >= 2:
+            date_cols = dates_full
+            for d in date_cols:
+                if d not in rows_by_date:
+                    rows_by_date[d] = {"code": code, "report_date": d}
+            continue
+
+        if not dates_full and len(dates_short) >= 2:
+            new_dates = []
+            for yy, mm, dd in dates_short:
+                y = 2000 + int(yy) if int(yy) <= 50 else 1900 + int(yy)
+                new_dates.append(f"{y}-{mm}-{dd}")
+            date_cols = new_dates
+            for d in date_cols:
+                if d not in rows_by_date:
+                    rows_by_date[d] = {"code": code, "report_date": d}
+            continue
+
+        if not date_cols:
+            continue
+
+        parts = _re.split(r"\t|  +", line)
+        if len(parts) < 2:
+            continue
+
+        indicator = parts[0].strip()
+        indicator_clean = _re.sub(r"\([^)]*\)", "", indicator).strip()
+
+        matched_field = None
+        explicitly_ignored = False
+        for kw, field in field_map.items():
+            if indicator_clean.startswith(kw) or indicator.startswith(kw):
+                if field is None:
+                    explicitly_ignored = True
+                else:
+                    matched_field = field
+                break
+
+        if explicitly_ignored or not matched_field:
+            continue
+
+        val_parts = parts[1:]
+        for j, d in enumerate(date_cols):
+            if j >= len(val_parts):
+                break
+            raw = val_parts[j].strip()
+            if not raw or raw in ("--", "—", ""):
+                continue
+            v = _to_float(raw)
+            if v is not None:
+                rows_by_date.setdefault(d, {"code": code, "report_date": d})[matched_field] = v
+
+    # 宽松过滤：只要有任意一个字段就保留（不强求 revenue/net_profit）
+    cutoff_year = datetime.utcnow().year - 5
+    result = []
+    for d, row in rows_by_date.items():
+        try:
+            row_year = int(d[:4])
+        except Exception:
+            continue
+        if row_year < cutoff_year:
+            continue
+        # 只要有至少一个有意义的财务指标
+        if any(row.get(f) is not None for f in ["revenue_yoy", "net_profit_yoy", "roe_weighted", "gross_margin"]):
+            result.append(row)
+
+    result.sort(key=lambda r: r.get("report_date", ""), reverse=True)
+    return result[:20]
+
 
 def _parse_dividend_history(code: str, fhrz_text: str) -> list[dict]:
     """从分红融资文本中解析分红历史记录"""
@@ -642,7 +1178,7 @@ def _upsert_f10_full(code: str, data: dict):
         old.net_profit_yoy = snap.net_profit_yoy
         old.updated_at = now
 
-        # ──── 3. stock_f10_financial_statement 财务三表 ────
+        # ──── 3. stock_f10_financial_statement 财务三表 + cwfx 成长性摘要 ────
         stmts = data.get("financial_statements", {})
         for stmt_type, stmt_data in stmts.items():
             if isinstance(stmt_data, dict):
@@ -652,7 +1188,6 @@ def _upsert_f10_full(code: str, data: dict):
                             StockF10FinancialStatement.code == code,
                             StockF10FinancialStatement.statement_type == stmt_type,
                             StockF10FinancialStatement.tab_label == tab_label,
-                            StockF10FinancialStatement.report_date == (data.get("report_period") or now.strftime("%Y-%m-%d")),
                         ).first()
                         if not existing:
                             existing = StockF10FinancialStatement(
@@ -664,6 +1199,26 @@ def _upsert_f10_full(code: str, data: dict):
                             db.add(existing)
                         existing.content_text = content
                         existing.updated_at = now
+
+        # 额外保存 cwfx 成长性摘要（含同比增长、ROE 等历史多期数据）
+        for cwfx_tab_label, cwfx_content_key in [("按报告期", "cwfx_by_period"), ("按年度", "cwfx_by_year")]:
+            cwfx_content = data.get(cwfx_content_key, "")
+            if cwfx_content and len(cwfx_content) > 100 and "同比" in cwfx_content:
+                existing_cwfx = db.query(StockF10FinancialStatement).filter(
+                    StockF10FinancialStatement.code == code,
+                    StockF10FinancialStatement.statement_type == "cwfx_summary",
+                    StockF10FinancialStatement.tab_label == cwfx_tab_label,
+                ).first()
+                if not existing_cwfx:
+                    existing_cwfx = StockF10FinancialStatement(
+                        code=code,
+                        statement_type="cwfx_summary",
+                        tab_label=cwfx_tab_label,
+                        report_date=data.get("report_period") or now.strftime("%Y-%m-%d"),
+                    )
+                    db.add(existing_cwfx)
+                existing_cwfx.content_text = cwfx_content
+                existing_cwfx.updated_at = now
 
         # ──── 4. stock_f10_dividend_history 分红历史 ────
         if data.get("fhrz_text"):
@@ -713,9 +1268,17 @@ def _upsert_f10_full(code: str, data: dict):
             biz = StockF10BusinessAnalysis(code=code)
             db.add(biz)
         biz.report_date = data.get("report_period")
-        biz.main_business_breakdown = json.dumps(
-            data.get("jyfx_categories", {}), ensure_ascii=False
-        )
+        # 优先存结构化的 jyfx_table_rows（带 ratio/revenue），兼容旧版 jyfx_categories 文本
+        jyfx_table_rows = data.get("jyfx_table_rows", {})
+        if jyfx_table_rows:
+            biz.main_business_breakdown = json.dumps(
+                {"structured": jyfx_table_rows, "raw": data.get("jyfx_categories", {})},
+                ensure_ascii=False
+            )
+        else:
+            biz.main_business_breakdown = json.dumps(
+                data.get("jyfx_categories", {}), ensure_ascii=False
+            )
         biz.rd_expense_ratio = _to_float(data.get("rd_expense_ratio"))
         biz.updated_at = now
         # 提取经营评述
@@ -723,6 +1286,42 @@ def _upsert_f10_full(code: str, data: dict):
         biz_review_m = re.search(r"经营评述(.{200,3000}?)(?:核心竞争力|行业背景|$)", jyfx_text, re.S)
         if biz_review_m:
             biz.business_review = biz_review_m.group(1).strip()
+
+        # ──── 6b. stock_f10_financial_history 近5年历史财报 ────
+        try:
+            # 优先从三张报表文本合并解析（income 有绝对值，balance_sheet 有 yoy/ROE）
+            # 此时 financial_statements 已写入数据库，直接用 _build_history_from_statements 读取
+            hist_rows = _build_history_from_statements(code)
+            if not hist_rows:
+                # 兜底：直接从 cwfx_by_period 文本解析（可能只有 yoy/ROE，无绝对值）
+                hist_rows = _parse_cwfx_history(
+                    code,
+                    data.get("cwfx_by_period", ""),
+                    data.get("cwfx_by_year", ""),
+                )
+            for hr in hist_rows:
+                ex = db.query(StockF10FinancialHistory).filter(
+                    StockF10FinancialHistory.code == code,
+                    StockF10FinancialHistory.report_date == hr["report_date"],
+                ).first()
+                if not ex:
+                    ex = StockF10FinancialHistory(
+                        code=code,
+                        report_date=hr["report_date"],
+                    )
+                    db.add(ex)
+                # 只更新有值的字段
+                for field in ["revenue", "revenue_yoy", "net_profit", "net_profit_yoy",
+                               "deducted_profit", "gross_profit", "gross_margin",
+                               "net_margin", "roe_weighted", "debt_ratio", "eps_basic", "nav_per_share"]:
+                    val = hr.get(field)
+                    if val is not None:
+                        setattr(ex, field, val)
+                ex.updated_at = now
+            if hist_rows:
+                logger.info(f"[F10] {code} 写入 financial_history {len(hist_rows)} 条")
+        except Exception as e:
+            logger.warning(f"[F10] {code} 写入 financial_history 失败: {e}")
 
         # ──── 7. stock_f10_shareholder_info 股东研究 ────
         sh = db.query(StockF10ShareholderInfo).filter(
@@ -1214,4 +1813,124 @@ async def get_fundamental_full(code: str):
                 "content_preview": s.content_text[:500] if s.content_text else None,
             } for s in stmts
         ],
+    }
+
+
+@router.get("/{code}/finance-view")
+async def get_finance_view(code: str, background_tasks: BackgroundTasks):
+    """
+    财务 Tab 专用接口：
+    - 立即从数据库返回：营收业务占比（饼图数据）+ 近5年财报历史（表格数据）
+    - 同时在后台触发全量 F10 同步（异步，不阻塞响应）
+    
+    响应结构：
+    {
+      "code": "...",
+      "updated_at": "...",
+      "business_breakdown": [{"name": "...", "ratio": 60.25, "revenue": 1234.56}, ...],
+      "income_history": [{"report_date": "2025-12-31", "revenue": 1234.56, "net_profit": 56.78, ...}, ...]
+    }
+    """
+    def _fetch_db():
+        db = SessionLocal()
+        try:
+            biz  = db.query(StockF10BusinessAnalysis).filter_by(code=code).first()
+            hist = (
+                db.query(StockF10FinancialHistory)
+                .filter(StockF10FinancialHistory.code == code)
+                .order_by(StockF10FinancialHistory.report_date.desc())
+                .limit(20)
+                .all()
+            )
+            snap = db.query(StockF10Snapshot).filter_by(code=code).first()
+            return biz, hist, snap
+        finally:
+            db.close()
+
+    biz, hist, snap = await run_in_threadpool(_fetch_db)
+
+    # 解析营收业务占比（饼图数据）
+    business_breakdown = []
+    if biz and biz.main_business_breakdown:
+        try:
+            raw = json.loads(biz.main_business_breakdown)
+            # 新格式：{"structured": {...}, "raw": {...}}
+            if isinstance(raw, dict) and "structured" in raw:
+                business_breakdown = _parse_jyfx_breakdown(raw["structured"])
+            # 旧格式：直接是 {"按产品": "...", ...}（纯文本，无法直接用）
+            elif isinstance(raw, dict):
+                # 尝试旧格式作为 table_rows 处理（可能只有文本）
+                business_breakdown = _parse_jyfx_breakdown(raw)
+        except Exception as e:
+            logger.warning(f"[finance-view] {code} 解析 business_breakdown 失败: {e}")
+
+    # 过滤近5年财报（最多20条，按报告期降序）
+    cutoff_year = datetime.utcnow().year - 5
+    income_history = []
+    for r in hist:
+        try:
+            if int(r.report_date[:4]) < cutoff_year:
+                continue
+        except Exception:
+            continue
+        income_history.append({
+            "report_date":      r.report_date,
+            "revenue":          r.revenue,
+            "revenue_yoy":      r.revenue_yoy,
+            "net_profit":       r.net_profit,
+            "net_profit_yoy":   r.net_profit_yoy,
+            "deducted_profit":  r.deducted_profit,
+            "gross_margin":     r.gross_margin,
+            "net_margin":       r.net_margin,
+            "roe_weighted":     r.roe_weighted,
+            "debt_ratio":       r.debt_ratio,
+            "eps_basic":        r.eps_basic,
+        })
+
+    # 若 stock_f10_financial_history 为空，从 stock_f10_financial_statement 直接解析（兜底）
+    if not income_history:
+        try:
+            fallback_rows = await run_in_threadpool(_build_history_from_statements, code)
+            if fallback_rows:
+                income_history = fallback_rows
+                logger.info(f"[finance-view] {code} 从 financial_statement 兜底解析到 {len(income_history)} 条历史数据")
+        except Exception as e:
+            logger.warning(f"[finance-view] {code} 兜底解析失败: {e}")
+
+    # 用 snapshot 补充最新一期缺失的 yoy/roe 数据（snapshot 有最近一期的指标快照）
+    if income_history and snap:
+        latest = income_history[0]
+        snap_date = snap.report_period if hasattr(snap, 'report_period') and snap.report_period else None
+        # 如果最新记录日期与 snapshot 一致（或 snapshot 无报告期），补充缺失字段
+        if not snap_date or latest.get("report_date") == snap_date:
+            for field, snap_field in [
+                ("revenue_yoy",    "revenue_yoy"),
+                ("net_profit_yoy", "net_profit_yoy"),
+                ("roe_weighted",   "roe_weighted"),
+                ("gross_margin",   "gross_margin"),
+                ("net_margin",     "net_margin"),
+            ]:
+                if latest.get(field) is None:
+                    v = getattr(snap, snap_field, None)
+                    if v is not None:
+                        latest[field] = v
+
+    # 后台触发全量同步（不阻塞）
+    def _bg_sync():
+        try:
+            data = _scrape_f10_full(code)
+            _upsert_f10_full(code, data)
+            logger.info(f"[finance-view] {code} 后台全量同步完成")
+        except Exception as e:
+            logger.warning(f"[finance-view] {code} 后台同步失败: {e}")
+
+    background_tasks.add_task(run_in_threadpool, _bg_sync)
+
+    return {
+        "code":               code,
+        "updated_at":         snap.updated_at.strftime("%Y-%m-%d %H:%M") if snap and snap.updated_at else None,
+        "has_data":           bool(business_breakdown or income_history),
+        "business_breakdown": business_breakdown,
+        "income_history":     income_history,
+        "syncing":            True,
     }

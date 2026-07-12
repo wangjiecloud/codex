@@ -64,6 +64,165 @@ interface FlashCatStat {
   syncing: boolean;
 }
 
+function MinuteSyncMonitor() {
+  const [stats, setStats] = useState<{
+    industry_total: number;
+    covered_codes: number;
+    latest_date: string;
+    latest_covered: number;
+    distinct_dates: number;
+    total_bars: number;
+    sync_status: {
+      running: boolean;
+      total: number;
+      done: number;
+      ok: number;
+      cached: number;
+      error: number;
+      current: string;
+      trade_date: string;
+      finished_at: string | null;
+    };
+  } | null>(null);
+  const [syncing, setSyncing] = useState(false);
+
+  const fetchStats = async () => {
+    try {
+      const r = await fetch("/api/minute/stats");
+      if (r.ok) {
+        const data = await r.json();
+        setStats(data);
+        setSyncing(data.sync_status?.running ?? false);
+      }
+    } catch {}
+  };
+
+  const handleSync = async () => {
+    if (syncing) return;
+    setSyncing(true);
+    try {
+      await fetch("/api/minute/sync-industry", { method: "POST" });
+      setTimeout(fetchStats, 1000);
+    } catch {}
+  };
+
+  useEffect(() => {
+    fetchStats();
+  }, []);
+
+  useEffect(() => {
+    if (syncing) {
+      const t = setInterval(fetchStats, 2000);
+      return () => clearInterval(t);
+    } else {
+      const t = setInterval(fetchStats, 10000);
+      return () => clearInterval(t);
+    }
+  }, [syncing]);
+
+  const s = stats?.sync_status;
+  const progress = s && s.total > 0 ? Math.round((s.done / s.total) * 100) : 0;
+
+  return (
+    <div className="bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-xl p-5">
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-base font-semibold text-[var(--text-primary)] flex items-center gap-2">
+          <TrendingUp size={16} className="text-[#3b82f6]" />
+          产业链分时数据
+        </h2>
+        <button
+          onClick={handleSync}
+          disabled={syncing}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-blue-500/10 border border-blue-500/30 text-blue-400 rounded-lg hover:bg-blue-500/20 transition-colors disabled:opacity-40"
+        >
+          <RefreshCw size={12} className={syncing ? "animate-spin" : ""} />
+          {syncing ? "同步中..." : "立即同步"}
+        </button>
+      </div>
+
+      {syncing && s && s.total > 0 && (
+        <div className="mb-4 p-3 bg-blue-500/5 border border-blue-500/20 rounded-lg">
+          <div className="flex items-center justify-between text-xs mb-1.5">
+            <span className="text-blue-400 font-medium">
+              正在同步产业链分时数据...
+            </span>
+            <span className="text-[var(--text-tertiary)] tabular-nums">
+              {s.done}/{s.total} ({progress}%)
+            </span>
+          </div>
+          <div className="w-full bg-[var(--bg-tertiary)] rounded-full h-1.5 overflow-hidden mb-1.5">
+            <div
+              className="h-full bg-gradient-to-r from-blue-500 to-cyan-400 transition-all duration-500"
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+          {s.current && (
+            <div className="text-[10px] text-[var(--text-tertiary)] truncate">
+              当前：{s.current}　✓{s.ok} 缓存{s.cached} ✗{s.error}
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="text-xs text-[var(--text-tertiary)] mb-4">
+        每个工作日 17:30 自动同步产业链全部 A 股当日分时数据（1分钟/5分钟）。
+      </div>
+
+      <div className="flex gap-4">
+        <div className="bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg p-4 flex-1">
+          <div className="text-xs text-[var(--text-tertiary)] mb-1">
+            产业链股票
+          </div>
+          <div className="text-2xl font-bold text-[var(--text-primary)]">
+            {stats ? stats.industry_total : "--"}
+          </div>
+        </div>
+        <div className="bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg p-4 flex-1">
+          <div className="text-xs text-[var(--text-tertiary)] mb-1">
+            今日已同步
+          </div>
+          <div className="text-2xl font-bold text-[var(--text-primary)]">
+            {stats ? stats.latest_covered : "--"}
+          </div>
+          <div className="text-[10px] text-[var(--text-tertiary)] mt-0.5">
+            {stats?.latest_date ?? ""}
+          </div>
+        </div>
+        <div className="bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg p-4 flex-1">
+          <div className="text-xs text-[var(--text-tertiary)] mb-1">
+            历史天数
+          </div>
+          <div className="text-2xl font-bold text-[var(--text-primary)]">
+            {stats ? stats.distinct_dates : "--"}
+          </div>
+        </div>
+        <div className="bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg p-4 flex-1">
+          <div className="text-xs text-[var(--text-tertiary)] mb-1">
+            总Bar数
+          </div>
+          <div className="text-2xl font-bold text-[var(--text-primary)]">
+            {stats ? stats.total_bars.toLocaleString() : "--"}
+          </div>
+        </div>
+        <div className="bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg p-4 flex-1">
+          <div className="text-xs text-[var(--text-tertiary)] mb-1">
+            同步频率
+          </div>
+          <div className="text-sm text-[var(--text-secondary)]">每日 17:30</div>
+          {s?.finished_at && !syncing && (
+            <div className="text-[10px] text-[var(--text-tertiary)] mt-1">
+              上次完成：
+              {new Date(s.finished_at + "Z")
+                .toLocaleString("zh-CN", { hour12: false })
+                .slice(5)}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SwIndustryMonitor() {
   const [boardCount, setBoardCount] = useState(0);
   const [syncing, setSyncing] = useState(false);
@@ -875,14 +1034,14 @@ export default function SystemMonitorPage() {
     }
   };
 
-   const waitForSyncComplete = async (typeName: string): Promise<void> => {
-     return new Promise((resolve, reject) => {
-       const maxAttempts = 900; // 900 × 2s = 30分钟，覆盖K线3300只全量同步
-       let attempts = 0;
-       let lastLoggedProgress = -1;
-       let confirmedStarted = false;
-       let startCheckAttempts = 0;
-       const maxStartChecks = 6;
+  const waitForSyncComplete = async (typeName: string): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      const maxAttempts = 900; // 900 × 2s = 30分钟，覆盖K线3300只全量同步
+      let attempts = 0;
+      let lastLoggedProgress = -1;
+      let confirmedStarted = false;
+      let startCheckAttempts = 0;
+      const maxStartChecks = 6;
 
       const poll = async () => {
         if (unmountedRef.current) {
@@ -950,7 +1109,10 @@ export default function SystemMonitorPage() {
           if (attempts < maxAttempts) {
             setTimeout(poll, 2000);
           } else {
-            addLog("warning", `${typeName}等待超时（30分钟），继续执行后续步骤`);
+            addLog(
+              "warning",
+              `${typeName}等待超时（30分钟），继续执行后续步骤`,
+            );
             resolve();
           }
         } catch (error) {
@@ -1321,6 +1483,9 @@ export default function SystemMonitorPage() {
 
         {/* SW Industry Monitor */}
         <SwIndustryMonitor />
+
+        {/* Minute Sync Monitor */}
+        <MinuteSyncMonitor />
 
         {/* Theme News Monitor */}
         <ThemeNewsMonitor />

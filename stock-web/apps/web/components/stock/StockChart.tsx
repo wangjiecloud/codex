@@ -21,6 +21,8 @@ interface StockChartProps {
   activeMAs: number[]; // 当前激活显示的 MA 周期列表（外部控制）
   onToggleMA?: (period: number) => void; // 点击 MA 标签回调
   containerHeight?: number; // 外部传入的可用高度，用于自适应分配各子图
+  /** 双击某根K线时回调，传入该K线的数据（包含日期）*/
+  onBarDoubleClick?: (bar: KLineBar) => void;
 }
 
 /* ─────────────────── mock data ─────────────────── */
@@ -296,6 +298,7 @@ export function StockChart({
   activeMAs: activeMAsArray,
   onToggleMA,
   containerHeight,
+  onBarDoubleClick,
 }: StockChartProps) {
   const { theme } = useTheme();
 
@@ -921,6 +924,24 @@ export function StockChart({
   const handleMouseLeave = useCallback(() => setHoverIdx(null), []);
 
   /* ────────────────────────────────────────────
+     DOUBLE-CLICK — 触发分时弹框
+  ──────────────────────────────────────────── */
+  const handleDoubleClick = useCallback(
+    (e: React.MouseEvent) => {
+      if (!onBarDoubleClick) return;
+      const container = containerRef.current;
+      if (!container) return;
+      const rect = container.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const idx = Math.round((x - startX) / barWidth - 0.5);
+      const clamped = Math.max(0, Math.min(idx, data.length - 1));
+      const bar = data[clamped];
+      if (bar) onBarDoubleClick(bar);
+    },
+    [onBarDoubleClick, startX, barWidth, data],
+  );
+
+  /* ────────────────────────────────────────────
      RESIZE OBSERVER
   ──────────────────────────────────────────── */
   useEffect(() => {
@@ -1004,7 +1025,11 @@ export function StockChart({
       className="flex flex-col w-full select-none"
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
-      style={{ position: "relative" }}
+      onDoubleClick={handleDoubleClick}
+      style={{
+        position: "relative",
+        cursor: onBarDoubleClick ? "crosshair" : "default",
+      }}
     >
       {/* ── MA Header（纯展示行，均线数值 + OHLC） ── */}
       <div

@@ -159,20 +159,83 @@ def scrape_full(code: str) -> dict:
         result["rd_expense_ratio"] = ex(r"研发投入占营收比\s+(\d+\.?\d*)%", result["jyfx_text"])
 
         jyfx_categories = {}
+        jyfx_table_rows = {}
         try:
-            tabs = page.query_selector_all("ul.zygcfx-tab li")
-            if tabs:
-                tabs[0].click()
-                page.wait_for_timeout(1000)
-            for cat in ["按产品", "按行业", "按地区"]:
-                el = page.get_by_text(cat, exact=True)
-                if el.count() > 0:
-                    el.first.click()
-                    page.wait_for_timeout(1500)
-                    jyfx_categories[cat] = get_content(page, 60)
+            # 直接解析主营构成表格（table 元素），不依赖 tab 按钮点击
+            # 表格格式：报告期\t主营构成\t主营收入(元)\t收入比例\t主营成本(元)\t...
+            # 行格式：按产品分类\t产品名\t55.73亿\t31.60%\t...  或  产品名\t55.73亿\t31.60%\t...
+            tables = page.query_selector_all("table")
+            breakdown_table_text = ""
+            for tbl in tables:
+                txt = tbl.inner_text()
+                if "按产品分类" in txt or ("主营构成" in txt and "收入比例" in txt):
+                    breakdown_table_text = txt
+                    break
+
+            product_rows = []
+            if breakdown_table_text:
+                jyfx_categories["按产品"] = breakdown_table_text
+                current_cat = None
+                for line in breakdown_table_text.split("\n"):
+                    line = line.strip()
+                    if not line:
+                        continue
+                    parts = [p.strip() for p in line.split("\t")]
+                    # 识别分类标题行（"按产品分类"、"按行业分类"、"按地区分类"）
+                    if parts[0] in ("按产品分类", "按行业分类", "按地区分类"):
+                        current_cat = parts[0]
+                        # 同行可能带第一条产品数据
+                        if len(parts) >= 4 and current_cat == "按产品分类":
+                            name = parts[1]
+                            rev_str = parts[2]
+                            ratio_str = parts[3]
+                            if "%" in ratio_str and len(name) >= 2:
+                                try:
+                                    ratio_val = float(ratio_str.replace("%", "").strip())
+                                except Exception:
+                                    ratio_val = None
+                                if ratio_val and 0 < ratio_val <= 100:
+                                    product_rows.append({
+                                        "name": name,
+                                        "revenue": to_float(rev_str),
+                                        "ratio": ratio_val,
+                                        "gross_margin": to_float(parts[8]) if len(parts) > 8 else None,
+                                    })
+                        continue
+                    # 只收集「按产品分类」下的行
+                    if current_cat != "按产品分类":
+                        continue
+                    # 普通产品行：名称\t收入\t收入比例\t...
+                    if len(parts) >= 3:
+                        name = parts[0]
+                        if re.search(r"主营构成|收入比例|成本比例|利润比例|报告期|合计|小计", name):
+                            continue
+                        if len(name) < 2 or len(name) > 30:
+                            continue
+                        rev_str = parts[1]
+                        ratio_str = parts[2]
+                        if "%" in ratio_str:
+                            try:
+                                ratio_val = float(ratio_str.replace("%", "").strip())
+                            except Exception:
+                                ratio_val = None
+                            if ratio_val and 0 < ratio_val <= 100:
+                                product_rows.append({
+                                    "name": name,
+                                    "revenue": to_float(rev_str),
+                                    "ratio": ratio_val,
+                                    "gross_margin": to_float(parts[8]) if len(parts) > 8 else None,
+                                })
+
+            if product_rows:
+                jyfx_table_rows["按产品"] = product_rows
+                print(f"    jyfx 主营构成（按产品）解析到 {len(product_rows)} 行")
+            else:
+                print(f"    jyfx 主营构成：未找到按产品分类数据")
         except Exception as e:
             print(f"    jyfx 主营构成失败: {e}")
         result["jyfx_categories"] = jyfx_categories
+        result["jyfx_table_rows"] = jyfx_table_rows
 
         # ── 5. ylyc 盈利预测 ──────────────────
         print(f"  [5/20] ylyc 盈利预测...")
@@ -563,7 +626,8 @@ def upsert_all(code: str, data: dict, db_path: str):
         "code": code,
         "report_date": rp,
         "main_business_breakdown": json.dumps(
-            data.get("jyfx_categories", {}), ensure_ascii=False
+            {"structured": data.get("jyfx_table_rows", {}), "raw": data.get("jyfx_categories", {})},
+            ensure_ascii=False
         ),
         "rd_expense_ratio": to_float(data.get("rd_expense_ratio")),
         "business_review": biz_review_m.group(1).strip() if biz_review_m else None,

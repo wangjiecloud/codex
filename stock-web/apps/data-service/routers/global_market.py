@@ -61,7 +61,10 @@ FEATURED_CODES = [
 ]
 
 # 复盘 tab 需要同步的全球指数 K 线（仅非A股，A 股大盘指数走 baostock）
+# 000680 科创综指：baostock 不支持，走新浪日K接口
 REVIEW_INDEX_CODES = [
+    # A 股特殊指数（baostock 不支持）
+    "000680",
     # 港股
     "HSI", "HSCEI", "HSTECH",
     # 美股
@@ -106,7 +109,56 @@ _SINA_INDEX_MAP: dict[str, tuple[str, str]] = {
     # 日本/韩国：ak.index_global_hist_sina(symbol) 用中文名
     "N225":   ("global", "日经225指数"),
     "KS11":   ("global", "首尔综合指数"),
+    # A 股指数（baostock 不支持，走新浪日K直接抓取接口）
+    "000680": ("cn_index", "sh000680"),   # 科创综指
 }
+
+
+def _fetch_sina_cn_index_daily(symbol: str) -> pd.DataFrame | None:
+    """
+    通过新浪财经日K接口抓取 A 股指数数据（baostock 不支持的指数，如科创综指 sh000680）。
+    symbol: 新浪格式，如 'sh000680'
+    返回标准化 DataFrame：date, open, high, low, close, volume
+    """
+    import re
+    import json
+    # 新浪日K接口每次最多返回有限条，循环多次获取近 500 个交易日
+    # scale=240 表示日K，datalen 最大约 300
+    all_bars: list[dict] = []
+    var_name = f"_{symbol}_daily"
+    url = (
+        f"https://quotes.sina.cn/cn/api/jsonp_v2.php/"
+        f"var%20{var_name}=/CN_MarketDataService.getKLineData"
+        f"?symbol={symbol}&scale=240&datalen=500&ma=no"
+    )
+    headers = {"Referer": "https://finance.sina.com.cn", "User-Agent": "Mozilla/5.0"}
+    try:
+        r = requests.get(url, headers=headers, timeout=15)
+        text = r.text
+        # 提取 JSON 数组
+        m = re.search(r'\(\[(.+)\]\)', text, re.DOTALL)
+        if not m:
+            return None
+        items = json.loads("[" + m.group(1) + "]")
+        for it in items:
+            all_bars.append({
+                "date": it["day"],
+                "open": float(it["open"]),
+                "high": float(it["high"]),
+                "low": float(it["low"]),
+                "close": float(it["close"]),
+                "volume": float(it.get("volume", 0)),
+            })
+    except Exception as e:
+        print(f"[global_kline] sina cn_index fetch failed for {symbol}: {e}")
+        return None
+
+    if not all_bars:
+        return None
+    df = pd.DataFrame(all_bars)
+    df["date"] = pd.to_datetime(df["date"]).dt.strftime("%Y-%m-%d")
+    df = df.sort_values("date").reset_index(drop=True)
+    return df
 
 
 def _fetch_sina_daily(code: str) -> pd.DataFrame | None:
@@ -135,6 +187,11 @@ def _fetch_sina_daily(code: str) -> pd.DataFrame | None:
                     "date": "date", "open": "open", "high": "high",
                     "low": "low", "close": "close", "volume": "volume"
                 })
+            elif kind == "cn_index":
+                # A 股指数直接调用新浪财经 K 线接口（baostock 不支持的指数）
+                df = _fetch_sina_cn_index_daily(symbol)
+                if df is None:
+                    return None
             else:  # global
                 df = ak.index_global_hist_sina(symbol=symbol)
                 # 列名：日期, 开盘, 收盘, 最高, 最低, 成交量

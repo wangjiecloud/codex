@@ -5,8 +5,8 @@ import time as _time
 import json
 
 from routers.industry import _sync_all_quotes, _sync_klines
-from db import SessionLocal, StockMeta, StockFundamental, StockQuote, StockKline
-from eastmoney_scraper import fetch_stock_info, fetch_stock_fundamental
+from db import SessionLocal, StockMeta, StockFundamental, StockF10Snapshot, StockQuote, StockKline
+from eastmoney_scraper import fetch_stock_info
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 router = APIRouter()
@@ -64,9 +64,10 @@ def _sort_klines_missing_first(codes: list) -> list:
 
 
 def _sort_fundamental_missing_first(codes: list) -> list:
+    """优先同步 stock_f10_snapshot 中无数据的股票"""
     db = SessionLocal()
     try:
-        have_data = {r.code for r in db.query(StockFundamental.code).all()}
+        have_data = {r.code for r in db.query(StockF10Snapshot.code).all()}
     finally:
         db.close()
     missing = [c for c in codes if c not in have_data]
@@ -221,15 +222,29 @@ def _run_full_sync():
             )
         return
 
-    fundamental_codes = _sort_fundamental_missing_first(codes)
+    all_fundamental_codes = _sort_fundamental_missing_first(codes)
+    # 预加载今日已同步的股票，直接从队列中移除
+    today_str = datetime.utcnow().strftime("%Y-%m-%d")
+    db2 = SessionLocal()
+    try:
+        synced_today = {
+            row.code
+            for row in db2.query(StockF10Snapshot.code, StockF10Snapshot.updated_at).all()
+            if row.updated_at and row.updated_at.strftime("%Y-%m-%d") == today_str
+        }
+    finally:
+        db2.close()
+    skip_count = sum(1 for c in all_fundamental_codes if c in synced_today)
+    fundamental_codes = [c for c in all_fundamental_codes if c not in synced_today]
+
     with _lock:
         _status.update(phase="fundamental", done=0, total=len(fundamental_codes))
 
     sched_log(
         "info",
-        f"[4/4] 开始同步财务数据，共 {len(fundamental_codes)} 只股票（无数据股优先）",
+        f"[4/4] 开始同步财务数据（F10），待同步 {len(fundamental_codes)} 只（今日已跳过 {skip_count} 只）",
     )
-    from routers.industry import _sync_fundamental
+    from routers.fundamental import _scrape_f10, _upsert_f10
 
     for i, code in enumerate(fundamental_codes):
         if _stop_requested.is_set():
@@ -247,7 +262,8 @@ def _run_full_sync():
             _status["done"] = i
 
         try:
-            _sync_fundamental(code)
+            data = _scrape_f10(code)
+            _upsert_f10(code, data)
         except Exception as e:
             print(f"[full_sync] fundamental {code} failed: {e}")
 
@@ -257,7 +273,7 @@ def _run_full_sync():
                 "info", f"[4/4] 财务数据同步进度: {i + 1}/{len(fundamental_codes)}"
             )
 
-    sched_log("success", f"[4/4] 财务数据同步完成，共 {len(fundamental_codes)} 只股票")
+    sched_log("success", f"[4/4] 财务数据（F10）同步完成，共处理 {len(fundamental_codes)} 只股票")
 
     if _stop_requested.is_set():
         sched_log("warning", "同步已被用户停止")
@@ -513,16 +529,31 @@ async def trigger_sync_stock_info(background_tasks: BackgroundTasks):
 
 def _run_fundamental_sync():
     from routers.system import sched_log
+    from routers.fundamental import _scrape_f10, _upsert_f10
 
     _stop_requested.clear()
 
     db = SessionLocal()
     try:
         raw_codes = [row.code for row in db.query(StockMeta.code).all()]
+        # 预加载今日已同步的股票，直接从队列中移除
+        today_str = datetime.utcnow().strftime("%Y-%m-%d")
+        synced_today = {
+            row.code
+            for row in db.query(StockF10Snapshot.code, StockF10Snapshot.updated_at).all()
+            if row.updated_at and row.updated_at.strftime("%Y-%m-%d") == today_str
+        }
     finally:
         db.close()
 
-    codes = _sort_fundamental_missing_first(raw_codes)
+    all_codes = _sort_fundamental_missing_first(raw_codes)
+    skip_count = sum(1 for c in all_codes if c in synced_today)
+    # 过滤掉今日已同步的，只处理真正需要同步的
+    codes = [c for c in all_codes if c not in synced_today]
+
+    if not codes:
+        sched_log("info", f"财务数据（F10）今日已全部同步，跳过（共 {skip_count} 只）")
+        return
 
     with _lock:
         _status.update(
@@ -535,7 +566,7 @@ def _run_fundamental_sync():
             finished_at="",
         )
 
-    sched_log("info", f"开始同步财务数据，共 {len(codes)} 只股票")
+    sched_log("info", f"开始同步财务数据（F10），待同步 {len(codes)} 只（今日已跳过 {skip_count} 只）")
 
     for i, code in enumerate(codes):
         if _stop_requested.is_set():
@@ -553,63 +584,11 @@ def _run_fundamental_sync():
             _status["done"] = i
 
         try:
-            fund_data = fetch_stock_fundamental(code)
-            if fund_data:
-                db = SessionLocal()
-                try:
-                    raw_data = fund_data.get("raw_data", {})
-
-                    def safe_float(val):
-                        try:
-                            return float(
-                                str(val)
-                                .replace(",", "")
-                                .replace("亿", "")
-                                .replace("万", "")
-                                .strip()
-                                or "0"
-                            )
-                        except:
-                            return 0.0
-
-                    stmt = sqlite_insert(StockFundamental).values(
-                        code=code,
-                        report_date=fund_data.get("report_date", ""),
-                        eps=safe_float(fund_data.get("basic_eps", "0")),
-                        roe=safe_float(fund_data.get("roe", "0")),
-                        revenue=safe_float(
-                            fund_data.get("total_operating_revenue", "0")
-                        ),
-                        revenue_yoy=0.0,
-                        net_profit=safe_float(fund_data.get("net_profit", "0")),
-                        net_profit_yoy=0.0,
-                        gross_margin=0.0,
-                        debt_ratio=0.0,
-                        raw_json=json.dumps(raw_data, ensure_ascii=False),
-                        updated_at=datetime.utcnow(),
-                    )
-                    stmt = stmt.on_conflict_do_update(
-                        index_elements=["code"],
-                        set_={
-                            "report_date": stmt.excluded.report_date,
-                            "eps": stmt.excluded.eps,
-                            "roe": stmt.excluded.roe,
-                            "revenue": stmt.excluded.revenue,
-                            "net_profit": stmt.excluded.net_profit,
-                            "raw_json": stmt.excluded.raw_json,
-                            "updated_at": stmt.excluded.updated_at,
-                        },
-                    )
-                    db.execute(stmt)
-                    db.commit()
-                    print(f"[sync] updated fundamental data for {code}")
-                except Exception as e:
-                    db.rollback()
-                    print(f"[sync] error updating fundamental data for {code}: {e}")
-                finally:
-                    db.close()
+            data = _scrape_f10(code)
+            _upsert_f10(code, data)
+            print(f"[sync] updated F10 data for {code}")
         except Exception as e:
-            print(f"[sync] error fetching fundamental data for {code}: {e}")
+            print(f"[sync] error syncing F10 for {code}: {e}")
 
         _time.sleep(0.3)
 
@@ -622,6 +601,7 @@ def _run_fundamental_sync():
             finished_at=datetime.utcnow().isoformat(),
         )
 
+    sched_log("success", f"财务数据（F10）同步完成，共 {len(codes)} 只股票")
     print("[sync] fundamental sync finished")
 
 

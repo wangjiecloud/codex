@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from routers import (
     quote,
     kline,
+    minute,
     fundamental,
     news,
     industry,
@@ -39,6 +40,7 @@ app.add_middleware(
 
 app.include_router(quote.router, prefix="/api/quote", tags=["行情"])
 app.include_router(kline.router, prefix="/api/kline", tags=["K线"])
+app.include_router(minute.router, prefix="/api/minute", tags=["分时"])
 app.include_router(fundamental.router, prefix="/api/fundamental", tags=["基本面"])
 app.include_router(news.router, prefix="/api/news", tags=["新闻"])
 app.include_router(industry.router, prefix="/api/industry", tags=["产业链"])
@@ -223,6 +225,84 @@ def startup():
         hour=16,
         minute=0,
         id="fund_flow_snapshot",
+        replace_existing=True,
+    )
+
+    # 每个工作日15:32收盘后自动同步产业链股票当日5分钟K线数据入库（baostock，支持任意历史日期）
+    def _auto_sync_minute():
+        """收盘后批量同步产业链全部A股 + A股宽基指数当日分时数据，持续积累历史"""
+        from routers.industry import is_trading_day
+        if not is_trading_day():
+            return
+        db = SessionLocal()
+        try:
+            from sqlalchemy import text as _text
+            rows = db.execute(_text("""
+                SELECT DISTINCT json_each.value as code
+                FROM industry_node, json_each(industry_node.stocks)
+                WHERE industry_node.stocks IS NOT NULL AND industry_node.stocks != '[]'
+            """)).fetchall()
+            codes = [r[0] for r in rows if r[0] and (
+                r[0].startswith("0") or r[0].startswith("3") or r[0].startswith("6")
+            ) and len(r[0]) == 6]
+        except Exception:
+            codes = []
+        finally:
+            db.close()
+
+        # 追加 A 股宽基指数（复盘Tab展示，支持双击分时）
+        CN_INDICES = ["000001", "399006", "000016", "000300", "000680", "000047"]
+        for idx_code in CN_INDICES:
+            if idx_code not in codes:
+                codes.append(idx_code)
+
+        if not codes:
+            print("[minute_sync] 未找到产业链A股，跳过")
+            return
+        print(f"[minute_sync] 开始同步 {len(codes)} 只产业链A股+宽基指数的当日分时数据")
+        from routers.minute import _fetch_one_code, _get_latest_trade_date
+        import time as _t
+        trade_date = _get_latest_trade_date()
+        ok, cached, skip, error = 0, 0, 0, 0
+        for code in codes:
+            result = _fetch_one_code(code, trade_date)
+            s = result.get("status", "error")
+            if s == "ok":
+                ok += 1
+            elif s == "cached":
+                cached += 1
+            elif s == "skip":
+                skip += 1
+            else:
+                error += 1
+            _t.sleep(0.2)  # 避免触发东方财富限频
+        print(f"[minute_sync] 完成: ok={ok} cached={cached} skip={skip} error={error}")
+
+    _scheduler.add_job(
+        _auto_sync_minute,
+        trigger="cron",
+        hour=17,
+        minute=30,
+        id="minute_daily_sync",
+        replace_existing=True,
+    )
+
+    # 每个工作日15:35收盘后快速同步 A 股宽基指数分时数据（6只，约2分钟完成）
+    def _auto_sync_indices_minute():
+        from routers.industry import is_trading_day
+        if not is_trading_day():
+            return
+        from routers.minute import _run_indices_sync, _get_latest_trade_date
+        trade_date = _get_latest_trade_date()
+        print(f"[indices_minute_sync] 同步 A 股宽基指数分时 {trade_date}")
+        _run_indices_sync(trade_date)
+
+    _scheduler.add_job(
+        _auto_sync_indices_minute,
+        trigger="cron",
+        hour=15,
+        minute=35,
+        id="indices_minute_daily_sync",
         replace_existing=True,
     )
 

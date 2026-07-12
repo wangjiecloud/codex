@@ -30,6 +30,7 @@ _CN_INDEX_BS_MAP: dict[str, str] = {
     "000905": "sh.000905",   # 中证500
     "000852": "sh.000852",   # 中证1000
     "000985": "sh.000985",   # 中证全指
+    "000047": "sh.000047",   # 上证全指
     "399001": "sz.399001",   # 深证成指
     "399006": "sz.399006",   # 创业板指
     "399005": "sz.399005",   # 中小板指
@@ -37,8 +38,9 @@ _CN_INDEX_BS_MAP: dict[str, str] = {
     "399673": "sz.399673",   # 创业板50
 }
 
-# 不支持 baostock 的指数，走 EM 接口（GlobalIndexKline）
-_CN_INDEX_EM_CODES = {"000688", "880351"}
+# 不支持 baostock 的指数，走 GlobalIndexKline / 新浪日K 接口
+# 000680 科创综指：baostock 不支持 sh.000680，走新浪日K
+_CN_INDEX_EM_CODES = {"000688", "880351", "000680"}
 
 
 def _is_global_index(code: str) -> bool:

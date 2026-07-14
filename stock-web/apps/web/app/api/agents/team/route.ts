@@ -3,7 +3,10 @@ import { randomUUID } from "crypto";
 import { createTask } from "@/lib/taskStore";
 import { runCodex, DB_PATH, DB_SCHEMA } from "@/lib/codexRunner";
 
-const TEAM_SYSTEM_PROMPT = (code: string, stockName: string) => `你是一个专业的A股股票分析 Orchestrator，负责对 ${stockName}（${code}）进行全面分析。
+const TEAM_SYSTEM_PROMPT = (
+  code: string,
+  stockName: string,
+) => `你是一个专业的A股股票分析 Orchestrator，负责对 ${stockName}（${code}）进行全面分析。
 
 你必须严格按照以下6个阶段顺序完成分析，每个阶段开始和结束时输出规定的标记行。
 
@@ -28,7 +31,7 @@ ${DB_SCHEMA}
 
 【第4阶段：新闻舆情】
 输出：[AGENT_START:news]
-查询 stock_news 表（如无数据则说明暂无新闻，基于公司基本情况做市场情绪判断）。
+查询 news_flash 表（东方财富快讯，category 字段可按 'a'/'important' 过滤 A 股相关）和 theme_news 表（板块主题新闻，按 theme_name 关键词过滤），结合股票基本情况分析市场情绪（stock_news 表无数据，勿查）。
 完成后输出：[AGENT_DONE:news] <一句话摘要>
 
 【第5阶段：风险评估】

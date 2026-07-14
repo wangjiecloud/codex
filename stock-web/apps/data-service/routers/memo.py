@@ -4,6 +4,8 @@ from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 
+_EPOCH = datetime(2000, 1, 1)
+
 from db import get_db, Memo
 
 router = APIRouter()
@@ -97,11 +99,21 @@ def delete_memo(memo_id: int, db: Session = Depends(get_db)):
 # ─── 内部工具 ─────────────────────────────────────────────────────────────────
 
 def _to_out(m: Memo) -> MemoOut:
+    def _dt(v):
+        if isinstance(v, datetime):
+            return v
+        if v:
+            try:
+                return datetime.fromisoformat(str(v))
+            except Exception:
+                pass
+        return _EPOCH
+
     return MemoOut(
         id=m.id,
         title=m.title or "",
         content=m.content or "",
         pinned=bool(m.pinned),
-        created_at=m.created_at,
-        updated_at=m.updated_at,
+        created_at=_dt(m.created_at),
+        updated_at=_dt(m.updated_at),
     )

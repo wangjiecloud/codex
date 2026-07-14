@@ -216,21 +216,32 @@ def _available_dates_by_period() -> dict:
 def take_daily_snapshot():
     """定时任务：快照今日全部 period 数据（concept + industry），收盘后调用"""
     from routers.industry import is_trading_day
+    from routers.system import sched_log
 
     if not is_trading_day():
         print("[fund_flow] take_daily_snapshot skipped — not a trading day")
+        sched_log("info", "[资金流向] 非交易日，跳过快照", source="fund_flow")
         return
 
     today = date.today().strftime("%Y-%m-%d")
     print(f"[fund_flow] taking daily snapshot for {today}...")
+    sched_log("info", f"[资金流向] 开始快照 {today}（concept + industry，全 period）", source="fund_flow")
+    ok_count = 0
+    err_count = 0
     for board_type in ["concept", "industry"]:
         for period, symbol in _PERIOD_MAP.items():
             try:
                 rows = _fetch_fund_flow(board_type, symbol)
                 if rows:
                     _save_snapshot(board_type, today, period, rows)
+                    ok_count += 1
             except Exception as e:
                 print(f"[fund_flow] snapshot {board_type} {period} error: {e}")
+                err_count += 1
+    if err_count == 0:
+        sched_log("success", f"[资金流向] 快照完成：{ok_count} 组数据写入成功", source="fund_flow")
+    else:
+        sched_log("warning", f"[资金流向] 快照完成（有异常）：成功 {ok_count} 组，失败 {err_count} 组", source="fund_flow")
 
 
 # ──────────────────────────────────────────────────────────────

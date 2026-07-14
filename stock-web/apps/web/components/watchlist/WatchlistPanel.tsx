@@ -491,6 +491,17 @@ function StockTable({
 }
 
 /* ─────────────────────────────────────────────
+   Market hours helper
+───────────────────────────────────────────── */
+function isMarketHours(): boolean {
+  const now = new Date();
+  const day = now.getDay();
+  if (day === 0 || day === 6) return false; // 周末
+  const t = now.getHours() * 100 + now.getMinutes();
+  return t >= 915 && t <= 1505; // 09:15-15:05
+}
+
+/* ─────────────────────────────────────────────
    Main Component
 ───────────────────────────────────────────── */
 export function WatchlistPanel() {
@@ -508,7 +519,10 @@ export function WatchlistPanel() {
   const [quotesLoading, setQuotesLoading] = useState(false);
   const [refreshSeed, setRefreshSeed] = useState(0);
   const [syncing, setSyncing] = useState(false);
-  const [syncResult, setSyncResult] = useState<{ refreshed: number; failed: number } | null>(null);
+  const [syncResult, setSyncResult] = useState<{
+    refreshed: number;
+    failed: number;
+  } | null>(null);
 
   const loadedGraphs = useRef<Set<string>>(new Set());
   const quotesLoaded = useRef(false);
@@ -764,6 +778,14 @@ export function WatchlistPanel() {
   /* ── Sync quotes for currently visible stocks ── */
   const handleSyncQuotes = useCallback(async () => {
     if (syncing || !visibleCodes.length) return;
+
+    // 非交易时间：只提示使用缓存，不调用 baostock
+    if (!isMarketHours()) {
+      setSyncResult({ refreshed: 0, failed: 0 });
+      setTimeout(() => setSyncResult(null), 4000);
+      return;
+    }
+
     setSyncing(true);
     setSyncResult(null);
     try {
@@ -776,7 +798,10 @@ export function WatchlistPanel() {
         },
       );
       const data = await res.json();
-      setSyncResult({ refreshed: data.refreshed ?? 0, failed: data.failed ?? 0 });
+      setSyncResult({
+        refreshed: data.refreshed ?? 0,
+        failed: data.failed ?? 0,
+      });
       // 用返回的新行情直接更新本地 state（无需重新全量拉取）
       if (data.quotes && Object.keys(data.quotes).length > 0) {
         setQuotes((prev) => ({ ...prev, ...data.quotes }));
@@ -844,21 +869,33 @@ export function WatchlistPanel() {
         </div>
         <div className="absolute top-1 right-1 flex items-center gap-1.5">
           {syncResult && (
-            <span className={
-              "text-[10px] font-mono px-1.5 py-0.5 rounded " +
-              (syncResult.failed === 0
-                ? "text-[#09d464] bg-[#09d464]/10"
-                : "text-[#e84444] bg-[#e84444]/10")
-            }>
-              {syncResult.failed === 0
-                ? `已刷新 ${syncResult.refreshed} 只`
-                : `${syncResult.refreshed} 成功 / ${syncResult.failed} 失败`}
+            <span
+              className={
+                "text-[10px] font-mono px-1.5 py-0.5 rounded " +
+                (syncResult.failed === 0 && syncResult.refreshed === 0
+                  ? "text-[var(--text-tertiary)] bg-[var(--bg-tertiary)]"
+                  : syncResult.failed === 0
+                    ? "text-[#09d464] bg-[#09d464]/10"
+                    : "text-[#e84444] bg-[#e84444]/10")
+              }
+            >
+              {syncResult.failed === 0 && syncResult.refreshed === 0
+                ? "非交易时间·使用缓存数据"
+                : syncResult.failed === 0
+                  ? `已刷新 ${syncResult.refreshed} 只`
+                  : `${syncResult.refreshed} 成功 / ${syncResult.failed} 失败`}
             </span>
           )}
           <button
             onClick={handleSyncQuotes}
             disabled={syncing || !visibleCodes.length}
-            title={syncing ? "刷新中…" : `刷新当前 ${visibleCodes.length} 只股票行情`}
+            title={
+              syncing
+                ? "刷新中…"
+                : isMarketHours()
+                  ? `刷新当前 ${visibleCodes.length} 只股票行情`
+                  : "非交易时间，点击查看缓存行情"
+            }
             className={
               "p-1.5 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--accent)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed " +
               (syncing ? "animate-spin text-[var(--accent)]" : "")

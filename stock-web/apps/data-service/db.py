@@ -20,8 +20,8 @@ DATABASE_URL = "sqlite:///./stock_data.db"
 engine = create_engine(
     DATABASE_URL,
     connect_args={"check_same_thread": False, "timeout": 60},
-    pool_size=10,
-    max_overflow=20,
+    pool_size=5,        # 从10降到5，减少并发写冲突
+    max_overflow=10,    # 从20降到10
     pool_pre_ping=True,
 )
 
@@ -31,9 +31,13 @@ from sqlalchemy import event
 @event.listens_for(engine, "connect")
 def set_wal_mode(dbapi_conn, connection_record):
     dbapi_conn.execute("PRAGMA journal_mode=WAL")
-    dbapi_conn.execute("PRAGMA synchronous=NORMAL")
+    # FULL：每次commit都fsync，防止OS crash/进程kill时WAL损坏
+    # 代价：写入略慢（约慢10-20%），但对低频批量写场景（K线/行情）完全可接受
+    dbapi_conn.execute("PRAGMA synchronous=FULL")
     dbapi_conn.execute("PRAGMA busy_timeout=60000")
     dbapi_conn.execute("PRAGMA cache_size=-64000")
+    # WAL文件超过64MB时自动触发checkpoint，防止WAL无限膨胀
+    dbapi_conn.execute("PRAGMA wal_autocheckpoint=1000")
 
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -601,6 +605,37 @@ class StockRelation(Base):
     __table_args__ = (UniqueConstraint("code_a", "code_b"),)
 
 
+class MarketFundFlowSnapshot(Base):
+    """市场资金流向每日快照（按投资者类型分类：机构/游资/散户/北向资金）"""
+
+    __tablename__ = "market_fund_flow_snapshot"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    trade_date = Column(String(10), index=True)  # YYYY-MM-DD 交易日期
+    investor_type = Column(String(20), index=True)  # north_bound | main | institution | hot_money | retail
+    inflow = Column(Float, default=0.0)  # 流入金额（元）
+    outflow = Column(Float, default=0.0)  # 流出金额（元）
+    netflow = Column(Float, default=0.0)  # 净流入金额（元）
+    updated_at = Column(DateTime, default=datetime.utcnow)
+    __table_args__ = (UniqueConstraint("trade_date", "investor_type"),)
+
+
+class FuturesPositionSnapshot(Base):
+    """期货持仓快照（中信证券在股指期货主力合约的持仓）"""
+
+    __tablename__ = "futures_position_snapshot"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    trade_date = Column(String(10), index=True)  # YYYYMMDD 交易日期
+    variety = Column(String(10))  # IF | IH | IC | IM 期货品种
+    contract = Column(String(20))  # 主力合约代码（如IF2609）
+    broker = Column(String(50), default="中信")  # 期货公司（默认中信）
+    long_position = Column(Integer, default=0)  # 多单持仓（手）
+    short_position = Column(Integer, default=0)  # 空单持仓（手）
+    net_position = Column(Integer, default=0)  # 净持仓（手，正数做多，负数做空）
+    total_oi = Column(Integer, default=0)  # 该合约全市场总持仓（手）
+    updated_at = Column(DateTime, default=datetime.utcnow)
+    __table_args__ = (UniqueConstraint("trade_date", "variety", "broker"),)
+
+
 class StockGubaPost(Base):
     """股吧帖子正文（关联分析用，全量落库）"""
 
@@ -676,6 +711,32 @@ class GlobalIndexKline(Base):
     change_pct = Column(_P, default=0.0)
     updated_at = Column(DateTime, default=datetime.utcnow)
     __table_args__ = (UniqueConstraint("code", "period", "trade_date"),)
+
+
+class MarketBreadth(Base):
+    """A股市场情绪/宽度统计（每日涨跌家数、涨跌停家数）"""
+
+    __tablename__ = "market_breadth"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    trade_date = Column(String(10), unique=True, index=True)  # "YYYY-MM-DD"
+    up_count = Column(Integer, default=0)       # 上涨家数
+    down_count = Column(Integer, default=0)     # 下跌家数
+    flat_count = Column(Integer, default=0)     # 平盘家数
+    limit_up = Column(Integer, default=0)       # 涨停家数
+    limit_down = Column(Integer, default=0)     # 跌停家数
+    st_limit_up = Column(Integer, default=0)    # ST涨停（+5%）家数
+    st_limit_down = Column(Integer, default=0)  # ST跌停（-5%）家数
+    total = Column(Integer, default=0)          # 全市场参与计算总家数
+    updated_at = Column(DateTime, default=datetime.utcnow)
+
+
+class TaskLastRun(Base):
+    """记录每个调度任务的上次完成时间（持久化，进程重启后不丢失）"""
+
+    __tablename__ = "task_last_run"
+    task_id = Column(String(100), primary_key=True)
+    last_run_at = Column(DateTime, nullable=False)   # UTC 时间
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 def get_db():

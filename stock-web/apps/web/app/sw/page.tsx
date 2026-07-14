@@ -535,8 +535,6 @@ function FundFlowModal({ onClose }: { onClose: () => void }) {
   // 日期维度 tabs：T（今日）+ T-1~T-5（取 today period 的历史日期）
   const todayStr = new Date().toISOString().slice(0, 10);
   const todayDates = datesMap["today"] ?? [];
-  // 当前 period 有数据的日期集合
-  const periodDates = new Set(datesMap[period] ?? []);
   // 历史日期：排除今天，最多5条
   const histDates = todayDates.filter((d) => d < todayStr).slice(0, 5);
 
@@ -556,12 +554,9 @@ function FundFlowModal({ onClose }: { onClose: () => void }) {
     }
   };
 
-  // 切换日期时，若历史日期下当前 period 无数据，自动回退到 today
+  // 切换日期
   const handleDateSelect = (d: string | null) => {
     setSelectedDate(d);
-    if (d && !periodDates.has(d) && period !== "today") {
-      setPeriod("today");
-    }
   };
 
   return (
@@ -642,11 +637,13 @@ function FundFlowModal({ onClose }: { onClose: () => void }) {
               {/* T：今日 */}
               <button
                 onClick={() => handleDateSelect(null)}
+                disabled={period !== "today"}
                 className={cn(
                   "px-2 py-0.5 rounded text-[11px] transition-colors whitespace-nowrap",
                   selectedDate === null
                     ? "bg-[var(--accent)] text-black font-medium"
                     : "text-[var(--text-tertiary)] hover:text-[var(--text-primary)] border border-[var(--border-color)]",
+                  period !== "today" && "opacity-30 cursor-not-allowed",
                 )}
               >
                 T
@@ -664,11 +661,13 @@ function FundFlowModal({ onClose }: { onClose: () => void }) {
                     <button
                       key={d}
                       onClick={() => handleDateSelect(d)}
+                      disabled={period !== "today"}
                       className={cn(
                         "px-2 py-0.5 rounded text-[11px] transition-colors whitespace-nowrap",
                         selectedDate === d
                           ? "bg-[var(--accent)] text-black font-medium"
                           : "text-[var(--text-tertiary)] hover:text-[var(--text-primary)] border border-[var(--border-color)]",
+                        period !== "today" && "opacity-30 cursor-not-allowed",
                       )}
                     >
                       T-{i + 1}
@@ -686,26 +685,24 @@ function FundFlowModal({ onClose }: { onClose: () => void }) {
             {/* Period 维度：今日/3日/5日/10日 */}
             <div className="flex items-center gap-1">
               <span className="text-[10px] text-[var(--text-tertiary)] mr-0.5">
-                周期
+                周期范围
               </span>
               {(["today", "3d", "5d", "10d"] as const).map((p) => {
-                // 历史日期下：仅当该 period 有当天数据时可点击
-                const disabled =
-                  selectedDate !== null && !periodDates.has(selectedDate);
-                const unavailable =
-                  selectedDate !== null && !periodDates.has(selectedDate);
                 return (
                   <button
                     key={p}
-                    onClick={() => !unavailable && setPeriod(p)}
+                    onClick={() => {
+                      setPeriod(p);
+                      // 切换到累计周期时，重置日期为今日
+                      if (p !== "today" && selectedDate !== null) {
+                        setSelectedDate(null);
+                      }
+                    }}
                     className={cn(
                       "px-2 py-0.5 rounded text-[11px] transition-colors whitespace-nowrap",
                       period === p
                         ? "bg-[var(--accent)] text-black font-medium"
                         : "text-[var(--text-tertiary)] hover:text-[var(--text-primary)] border border-[var(--border-color)]",
-                      unavailable && p !== "today"
-                        ? "opacity-30 cursor-not-allowed"
-                        : "",
                     )}
                   >
                     {PERIOD_LABELS[p]}
@@ -1201,6 +1198,35 @@ function RotationModal({ onClose }: { onClose: () => void }) {
           industries: l2Groups,
           agg: aggregateBoards(allL1Boards, dates.length),
         });
+      }
+    }
+
+    // 按 sortBy 对 L1、L2 分组重新排序
+    if (sortBy === "cumulative") {
+      industryTree.sort((a, b) =>
+        rotationSortOrder === "desc"
+          ? b.agg.cumulative - a.agg.cumulative
+          : a.agg.cumulative - b.agg.cumulative,
+      );
+      for (const l1 of industryTree) {
+        l1.industries.sort((a, b) =>
+          rotationSortOrder === "desc"
+            ? b.agg.cumulative - a.agg.cumulative
+            : a.agg.cumulative - b.agg.cumulative,
+        );
+      }
+    } else if (sortBy === "recent") {
+      industryTree.sort((a, b) =>
+        rotationSortOrder === "desc"
+          ? b.agg.currentChangePct - a.agg.currentChangePct
+          : a.agg.currentChangePct - b.agg.currentChangePct,
+      );
+      for (const l1 of industryTree) {
+        l1.industries.sort((a, b) =>
+          rotationSortOrder === "desc"
+            ? b.agg.currentChangePct - a.agg.currentChangePct
+            : a.agg.currentChangePct - b.agg.currentChangePct,
+        );
       }
     }
   }
@@ -3122,10 +3148,15 @@ export default function SwIndustryPage() {
                           <td className="px-3 py-1.5 text-center text-[var(--text-tertiary)]">
                             {idx + 1}
                           </td>
-                          <td className="px-3 py-1.5">
+                          <td
+                            className="px-3 py-1.5 cursor-pointer"
+                            onClick={() =>
+                              window.open(`/stock/${s.code}`, "_blank")
+                            }
+                          >
                             <div
                               className={cn(
-                                "font-medium",
+                                "font-medium hover:underline",
                                 isSearchedStock
                                   ? "text-[#3b82f6]"
                                   : "text-[var(--text-primary)]",
@@ -3163,7 +3194,9 @@ export default function SwIndustryPage() {
                           </td>
                           <td className="px-3 py-1.5">
                             <button
-                              onClick={() => router.push(`/stock/${s.code}`)}
+                              onClick={() =>
+                                window.open(`/stock/${s.code}`, "_blank")
+                              }
                               className="text-[10px] text-[#3b82f6] hover:underline whitespace-nowrap"
                             >
                               详情↗

@@ -497,8 +497,13 @@ export default function SwBoardDetailPage() {
                       <td className="px-3 py-1.5 text-center text-[var(--text-tertiary)]">
                         {idx + 1}
                       </td>
-                      <td className="px-3 py-1.5">
-                        <div className="font-medium text-[var(--text-primary)]">
+                      <td
+                        className="px-3 py-1.5 cursor-pointer"
+                        onClick={() =>
+                          window.open(`/stock/${s.code}`, "_blank")
+                        }
+                      >
+                        <div className="font-medium text-[var(--text-primary)] hover:underline">
                           {s.name}
                         </div>
                         <div className="text-[10px] text-[var(--text-tertiary)]">
@@ -531,7 +536,9 @@ export default function SwBoardDetailPage() {
                       </td>
                       <td className="px-3 py-1.5">
                         <button
-                          onClick={() => router.push(`/stock/${s.code}`)}
+                          onClick={() =>
+                            window.open(`/stock/${s.code}`, "_blank")
+                          }
                           className="text-[10px] text-[#3b82f6] hover:underline whitespace-nowrap"
                         >
                           详情↗

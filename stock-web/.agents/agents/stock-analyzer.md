@@ -13,13 +13,13 @@ color: "#2E86C1"
 
 # ── Permissions ───────────────────────────────────────────
 permission:
-  "*": allow  # 默认允许所有工具
+  "*": allow # 默认允许所有工具
   bash:
-    "rm -rf / *": deny           # 禁止删除根目录
-    "rm -rf ~ *": deny           # 禁止删除用户目录
-    "DROP DATABASE*": deny       # 禁止删库
-    "TRUNCATE*": deny            # 禁止清空表（必须用户明确授权）
-    "*": allow                   # 允许其他所有 shell 命令
+    "rm -rf / *": deny # 禁止删除根目录
+    "rm -rf ~ *": deny # 禁止删除用户目录
+    "DROP DATABASE*": deny # 禁止删库
+    "TRUNCATE*": deny # 禁止清空表（必须用户明确授权）
+    "*": allow # 允许其他所有 shell 命令
 ---
 
 # 股票基本面分析专家
@@ -98,6 +98,14 @@ permission:
 - 工作目录：优先在 `apps/data-service/` 下执行命令
 - A 股判断规则（AGENTS.md 规则 6）：以 0/3/6 开头为 A 股，其他为海外股票
 - F10 skill 位置：`/Users/wangjie494/codespace/self/SuperJAI/oss/agent/codex/stock-web/.agents/skills/f10-scraper/`
+
+### ⚠️ 日期/星期计算规则（必须遵守）
+
+**严禁凭记忆或推断说某个日期是"周几"**。必须用代码计算后再告知用户：
+
+```bash
+python3 -c "from datetime import date; d=date(2026,7,10); print(['周一','周二','周三','周四','周五','周六','周日'][d.weekday()])"
+```
 
 ## 响应风格
 

@@ -269,14 +269,23 @@ def _fetch_popular_stocks_realtime(sort: str) -> list:
 def get_popular_stocks(
     sort: str = Query("hot", description="hot=人气榜 rise=飙升榜"),
 ):
-    """从数据库缓存读取人气榜/飙升榜（最多100条）"""
+    """从数据库缓存读取人气榜/飙升榜（最多100条），包含申万行业信息"""
     import sqlite3
 
     try:
         conn = sqlite3.connect(_db_path())
+        # LEFT JOIN 申万行业表，获取二级行业名称
         rows = conn.execute(
-            "SELECT rank, code, name, price, pct, change, prev_close, his_rc, updated_at "
-            "FROM popular_stock_cache WHERE sort=? ORDER BY rank ASC",
+            """
+            SELECT 
+                p.rank, p.code, p.name, p.price, p.pct, p.change, p.prev_close, p.his_rc, p.updated_at,
+                i.name as industry
+            FROM popular_stock_cache p
+            LEFT JOIN sw_industry_constituent c ON p.code = c.stock_code
+            LEFT JOIN sw_industry i ON c.board_code = i.code AND i.level = '二级'
+            WHERE p.sort = ?
+            ORDER BY p.rank ASC
+            """,
             (sort,),
         ).fetchall()
         conn.close()
@@ -298,6 +307,7 @@ def get_popular_stocks(
             "change": r[5],
             "prevClose": r[6],
             "hisRc": r[7],
+            "industry": r[9] if r[9] else None,  # 行业字段
         }
         for r in rows
     ]

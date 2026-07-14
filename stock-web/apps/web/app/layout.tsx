@@ -7,7 +7,7 @@ import { ThemeProvider } from "./theme-provider";
 const geist = Geist({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "盘古 - A股智能分析平台",
+  title: "Agent学习",
   description: "基于多Agent架构的A股智能分析平台",
 };
 

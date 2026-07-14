@@ -33,7 +33,9 @@ export const DB_SCHEMA = `数据库路径: ${DB_PATH}
 - stock_kline: code, period('daily'), trade_date, open, high, low, close, volume, turnover, change_pct, turn_rate  (按 trade_date DESC 取最新)
 - stock_meta: code, name, market, industry_ids
 - stock_fundamental: code, report_date, eps, roe, revenue(营收), revenue_yoy(营收同比%), net_profit(净利润), net_profit_yoy(净利润同比%), gross_margin(毛利率%), debt_ratio(负债率%), raw_json
-- stock_news: code, title, content, pub_time, source  (目前暂无数据)
+- news_flash: id, title, digest, url, ctime, category(important/a/hk/us/abnormal/notice), updated_at  (东方财富快讯，约19341条)
+- theme_news: id, theme_id, theme_name, title, source, pub_time, url, updated_at  (同花顺板块主题新闻，约29855条)
+- stock_news: code, title, content, pub_time, source  (暂无数据，勿查此表)
 
 F10 基本面详细数据表（由 f10-scraper skill 爬取写入）:
 - stock_f10_snapshot: code, eps_basic, eps_diluted, nav_per_share, cfps, pe_ttm, pe_static, pb, roe_weighted(加权ROE%), gross_margin(毛利率%), debt_ratio(资产负债率%), revenue_yoy, net_profit_yoy, report_period, updated_at

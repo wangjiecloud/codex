@@ -20,6 +20,8 @@ from routers import (
     fund_flow,
     relation,
     memo,
+    market_breadth,
+    market_flow,
 )
 import akshare as ak
 from fastapi import HTTPException
@@ -55,8 +57,10 @@ app.include_router(sw_industry.router, prefix="/api/sw-industry", tags=["申万�
 app.include_router(cleanup.router, prefix="/api/cleanup", tags=["数据清理"])
 app.include_router(guba.router, prefix="/api/guba", tags=["股吧资讯"])
 app.include_router(fund_flow.router, prefix="/api/fund-flow", tags=["资金流向"])
+app.include_router(market_flow.router, prefix="/api/market-flow", tags=["市场资金流向"])
 app.include_router(relation.router, prefix="/api/relation", tags=["股票关联"])
 app.include_router(memo.router, prefix="/api/memo", tags=["备忘录"])
+app.include_router(market_breadth.router, prefix="/api/market-breadth", tags=["市场情绪"])
 
 _scheduler = BackgroundScheduler(timezone="Asia/Shanghai")
 
@@ -154,6 +158,10 @@ def startup():
 
     threading.Thread(target=_warmup_caches, daemon=True).start()
 
+    # 从数据库预热任务完成时间缓存（进程重启后恢复 lastRun 显示）
+    from routers.system import _load_task_last_run_from_db
+    _load_task_last_run_from_db()
+
     # 启动时后台异步同步全球指数 K 线（如果数据库中缺少数据）
     def _maybe_sync_global_klines():
         from db import SessionLocal, GlobalIndexKline
@@ -208,11 +216,11 @@ def startup():
         replace_existing=True,
     )
 
-    # 每天17:30同步股吧资讯与公告
+    # 每天19:30同步股吧资讯与公告（从17:30移后，避免与daily_sync并发）
     _scheduler.add_job(
         guba.sync_all_guba,
         trigger="cron",
-        hour=17,
+        hour=19,
         minute=30,
         id="guba_daily_sync",
         replace_existing=True,
@@ -231,6 +239,7 @@ def startup():
     # 每个工作日15:32收盘后自动同步产业链股票当日5分钟K线数据入库（baostock，支持任意历史日期）
     def _auto_sync_minute():
         """收盘后批量同步产业链全部A股 + A股宽基指数当日分时数据，持续积累历史"""
+        from db import SessionLocal
         from routers.industry import is_trading_day
         if not is_trading_day():
             return
@@ -281,8 +290,8 @@ def startup():
     _scheduler.add_job(
         _auto_sync_minute,
         trigger="cron",
-        hour=17,
-        minute=30,
+        hour=19,
+        minute=5,
         id="minute_daily_sync",
         replace_existing=True,
     )
@@ -316,7 +325,242 @@ def startup():
         replace_existing=True,
     )
 
+    # 每天19:00同步概念板块行情（闭盘后接口稳定，错开daily_sync，避免并发）
+    _scheduler.add_job(
+        concept_board.sync_concept_boards,
+        trigger="cron",
+        hour=19,
+        minute=0,
+        id="concept_board_sync",
+        replace_existing=True,
+    )
+
+    # 每天18:00增量同步K线（只同步今日未更新的股票，支持中断续传）
+    def _daily_klines_incremental():
+        """K线增量同步：查今日未更新的股票，依次同步，内部已有today跳过逻辑"""
+        from db import SessionLocal
+        from routers.industry import is_trading_day, _sync_klines
+        from routers.system import sched_log
+        from datetime import date as _date
+
+        if not is_trading_day():
+            return
+
+        today_str = _date.today().strftime("%Y-%m-%d")
+        db = SessionLocal()
+        try:
+            from sqlalchemy import text as _text
+            from db import StockMeta as _SM
+            already = {
+                r[0] for r in db.execute(_text(
+                    "SELECT DISTINCT code FROM stock_kline WHERE period='daily' AND trade_date=:today"
+                ), {"today": today_str}).fetchall()
+            }
+            all_codes = [r.code for r in db.query(_SM).filter(_SM.market.in_(["SH", "SZ"])).all()]
+        finally:
+            db.close()
+
+        pending = [c for c in all_codes if c not in already]
+        sched_log("info", f"[K线增量] 待同步 {len(pending)}/{len(all_codes)} 只（今日已跳过 {len(already)} 只）")
+
+        for code in pending:
+            try:
+                _sync_klines(code, "daily")
+            except Exception as e:
+                print(f"[kline_incr] error {code}: {e}")
+            import time as _t; _t.sleep(0.1)
+
+        sched_log("success", f"[K线增量] 完成，共同步 {len(pending)} 只")
+
+    _scheduler.add_job(
+        _daily_klines_incremental,
+        trigger="cron",
+        hour=18,
+        minute=0,
+        id="daily_klines_incremental",
+        replace_existing=True,
+    )
+
+    # 每周日凌晨02:00同步F10财务数据（低频，财报季同步30天内未更新，非财报季只补缺失）
+    def _is_reporting_season() -> bool:
+        """财报密集披露期：1-4月（年报/一季报）、8月（半年报）、10-11月（三季报）"""
+        from datetime import date as _date
+        return _date.today().month in (1, 2, 3, 4, 8, 10, 11)
+
+    def _weekly_fundamental_sync():
+        """每周日低频同步F10财务数据：财报季同步30天内未更新的，非财报季只同步从未同步过的"""
+        from db import SessionLocal
+        from routers.system import sched_log
+        from routers.fundamental import _scrape_f10, _upsert_f10
+        from datetime import date as _date, timedelta as _td
+
+        reporting = _is_reporting_season()
+        sched_log("info", f"[weekly_f10] 开始，当前{'财报季' if reporting else '非财报季'}")
+
+        db = SessionLocal()
+        try:
+            from db import StockF10Snapshot, StockMeta as _SM
+            all_codes = [r.code for r in db.query(_SM.code).all()]
+
+            if reporting:
+                # 财报季：同步30天内未更新的
+                threshold = (_date.today() - _td(days=30)).strftime("%Y-%m-%d")
+                already = {
+                    r.code for r in db.query(StockF10Snapshot.code, StockF10Snapshot.updated_at).all()
+                    if r.updated_at and r.updated_at.strftime("%Y-%m-%d") >= threshold
+                }
+                sched_log("info", f"[weekly_f10] 财报季：已有{len(already)}只在30天内，待同步{len(all_codes)-len(already)}只")
+            else:
+                # 非财报季：只同步从未同步过的
+                already = {r.code for r in db.query(StockF10Snapshot.code).all()}
+                sched_log("info", f"[weekly_f10] 非财报季：已有{len(already)}只，仅补缺失{len(all_codes)-len(already)}只")
+        finally:
+            db.close()
+
+        codes = [c for c in all_codes if c not in already]
+        if not codes:
+            sched_log("info", "[weekly_f10] 无需同步，跳过")
+            return
+
+        for code in codes:
+            try:
+                data = _scrape_f10(code)
+                _upsert_f10(code, data)
+            except Exception as e:
+                print(f"[weekly_f10] error {code}: {e}")
+            import time as _t; _t.sleep(0.5)
+
+        sched_log("success", f"[weekly_f10] 完成，共同步 {len(codes)} 只")
+
+    _scheduler.add_job(
+        _weekly_fundamental_sync,
+        trigger="cron",
+        day_of_week="sun",
+        hour=2,
+        minute=0,
+        id="weekly_fundamental_sync",
+        replace_existing=True,
+    )
+
+    # 每个交易日 15:35 收盘后同步市场情绪（涨跌家数/涨跌停家数）
+    def _auto_sync_market_breadth():
+        from routers.industry import is_trading_day
+        if not is_trading_day():
+            return
+        from routers.market_breadth import sync_market_breadth
+        result = sync_market_breadth()
+        print(f"[market_breadth] 定时同步完成: {result}")
+
+    _scheduler.add_job(
+        _auto_sync_market_breadth,
+        trigger="cron",
+        hour=15,
+        minute=35,
+        id="market_breadth_daily_sync",
+        replace_existing=True,
+    )
+
+    # 每6小时执行一次 WAL checkpoint，防止 WAL 文件无限膨胀
+    _scheduler.add_job(
+        cleanup.wal_checkpoint,
+        trigger="interval",
+        hours=6,
+        start_date=_t0 + timedelta(minutes=10),
+        id="wal_checkpoint",
+        replace_existing=True,
+    )
+
     _scheduler.start()
+
+    # 监听任务完成事件，记录每个任务的上次完成时间
+    from apscheduler.events import EVENT_JOB_EXECUTED, EVENT_JOB_ERROR
+    from routers.system import record_task_last_run
+
+    def _on_job_done(event):
+        record_task_last_run(event.job_id)
+
+    _scheduler.add_listener(_on_job_done, EVENT_JOB_EXECUTED | EVENT_JOB_ERROR)
+
+    # -----------------------------------------------------------------------
+    # 统一补跑机制：进程重启后检查所有「有状态」任务，若上一次应执行时的数据缺失，
+    # 则在后台线程里按顺序补跑，保证数据不因关机/重启而永久丢失。
+    #
+    # 补跑规则（CATCHUP_RULES）字段说明：
+    #   task_id          — APScheduler 任务 ID
+    #   max_gap_days     — 上次完成距今超过多少天触发补跑（基于 task_last_run 表）
+    #                      日频：3（周五→周一最多差3天）；周频：9
+    #   fn               — 实际执行的补跑函数（与调度器注册的函数相同）
+    #   desc             — 日志描述
+    #   trading_day_only — True：今天若非交易日则跳过（但不更新 lastRun，下次交易日启动再跑）
+    #                      False：无论什么日期都执行（如 F10、概念板块等）
+    #
+    # 不在列表中的任务（news_flash / theme_news / daily_cleanup / wal_checkpoint）
+    # 属于幂等/高频，不需要补跑。
+    # -----------------------------------------------------------------------
+
+    CATCHUP_RULES = [
+        # ---- 日频任务，仅交易日补跑 ----
+        dict(task_id="daily_sync",                max_gap_days=3, trading_day_only=True,  fn=lambda: industry.sync_all_data(),                         desc="每日全量行情"),
+        dict(task_id="daily_klines_incremental",  max_gap_days=3, trading_day_only=True,  fn=lambda: _daily_klines_incremental(),                      desc="K线增量同步"),
+        dict(task_id="fund_flow_snapshot",        max_gap_days=3, trading_day_only=True,  fn=lambda: fund_flow.take_daily_snapshot(),                  desc="资金流向快照"),
+        dict(task_id="market_breadth_daily_sync", max_gap_days=3, trading_day_only=True,  fn=lambda: _auto_sync_market_breadth(),                      desc="涨跌统计"),
+        dict(task_id="minute_daily_sync",         max_gap_days=3, trading_day_only=True,  fn=lambda: _auto_sync_minute(),                              desc="产业链分时数据"),
+        dict(task_id="indices_minute_daily_sync", max_gap_days=3, trading_day_only=True,  fn=lambda: _auto_sync_indices_minute(),                      desc="宽基指数分时"),
+        dict(task_id="guba_daily_sync",           max_gap_days=3, trading_day_only=True,  fn=lambda: guba.sync_all_guba(),                             desc="股吧资讯"),
+        # ---- 日频任务，不受交易日限制 ----
+        dict(task_id="global_index_kline_sync",   max_gap_days=3, trading_day_only=False, fn=lambda: global_market.sync_all_review_index_klines(),     desc="全球指数K线"),
+        dict(task_id="concept_board_sync",        max_gap_days=3, trading_day_only=False, fn=lambda: concept_board.sync_concept_boards(),              desc="概念板块行情"),
+        # ---- 周频任务 ----
+        dict(task_id="weekly_fundamental_sync",   max_gap_days=9, trading_day_only=False, fn=lambda: _weekly_fundamental_sync(),                       desc="F10财务数据"),
+    ]
+
+    def _run_catchup_checks():
+        """启动后在后台线程里顺序检查所有 A 类任务，缺了就补。"""
+        from routers.industry import is_trading_day as _is_trading_day
+        from routers.system import get_task_last_run_dt, sched_log, record_task_last_run as _record
+        import time as _time
+
+        today_is_trading = _is_trading_day()
+
+        sched_log("info", f"[catchup] 开始检查所有任务是否需要补跑（今日{'交易日' if today_is_trading else '非交易日'}）")
+        for rule in CATCHUP_RULES:
+            task_id          = rule["task_id"]
+            max_days         = rule["max_gap_days"]
+            fn               = rule["fn"]
+            desc             = rule["desc"]
+            trading_day_only = rule["trading_day_only"]
+            try:
+                # 非交易日且该任务仅限交易日执行：直接跳过，不更新 lastRun
+                if trading_day_only and not today_is_trading:
+                    sched_log("info", f"[catchup] {desc}（{task_id}）今日非交易日，跳过")
+                    continue
+
+                last_dt = get_task_last_run_dt(task_id)
+                if last_dt is None:
+                    sched_log("info", f"[catchup] {desc}（{task_id}）从未执行，立即补跑")
+                    need = True
+                else:
+                    gap = (datetime.utcnow() - last_dt).total_seconds() / 86400
+                    if gap >= max_days:
+                        sched_log("info", f"[catchup] {desc}（{task_id}）上次 {last_dt.strftime('%m-%d %H:%M')} UTC，距今 {gap:.1f} 天，补跑")
+                        need = True
+                    else:
+                        sched_log("info", f"[catchup] {desc}（{task_id}）距今 {gap:.1f} 天，无需补跑")
+                        need = False
+
+                if need:
+                    fn()
+                    _record(task_id)   # 补跑完成，更新持久化 lastRun
+                    sched_log("success", f"[catchup] {desc}（{task_id}）补跑完成")
+
+            except Exception as e:
+                sched_log("warn", f"[catchup] {desc}（{task_id}）补跑失败: {e}")
+
+            _time.sleep(0.5)   # 任务间短暂间隔，避免并发冲击
+
+        sched_log("info", "[catchup] 全部检查完毕")
+
+    threading.Thread(target=_run_catchup_checks, daemon=True).start()
 
     # 检查是否在生产环境中启用自动同步
     # 可以通过环境变量 AUTO_SYNC_ON_STARTUP=false 来禁用

@@ -428,6 +428,7 @@ def _get_industry_codes() -> List[str]:
 def _run_industry_sync(trade_date: str):
     """后台线程：批量同步产业链全部 A 股分时数据"""
     import time as _t
+    from routers.system import sched_log
     global _industry_sync_status
     codes = _get_industry_codes()
     _industry_sync_status.update({
@@ -437,6 +438,7 @@ def _run_industry_sync(trade_date: str):
         "started_at": datetime.utcnow().isoformat(),
         "finished_at": None,
     })
+    sched_log("info", f"[分时同步] 开始，共 {len(codes)} 只产业链A股，交易日 {trade_date}", source="minute_sync")
     for code in codes:
         _industry_sync_status["current"] = code
         result = _fetch_one_code(code, trade_date)
@@ -453,6 +455,10 @@ def _run_industry_sync(trade_date: str):
         "running": False, "current": "",
         "finished_at": datetime.utcnow().isoformat(),
     })
+    ok = _industry_sync_status["ok"]
+    cached = _industry_sync_status["cached"]
+    error = _industry_sync_status["error"]
+    sched_log("success", f"[分时同步] 完成：新增 {ok} 只，缓存 {cached} 只，失败 {error} 只", source="minute_sync")
 
 
 @router.get("/stats/industry")

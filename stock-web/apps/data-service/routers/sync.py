@@ -3,6 +3,7 @@ from datetime import datetime
 import threading
 import time as _time
 import json
+import os
 
 from routers.industry import _sync_all_quotes, _sync_klines
 from db import SessionLocal, StockMeta, StockFundamental, StockF10Snapshot, StockQuote, StockKline
@@ -22,6 +23,46 @@ _status: dict = {
 }
 _lock = threading.Lock()
 _stop_requested = threading.Event()
+
+# 断点续传游标文件路径
+_FUNDAMENTAL_CURSOR_FILE = os.path.join(os.path.dirname(__file__), "..", "fundamental_cursor.json")
+
+
+def _save_fundamental_cursor(date_str: str, codes: list, done: int):
+    """保存断点续传游标"""
+    cursor = {"date": date_str, "codes": codes, "done": done}
+    try:
+        with open(_FUNDAMENTAL_CURSOR_FILE, "w", encoding="utf-8") as f:
+            json.dump(cursor, f)
+    except Exception as e:
+        print(f"[sync] failed to save fundamental cursor: {e}")
+
+
+def _load_fundamental_cursor(date_str: str):
+    """加载断点续传游标，仅当日期匹配时有效，返回 (codes, start_index) 或 None"""
+    try:
+        if not os.path.exists(_FUNDAMENTAL_CURSOR_FILE):
+            return None
+        with open(_FUNDAMENTAL_CURSOR_FILE, "r", encoding="utf-8") as f:
+            cursor = json.load(f)
+        if cursor.get("date") == date_str and isinstance(cursor.get("codes"), list):
+            done = cursor.get("done", 0)
+            codes = cursor["codes"]
+            # done >= 0 且列表非空即认为游标有效（done=0 表示从头续传剩余列表）
+            if 0 <= done < len(codes):
+                return codes, done
+    except Exception as e:
+        print(f"[sync] failed to load fundamental cursor: {e}")
+    return None
+
+
+def _clear_fundamental_cursor():
+    """清除游标文件"""
+    try:
+        if os.path.exists(_FUNDAMENTAL_CURSOR_FILE):
+            os.remove(_FUNDAMENTAL_CURSOR_FILE)
+    except Exception:
+        pass
 
 
 def _sort_codes_missing_first(codes: list, table, code_col, has_data_check) -> list:
@@ -380,11 +421,20 @@ def _run_quotes_sync():
 
     db = SessionLocal()
     try:
-        from db import StockMeta as _SM
-
+        from db import StockMeta as _SM, StockQuote as _SQ
+        from sqlalchemy import func as _func
         total = db.query(_SM.code).count()
+        # 今日已更新的行情（按 updated_at 日期过滤）
+        today_str = datetime.utcnow().strftime("%Y-%m-%d")
+        already_today = db.query(_func.count(_SQ.code)).filter(
+            _SQ.updated_at >= today_str
+        ).scalar() or 0
     finally:
         db.close()
+
+    if already_today >= total * 0.9:
+        sched_log("info", f"实时行情今日已同步 {already_today}/{total} 只（≥90%），跳过重复同步")
+        return
 
     with _lock:
         _status.update(
@@ -397,7 +447,7 @@ def _run_quotes_sync():
             finished_at="",
         )
 
-    sched_log("info", f"开始同步实时行情，共 {total} 只股票")
+    sched_log("info", f"开始同步实时行情，共 {total} 只股票（今日已有 {already_today} 只）")
     _sync_all_quotes()
 
     if _stop_requested.is_set():
@@ -533,44 +583,59 @@ def _run_fundamental_sync():
 
     _stop_requested.clear()
 
-    db = SessionLocal()
-    try:
-        raw_codes = [row.code for row in db.query(StockMeta.code).all()]
-        # 预加载今日已同步的股票，直接从队列中移除
-        today_str = datetime.utcnow().strftime("%Y-%m-%d")
-        synced_today = {
-            row.code
-            for row in db.query(StockF10Snapshot.code, StockF10Snapshot.updated_at).all()
-            if row.updated_at and row.updated_at.strftime("%Y-%m-%d") == today_str
-        }
-    finally:
-        db.close()
+    today_str = datetime.now().strftime("%Y-%m-%d")
 
-    all_codes = _sort_fundamental_missing_first(raw_codes)
-    skip_count = sum(1 for c in all_codes if c in synced_today)
-    # 过滤掉今日已同步的，只处理真正需要同步的
-    codes = [c for c in all_codes if c not in synced_today]
+    # ── 断点续传：优先从游标文件恢复 ──
+    resumed = _load_fundamental_cursor(today_str)
+    if resumed:
+        codes, start_index = resumed
+        sched_log("info", f"财务数据（F10）断点续传，从第 {start_index + 1}/{len(codes)} 只继续")
+    else:
+        # 无有效游标，重新构建股票列表并过滤今日已同步
+        db = SessionLocal()
+        try:
+            raw_codes = [row.code for row in db.query(StockMeta.code).all()]
+            # 预加载今日已同步的股票（updated_at 日期为今天），直接从队列中移除
+            from sqlalchemy import text as _text
+            rows = db.execute(
+                _text("SELECT code FROM stock_f10_snapshot WHERE substr(updated_at,1,10) = :today"),
+                {"today": today_str},
+            ).fetchall()
+            synced_today = {r[0] for r in rows}
+        finally:
+            db.close()
 
-    if not codes:
-        sched_log("info", f"财务数据（F10）今日已全部同步，跳过（共 {skip_count} 只）")
-        return
+        all_codes = _sort_fundamental_missing_first(raw_codes)
+        skip_count = sum(1 for c in all_codes if c in synced_today)
+        codes = [c for c in all_codes if c not in synced_today]
+        start_index = 0
+
+        if not codes:
+            sched_log("info", f"财务数据（F10）今日已全部同步，跳过（共 {skip_count} 只）")
+            _clear_fundamental_cursor()
+            return
+
+        sched_log("info", f"开始同步财务数据（F10），待同步 {len(codes)} 只（今日已跳过 {skip_count} 只）")
+        # 不在初始化时保存游标（done=0 无意义），等第一只同步完再保存
 
     with _lock:
         _status.update(
             running=True,
             phase="fundamental",
             total=len(codes),
-            done=0,
+            done=start_index,
             current="",
             started_at=datetime.utcnow().isoformat(),
             finished_at="",
         )
 
-    sched_log("info", f"开始同步财务数据（F10），待同步 {len(codes)} 只（今日已跳过 {skip_count} 只）")
+    for i in range(start_index, len(codes)):
+        code = codes[i]
 
-    for i, code in enumerate(codes):
         if _stop_requested.is_set():
             sched_log("warning", "财务数据同步已被用户停止")
+            # 保存当前游标以便下次续传
+            _save_fundamental_cursor(today_str, codes, i)
             with _lock:
                 _status.update(
                     running=False,
@@ -590,6 +655,9 @@ def _run_fundamental_sync():
         except Exception as e:
             print(f"[sync] error syncing F10 for {code}: {e}")
 
+        # 每只同步后立即更新游标，确保重启后能从最近完成的位置续传
+        _save_fundamental_cursor(today_str, codes, i + 1)
+
         _time.sleep(0.3)
 
     with _lock:
@@ -601,15 +669,19 @@ def _run_fundamental_sync():
             finished_at=datetime.utcnow().isoformat(),
         )
 
+    # 同步完成，清除游标
+    _clear_fundamental_cursor()
     sched_log("success", f"财务数据（F10）同步完成，共 {len(codes)} 只股票")
     print("[sync] fundamental sync finished")
 
 
 @router.post("/fundamental")
-async def trigger_sync_fundamental(background_tasks: BackgroundTasks):
+async def trigger_sync_fundamental(background_tasks: BackgroundTasks, force: bool = False):
     with _lock:
         if _status["running"]:
             return {"status": "already_running", **_status}
+    if force:
+        _clear_fundamental_cursor()
     background_tasks.add_task(_run_fundamental_sync)
     return {"status": "started"}
 

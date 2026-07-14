@@ -12,6 +12,7 @@ import {
   Globe,
   Star,
   Layers,
+  DollarSign,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -47,6 +48,12 @@ const navItems = [
     label: "自选股",
     icon: Star,
     match: (p: string) => p.startsWith("/watchlist"),
+  },
+  {
+    href: "/market",
+    label: "资金流向",
+    icon: DollarSign,
+    match: (p: string) => p.startsWith("/market"),
   },
   {
     href: "/global",

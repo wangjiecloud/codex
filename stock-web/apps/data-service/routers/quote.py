@@ -24,17 +24,73 @@ async def search_stocks(q: str = Query("", description="股票代码或名称关
         db = SessionLocal()
         try:
             rows = (
-                db.query(StockMeta.code, StockMeta.name)
+                db.query(StockMeta.code, StockMeta.name, StockMeta.market)
                 .filter(StockMeta.market.in_(["A股", "SH", "SZ"]))
                 .all()
             )
             results = [
-                {"code": r.code, "name": r.name}
+                {"code": r.code, "name": r.name, "market": r.market}
                 for r in rows
                 if keyword in r.code.lower() or keyword in (r.name or "").lower()
             ]
             results.sort(key=lambda x: (not x["code"].startswith(q.strip()), x["code"]))
             return {"results": results[:20]}
+        finally:
+            db.close()
+
+    return await run_in_threadpool(_fetch)
+
+
+@router.get("/industries")
+async def get_stock_industries(codes: list[str] = Query([], description="股票代码列表")):
+    """
+    批量获取股票所属行业
+    优先返回申万行业分类，查不到时使用产业分类（industry_ids 第一个）
+    返回格式: { "600000": "银行", "000001": "银行", ... }
+    """
+    if not codes:
+        return {}
+
+    def _fetch():
+        db = SessionLocal()
+        try:
+            from db import SwIndustry, SwIndustryConstituent, IndustryMeta
+            import json
+            # 查询申万行业
+            result = {}
+            for code in codes:
+                # 优先查询申万行业
+                row = (
+                    db.query(SwIndustry.name)
+                    .join(
+                        SwIndustryConstituent,
+                        SwIndustry.code == SwIndustryConstituent.board_code,
+                    )
+                    .filter(SwIndustryConstituent.stock_code == code)
+                    .first()
+                )
+                if row and row[0]:
+                    result[code] = row[0]
+                else:
+                    # 申万行业查不到，尝试使用产业分类
+                    meta = db.query(StockMeta).filter(StockMeta.code == code).first()
+                    if meta and meta.industry_ids:
+                        try:
+                            industry_ids = json.loads(meta.industry_ids) if isinstance(meta.industry_ids, str) else meta.industry_ids
+                            if industry_ids and len(industry_ids) > 0:
+                                # 查询产业名称
+                                industry = db.query(IndustryMeta).filter(IndustryMeta.industry_id == industry_ids[0]).first()
+                                if industry and industry.title:
+                                    result[code] = industry.title
+                                else:
+                                    result[code] = "未分类"
+                            else:
+                                result[code] = "未分类"
+                        except:
+                            result[code] = "未分类"
+                    else:
+                        result[code] = "未分类"
+            return result
         finally:
             db.close()
 
@@ -270,6 +326,23 @@ def _row_to_dict(r: StockQuote, warning: str | None = None) -> dict:
     if warning:
         d["cacheWarning"] = warning
     return d
+
+
+@router.get("/batch")
+async def get_batch_quotes(codes: list[str] = Query([], description="股票代码列表")):
+    """批量获取股票行情（从缓存读取，不触发刷新）"""
+    if not codes:
+        return {"quotes": []}
+
+    def _fetch():
+        db = SessionLocal()
+        try:
+            rows = db.query(StockQuote).filter(StockQuote.code.in_(codes)).all()
+            return {"quotes": [_row_to_dict(r) for r in rows]}
+        finally:
+            db.close()
+
+    return await run_in_threadpool(_fetch)
 
 
 @router.get("/{code}")

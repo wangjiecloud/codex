@@ -1527,7 +1527,7 @@ def _upsert_f10(code: str, data: dict):
             {k: v for k, v in data.items() if not k.endswith("_text")},
             ensure_ascii=False
         )
-        snap.updated_at = datetime.utcnow()
+        snap.updated_at = datetime.now()
 
         old = db.query(StockFundamental).filter(StockFundamental.code == code).first()
         if not old:
@@ -1538,7 +1538,7 @@ def _upsert_f10(code: str, data: dict):
         old.debt_ratio = snap.debt_ratio
         old.revenue_yoy = snap.revenue_yoy
         old.net_profit_yoy = snap.net_profit_yoy
-        old.updated_at = datetime.utcnow()
+        old.updated_at = datetime.now()
 
         db.commit()
     finally:
@@ -1832,19 +1832,104 @@ async def get_finance_view(code: str, background_tasks: BackgroundTasks):
     }
     """
     def _fetch_db():
+        """
+        F10 表中部分字段（main_business_breakdown、raw_json 等）可能含非 UTF-8 乱码数据。
+        SQLAlchemy ORM 在读取这些字段时，sqlite3 驱动会抛 OperationalError: Could not decode to UTF-8。
+        解决方案：将底层 sqlite3 连接的 text_factory 临时切换为 bytes，用 errors='replace' 解码，
+        再构造轻量 proxy 对象传给上层逻辑。
+        """
+        import sqlite3 as _sqlite3
+
         db = SessionLocal()
         try:
-            biz  = db.query(StockF10BusinessAnalysis).filter_by(code=code).first()
-            hist = (
-                db.query(StockF10FinancialHistory)
-                .filter(StockF10FinancialHistory.code == code)
-                .order_by(StockF10FinancialHistory.report_date.desc())
-                .limit(20)
-                .all()
-            )
-            snap = db.query(StockF10Snapshot).filter_by(code=code).first()
+            # ---- 获取底层 sqlite3 连接并切换为 bytes 模式 ----
+            raw_conn = db.connection().connection
+            orig_factory = raw_conn.text_factory
+            raw_conn.text_factory = bytes
+
+            def _safe_str(v):
+                """bytes → str，非 UTF-8 字符用 ? 替代"""
+                if isinstance(v, bytes):
+                    return v.decode("utf-8", errors="replace")
+                return v
+
+            # ---- 读取 business_analysis ----
+            biz = None
+            try:
+                row = raw_conn.execute(
+                    "SELECT main_business_breakdown FROM stock_f10_business_analysis WHERE code=?",
+                    (code,)
+                ).fetchone()
+                if row and row[0]:
+                    decoded = _safe_str(row[0])
+                    class _BizProxy:
+                        main_business_breakdown = decoded
+                    biz = _BizProxy()
+            except Exception as e_biz:
+                logger.warning(f"[finance-view] {code} 读取 business_analysis 失败，跳过: {e_biz}")
+
+            # ---- 读取 financial_history（纯数值列，bytes 模式下仍返回 bytes for TEXT） ----
+            hist_rows = raw_conn.execute(
+                """SELECT report_date, revenue, revenue_yoy, net_profit, net_profit_yoy,
+                          deducted_profit, gross_margin, net_margin, roe_weighted, debt_ratio, eps_basic
+                   FROM stock_f10_financial_history
+                   WHERE code=?
+                   ORDER BY report_date DESC
+                   LIMIT 20""",
+                (code,)
+            ).fetchall()
+
+            class _HistProxy:
+                __slots__ = ("report_date", "revenue", "revenue_yoy", "net_profit",
+                             "net_profit_yoy", "deducted_profit", "gross_margin",
+                             "net_margin", "roe_weighted", "debt_ratio", "eps_basic")
+                def __init__(self, row):
+                    self.report_date     = _safe_str(row[0])
+                    self.revenue         = row[1]
+                    self.revenue_yoy     = row[2]
+                    self.net_profit      = row[3]
+                    self.net_profit_yoy  = row[4]
+                    self.deducted_profit = row[5]
+                    self.gross_margin    = row[6]
+                    self.net_margin      = row[7]
+                    self.roe_weighted    = row[8]
+                    self.debt_ratio      = row[9]
+                    self.eps_basic       = row[10]
+
+            hist = [_HistProxy(r) for r in hist_rows]
+
+            # ---- 读取 snapshot（只需少量字段，raw_json 可能也有乱码） ----
+            snap = None
+            try:
+                snap_row = raw_conn.execute(
+                    """SELECT updated_at, report_period, revenue_yoy, net_profit_yoy,
+                              roe_weighted, gross_margin, net_margin
+                       FROM stock_f10_snapshot WHERE code=?""",
+                    (code,)
+                ).fetchone()
+                if snap_row:
+                    from datetime import datetime as _dt
+                    class _SnapProxy:
+                        pass
+                    s = _SnapProxy()
+                    s.updated_at      = _dt.fromisoformat(_safe_str(snap_row[0])) if snap_row[0] else None
+                    s.report_period   = _safe_str(snap_row[1]) if snap_row[1] else None
+                    s.revenue_yoy     = snap_row[2]
+                    s.net_profit_yoy  = snap_row[3]
+                    s.roe_weighted    = snap_row[4]
+                    s.gross_margin    = snap_row[5]
+                    s.net_margin      = snap_row[6]
+                    snap = s
+            except Exception as e_snap:
+                logger.warning(f"[finance-view] {code} 读取 snapshot 失败，跳过: {e_snap}")
+
             return biz, hist, snap
         finally:
+            # 还原 text_factory，避免影响其他查询
+            try:
+                raw_conn.text_factory = orig_factory
+            except Exception:
+                pass
             db.close()
 
     biz, hist, snap = await run_in_threadpool(_fetch_db)

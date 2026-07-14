@@ -1,12 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import { Star, DollarSign } from "lucide-react";
+import { Star, DollarSign, Layers } from "lucide-react";
 import { WatchlistPanel } from "@/components/watchlist/WatchlistPanel";
 import { PortfolioPanel } from "@/components/watchlist/PortfolioPanel";
+import { CustomWatchlistPanel } from "@/components/watchlist/CustomWatchlistPanel";
 import { cn } from "@/lib/utils";
 
 const TABS = [
+  { key: "industry", label: "产业股", icon: Layers },
   { key: "watchlist", label: "自选股", icon: Star },
   { key: "portfolio", label: "持仓", icon: DollarSign },
 ] as const;
@@ -14,7 +16,7 @@ const TABS = [
 type TabKey = (typeof TABS)[number]["key"];
 
 export default function WatchlistPage() {
-  const [activeTab, setActiveTab] = useState<TabKey>("watchlist");
+  const [activeTab, setActiveTab] = useState<TabKey>("industry");
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -39,7 +41,8 @@ export default function WatchlistPage() {
 
       {/* Content */}
       <div className="flex-1 overflow-hidden">
-        {activeTab === "watchlist" && <WatchlistPanel />}
+        {activeTab === "industry" && <WatchlistPanel />}
+        {activeTab === "watchlist" && <CustomWatchlistPanel />}
         {activeTab === "portfolio" && <PortfolioPanel />}
       </div>
     </div>

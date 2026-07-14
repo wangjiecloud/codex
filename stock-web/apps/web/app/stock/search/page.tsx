@@ -59,6 +59,7 @@ interface PopularStock {
   change: number | null;
   prevClose: number | null;
   hisRc: number;
+  industry?: string | null; // 申万行业
 }
 
 function parseStocks(raw: Record<string, unknown>[]): PopularStock[] {
@@ -71,6 +72,7 @@ function parseStocks(raw: Record<string, unknown>[]): PopularStock[] {
     change: typeof s.change === "number" ? s.change : null,
     prevClose: typeof s.prevClose === "number" ? s.prevClose : null,
     hisRc: typeof s.hisRc === "number" ? s.hisRc : 0,
+    industry: typeof s.industry === "string" ? s.industry : null,
   }));
 }
 
@@ -2411,8 +2413,13 @@ export default function StockSearchPage() {
                                 <div className="text-[var(--text-primary)] font-semibold text-sm leading-tight">
                                   {stock.name}
                                 </div>
-                                <div className="text-[var(--text-tertiary)] text-[11px] mt-0.5 flex items-center gap-1.5">
-                                  {stock.code}
+                                <div className="text-[var(--text-tertiary)] text-[11px] mt-0.5 flex items-center gap-1.5 flex-wrap">
+                                  <span>{stock.code}</span>
+                                  {stock.industry && (
+                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--bg-tertiary)] text-[var(--text-secondary)] border border-[var(--border-color)]">
+                                      {stock.industry}
+                                    </span>
+                                  )}
                                   {sortMode === "rise" && stock.hisRc > 0 && (
                                     <RiseBadge hisRc={stock.hisRc} />
                                   )}
@@ -2486,13 +2493,18 @@ export default function StockSearchPage() {
                         >
                           <div className="flex items-center gap-3 min-w-0">
                             <RankBadge rank={stock.rank} />
-                            <div className="min-w-0 flex items-center gap-2">
+                            <div className="min-w-0 flex items-center gap-2 flex-wrap">
                               <span className="text-[var(--text-primary)] text-sm font-medium">
                                 {stock.name}
                               </span>
                               <span className="text-[var(--text-tertiary)] text-xs">
                                 {stock.code}
                               </span>
+                              {stock.industry && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--bg-tertiary)] text-[var(--text-secondary)] border border-[var(--border-color)] whitespace-nowrap">
+                                  {stock.industry}
+                                </span>
+                              )}
                               {sortMode === "rise" && stock.hisRc > 0 && (
                                 <RiseBadge hisRc={stock.hisRc} />
                               )}

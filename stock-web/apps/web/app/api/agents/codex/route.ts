@@ -22,10 +22,7 @@ const DB_PATH =
 
 const WORKDIR =
   process.env.STOCK_WORKDIR ||
-  path.join(
-    os.homedir(),
-    "codespace/self/SuperJAI/oss/agent/codex/stock-web",
-  );
+  path.join(os.homedir(), "codespace/self/SuperJAI/oss/agent/codex/stock-web");
 
 const SYSTEM_PROMPT = `你是一个专业的A股股票分析助手。你可以通过运行 sqlite3 命令查询本地股票数据库来回答用户问题。
 
@@ -36,7 +33,9 @@ const SYSTEM_PROMPT = `你是一个专业的A股股票分析助手。你可以�
 - stock_kline: code, period('daily'), trade_date, open, high, low, close, volume, turnover, change_pct, turn_rate
 - stock_meta: code, name, market, industry_ids
 - stock_fundamental: code, report_date, eps, roe, revenue, revenue_yoy, net_profit, net_profit_yoy, gross_margin, debt_ratio
-- stock_news: code, title, content, pub_time, source
+- news_flash: id, title, digest, ctime, category(important/a/hk/us/abnormal/notice)  (东方财富快讯，约19341条)
+- theme_news: id, theme_id, theme_name, title, source, pub_time  (板块主题新闻，约29855条)
+- stock_news: code, title, content, pub_time, source  (暂无数据，勿查此表)
 
 查询示例:
   sqlite3 '${DB_PATH}' 'SELECT code,name,price,change FROM stock_quote WHERE code="000001";'
@@ -81,10 +80,7 @@ export async function POST(req: NextRequest) {
   const { prompt } = body as { prompt?: string };
 
   if (!prompt || !prompt.trim()) {
-    return NextResponse.json(
-      { error: "prompt is required" },
-      { status: 400 },
-    );
+    return NextResponse.json({ error: "prompt is required" }, { status: 400 });
   }
 
   const taskId = randomUUID();
@@ -111,7 +107,10 @@ export async function POST(req: NextRequest) {
       fullPrompt,
     ];
 
-    const child = spawn(CODEX_BIN, args, { env, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(CODEX_BIN, args, {
+      env,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
 
     let buffer = "";
 
@@ -168,13 +167,18 @@ export async function POST(req: NextRequest) {
     });
 
     child.on("error", (err: Error) => {
-      pushEvent(taskId, { type: "error", message: `Failed to start codex: ${err.message}` });
+      pushEvent(taskId, {
+        type: "error",
+        message: `Failed to start codex: ${err.message}`,
+      });
       completeTask(taskId);
     });
 
     child.on("close", (code: number | null) => {
       if (code !== 0) {
-        const task = (globalThis as { _sseTaskStore?: Map<string, { done: boolean }> })._sseTaskStore?.get(taskId);
+        const task = (
+          globalThis as { _sseTaskStore?: Map<string, { done: boolean }> }
+        )._sseTaskStore?.get(taskId);
         if (task && !task.done) {
           pushEvent(taskId, {
             type: "error",

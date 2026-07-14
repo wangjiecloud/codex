@@ -13,6 +13,8 @@ from db import (
     StockKline,
     IndustryNode,
     NewsFlash,
+    TaskLastRun,
+    SessionLocal,
 )
 from datetime import datetime, timedelta
 
@@ -24,6 +26,64 @@ _sched_log_seq: int = 0
 
 _failed_stocks: dict = {}
 _failed_stocks_lock = threading.Lock()
+
+# 记录每个任务的上次完成时间 { task_id: "MM-DD HH:MM" }
+# 进程启动时从数据库预热，之后每次完成时内存+DB 同步更新
+_task_last_run: dict = {}
+_task_last_run_lock = threading.Lock()
+_task_last_run_loaded = False
+
+
+def _load_task_last_run_from_db():
+    """进程启动时调用一次，从 DB 预热内存字典"""
+    global _task_last_run_loaded
+    db = SessionLocal()
+    try:
+        rows = db.query(TaskLastRun).all()
+        with _task_last_run_lock:
+            for row in rows:
+                _task_last_run[row.task_id] = row.last_run_at.strftime("%m-%d %H:%M")
+            _task_last_run_loaded = True
+    except Exception as e:
+        print(f"[system] 加载 task_last_run 失败: {e}")
+    finally:
+        db.close()
+
+
+def record_task_last_run(task_id: str):
+    """任务执行完毕时调用，同时更新内存缓存和数据库"""
+    now = datetime.utcnow()
+    display = now.strftime("%m-%d %H:%M")
+    with _task_last_run_lock:
+        _task_last_run[task_id] = display
+    # 异步写入数据库（不阻塞调度线程）
+    def _persist():
+        db = SessionLocal()
+        try:
+            row = db.query(TaskLastRun).filter_by(task_id=task_id).first()
+            if row:
+                row.last_run_at = now
+                row.updated_at = now
+            else:
+                db.add(TaskLastRun(task_id=task_id, last_run_at=now, updated_at=now))
+            db.commit()
+        except Exception as e:
+            print(f"[system] 持久化 task_last_run({task_id}) 失败: {e}")
+        finally:
+            db.close()
+    threading.Thread(target=_persist, daemon=True).start()
+
+
+def get_task_last_run_dt(task_id: str) -> datetime | None:
+    """返回指定任务的上次完成时间（datetime，UTC），从 DB 读取；未执行过返回 None"""
+    db = SessionLocal()
+    try:
+        row = db.query(TaskLastRun).filter_by(task_id=task_id).first()
+        return row.last_run_at if row else None
+    except Exception:
+        return None
+    finally:
+        db.close()
 
 
 def record_failed_stock(code: str, name: str, reason: str, sync_type: str = "kline"):
@@ -206,3 +266,84 @@ async def get_scheduler_logs(since: int = Query(0)):
     with _sched_logs_lock:
         logs = [e for e in _sched_logs if e["seq"] > since]
     return {"logs": logs, "latest_seq": _sched_log_seq}
+
+
+# ---------------------------------------------------------------------------
+# 任务状态中心（统一调度管理接口）
+# ---------------------------------------------------------------------------
+
+def _get_scheduler():
+    """获取 main.py 中的 _scheduler 实例"""
+    import main as _main
+    return getattr(_main, "_scheduler", None)
+
+
+@router.get("/task-status")
+async def get_task_status():
+    """返回所有定时任务的当前状态（调度时间 + 上次/下次运行时间）"""
+    # 若内存尚未从 DB 预热，先做一次同步加载
+    if not _task_last_run_loaded:
+        _load_task_last_run_from_db()
+
+    scheduler = _get_scheduler()
+    if scheduler is None:
+        return {"tasks": [], "error": "scheduler not found"}
+
+    with _task_last_run_lock:
+        last_run_snapshot = dict(_task_last_run)
+
+    tasks = []
+    for job in scheduler.get_jobs():
+        next_run = job.next_run_time
+        tasks.append({
+            "id": job.id,
+            "name": job.name or job.id,
+            "nextRun": next_run.isoformat() if next_run else None,
+            "trigger": str(job.trigger),
+            "lastRun": last_run_snapshot.get(job.id),
+        })
+    return {"tasks": tasks}
+
+
+@router.post("/trigger-task/{task_id}")
+async def trigger_task(task_id: str):
+    """手动立即触发指定调度任务（通过 modify_job 将 next_run_time 设为 now）"""
+    scheduler = _get_scheduler()
+    if scheduler is None:
+        return {"status": "error", "message": "scheduler not found"}
+
+    job = scheduler.get_job(task_id)
+    if not job:
+        known_ids = [j.id for j in scheduler.get_jobs()]
+        return {
+            "status": "error",
+            "message": f"task '{task_id}' not found",
+            "available": known_ids,
+        }
+
+    try:
+        from apscheduler.util import datetime_ceil
+        job.modify(next_run_time=datetime.now())
+        sched_log("info", f"[task-trigger] 手动触发任务: {task_id}")
+        return {"status": "triggered", "task_id": task_id}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@router.post("/stop-task/{task_id}")
+async def stop_task(task_id: str):
+    """暂停指定调度任务（pause_job）。注意：仅暂停下次调度，不中断已在运行的线程。"""
+    scheduler = _get_scheduler()
+    if scheduler is None:
+        return {"status": "error", "message": "scheduler not found"}
+
+    job = scheduler.get_job(task_id)
+    if not job:
+        return {"status": "error", "message": f"task '{task_id}' not found"}
+
+    try:
+        scheduler.pause_job(task_id)
+        sched_log("info", f"[task-stop] 已暂停任务: {task_id}")
+        return {"status": "paused", "task_id": task_id}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}

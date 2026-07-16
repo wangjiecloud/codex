@@ -6,7 +6,14 @@ import json
 import os
 
 from routers.industry import _sync_all_quotes, _sync_klines
-from db import SessionLocal, StockMeta, StockFundamental, StockF10Snapshot, StockQuote, StockKline
+from db import (
+    SessionLocal,
+    StockMeta,
+    StockFundamental,
+    StockF10Snapshot,
+    StockQuote,
+    StockKline,
+)
 from eastmoney_scraper import fetch_stock_info
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
@@ -25,7 +32,9 @@ _lock = threading.Lock()
 _stop_requested = threading.Event()
 
 # 断点续传游标文件路径
-_FUNDAMENTAL_CURSOR_FILE = os.path.join(os.path.dirname(__file__), "..", "fundamental_cursor.json")
+_FUNDAMENTAL_CURSOR_FILE = os.path.join(
+    os.path.dirname(__file__), "..", "fundamental_cursor.json"
+)
 
 
 def _save_fundamental_cursor(date_str: str, codes: list, done: int):
@@ -248,7 +257,7 @@ def _run_full_sync():
                     consecutive_timeouts = 0
 
         _time.sleep(0.1)
-        if (i + 1) % 500 == 0:
+        if (i + 1) % 100 == 0:
             sched_log("info", f"[3/4] K线同步进度: {i + 1}/{len(kline_codes)}")
 
     sched_log("success", f"[3/4] K线数据同步完成，共 {len(kline_codes)} 只股票")
@@ -270,7 +279,9 @@ def _run_full_sync():
     try:
         synced_today = {
             row.code
-            for row in db2.query(StockF10Snapshot.code, StockF10Snapshot.updated_at).all()
+            for row in db2.query(
+                StockF10Snapshot.code, StockF10Snapshot.updated_at
+            ).all()
             if row.updated_at and row.updated_at.strftime("%Y-%m-%d") == today_str
         }
     finally:
@@ -314,7 +325,10 @@ def _run_full_sync():
                 "info", f"[4/4] 财务数据同步进度: {i + 1}/{len(fundamental_codes)}"
             )
 
-    sched_log("success", f"[4/4] 财务数据（F10）同步完成，共处理 {len(fundamental_codes)} 只股票")
+    sched_log(
+        "success",
+        f"[4/4] 财务数据（F10）同步完成，共处理 {len(fundamental_codes)} 只股票",
+    )
 
     if _stop_requested.is_set():
         sched_log("warning", "同步已被用户停止")
@@ -330,6 +344,7 @@ def _run_full_sync():
     sched_log("info", "[5/6] 开始同步申万行业板块 K 线...")
     try:
         from routers.sw_industry import _sync_rotation_klines as _sync_sw_klines
+
         _sync_sw_klines()
         sched_log("success", "[5/6] 申万行业板块 K 线同步完成")
     except Exception as e:
@@ -349,6 +364,7 @@ def _run_full_sync():
     sched_log("info", "[6/7] 开始同步板块新闻...")
     try:
         from routers.theme import sync_theme_news as _sync_theme_news
+
         _sync_theme_news()
     except Exception as e:
         sched_log("error", f"[6/7] 板块新闻同步失败: {e}")
@@ -357,10 +373,12 @@ def _run_full_sync():
     sched_log("info", "[7/7] 开始计算技术指标（KDJ/MA）...")
     try:
         import subprocess, sys, os
-        script_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "compute_indicators.py")
+
+        script_path = os.path.join(
+            os.path.dirname(os.path.dirname(__file__)), "compute_indicators.py"
+        )
         result = subprocess.run(
-            [sys.executable, script_path],
-            capture_output=True, text=True, timeout=120
+            [sys.executable, script_path], capture_output=True, text=True, timeout=120
         )
         if result.returncode == 0:
             sched_log("success", "[7/7] 技术指标计算完成")
@@ -423,17 +441,22 @@ def _run_quotes_sync():
     try:
         from db import StockMeta as _SM, StockQuote as _SQ
         from sqlalchemy import func as _func
+
         total = db.query(_SM.code).count()
         # 今日已更新的行情（按 updated_at 日期过滤）
         today_str = datetime.utcnow().strftime("%Y-%m-%d")
-        already_today = db.query(_func.count(_SQ.code)).filter(
-            _SQ.updated_at >= today_str
-        ).scalar() or 0
+        already_today = (
+            db.query(_func.count(_SQ.code)).filter(_SQ.updated_at >= today_str).scalar()
+            or 0
+        )
     finally:
         db.close()
 
     if already_today >= total * 0.9:
-        sched_log("info", f"实时行情今日已同步 {already_today}/{total} 只（≥90%），跳过重复同步")
+        sched_log(
+            "info",
+            f"实时行情今日已同步 {already_today}/{total} 只（≥90%），跳过重复同步",
+        )
         return
 
     with _lock:
@@ -447,7 +470,9 @@ def _run_quotes_sync():
             finished_at="",
         )
 
-    sched_log("info", f"开始同步实时行情，共 {total} 只股票（今日已有 {already_today} 只）")
+    sched_log(
+        "info", f"开始同步实时行情，共 {total} 只股票（今日已有 {already_today} 只）"
+    )
     _sync_all_quotes()
 
     if _stop_requested.is_set():
@@ -589,7 +614,10 @@ def _run_fundamental_sync():
     resumed = _load_fundamental_cursor(today_str)
     if resumed:
         codes, start_index = resumed
-        sched_log("info", f"财务数据（F10）断点续传，从第 {start_index + 1}/{len(codes)} 只继续")
+        sched_log(
+            "info",
+            f"财务数据（F10）断点续传，从第 {start_index + 1}/{len(codes)} 只继续",
+        )
     else:
         # 无有效游标，重新构建股票列表并过滤今日已同步
         db = SessionLocal()
@@ -597,8 +625,11 @@ def _run_fundamental_sync():
             raw_codes = [row.code for row in db.query(StockMeta.code).all()]
             # 预加载今日已同步的股票（updated_at 日期为今天），直接从队列中移除
             from sqlalchemy import text as _text
+
             rows = db.execute(
-                _text("SELECT code FROM stock_f10_snapshot WHERE substr(updated_at,1,10) = :today"),
+                _text(
+                    "SELECT code FROM stock_f10_snapshot WHERE substr(updated_at,1,10) = :today"
+                ),
                 {"today": today_str},
             ).fetchall()
             synced_today = {r[0] for r in rows}
@@ -611,11 +642,16 @@ def _run_fundamental_sync():
         start_index = 0
 
         if not codes:
-            sched_log("info", f"财务数据（F10）今日已全部同步，跳过（共 {skip_count} 只）")
+            sched_log(
+                "info", f"财务数据（F10）今日已全部同步，跳过（共 {skip_count} 只）"
+            )
             _clear_fundamental_cursor()
             return
 
-        sched_log("info", f"开始同步财务数据（F10），待同步 {len(codes)} 只（今日已跳过 {skip_count} 只）")
+        sched_log(
+            "info",
+            f"开始同步财务数据（F10），待同步 {len(codes)} 只（今日已跳过 {skip_count} 只）",
+        )
         # 不在初始化时保存游标（done=0 无意义），等第一只同步完再保存
 
     with _lock:
@@ -676,7 +712,9 @@ def _run_fundamental_sync():
 
 
 @router.post("/fundamental")
-async def trigger_sync_fundamental(background_tasks: BackgroundTasks, force: bool = False):
+async def trigger_sync_fundamental(
+    background_tasks: BackgroundTasks, force: bool = False
+):
     with _lock:
         if _status["running"]:
             return {"status": "already_running", **_status}

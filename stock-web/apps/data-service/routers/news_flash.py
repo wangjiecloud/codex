@@ -1,3 +1,4 @@
+from typing import Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
@@ -45,7 +46,7 @@ def _fetch_ths_page(tag_id: str, last_seq: str = "0") -> list[dict]:
         return []
 
 
-def _parse_item(it: dict, cate_key: str) -> dict | None:
+def _parse_item(it: dict, cate_key: str) -> Optional[dict]:
     news_id = str(it.get("id") or it.get("seq") or "")
     if not news_id:
         return None
@@ -66,7 +67,7 @@ def _parse_item(it: dict, cate_key: str) -> dict | None:
     }
 
 
-def _get_latest_seq(cate_key: str) -> str | None:
+def _get_latest_seq(cate_key: str) -> Optional[str]:
     db = SessionLocal()
     try:
         row = (
@@ -83,7 +84,7 @@ def _get_latest_seq(cate_key: str) -> str | None:
         db.close()
 
 
-def sync_category(cate_key: str, pages: int | None = None) -> int:
+def sync_category(cate_key: str, pages: Optional[int] = None) -> int:
     cfg = _CATEGORY_MAP.get(cate_key)
     if not cfg:
         return 0

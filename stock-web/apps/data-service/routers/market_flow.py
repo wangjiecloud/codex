@@ -16,7 +16,7 @@ router = APIRouter()
 _ak_lock = threading.Lock()
 
 # 导入数据库模型
-from db import SessionLocal, MarketFundFlowSnapshot, FuturesPositionSnapshot
+from db import SessionLocal, MarketFundFlowSnapshot, FuturesPositionSnapshot, MarketDailyFundFlow
 
 
 def _get_north_bound_flow() -> dict:
@@ -410,6 +410,224 @@ def _get_citic_futures_position(date_str: str = None, variety: str = 'IF') -> di
     except Exception as e:
         print(f"[market_flow] get_citic_futures_position error: {e}")
         return {'error': str(e)}
+
+
+def sync_market_daily_fund_flow():
+    """
+    从东方财富拉取大盘资金流向历史数据，落库到 market_daily_fund_flow 表。
+    每次调用会拉取全量历史，已有日期用 IGNORE 跳过。
+    返回写入条数。失败时自动重试最多 3 次（间隔 5s）。
+    使用 curl_cffi 模拟浏览器请求 JSONP API。
+    """
+    import pandas as pd
+    import time as _time
+    import re
+    import json
+    from curl_cffi import requests as cffi_requests
+    from routers.system import sched_log
+
+    sched_log("info", "[大盘资金流向] 开始同步（curl_cffi + 东方财富 JSONP API）", source="market_flow")
+
+    # 东方财富 JSONP API（网页动态加载）
+    url = (
+        "https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get"
+        "?lmt=0&klt=101&fields1=f1,f2,f3,f7"
+        "&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63,f64,f65"
+        "&ut=b2884a393a59ad64002292a3e90d46a5&secid=1.000001&secid2=0.399001"
+        f"&cb=jQuery_callback&_={int(datetime.now().timestamp() * 1000)}"
+    )
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+        "Referer": "https://data.eastmoney.com/zjlx/dpzjlx.html",
+        "Accept": "*/*",
+    }
+
+    # 最多重试 3 次
+    df = None
+    last_err = None
+    for attempt in range(1, 4):
+        try:
+            # 使用 curl_cffi 模拟 Chrome 124 浏览器（与 guba.py 相同）
+            resp = cffi_requests.get(url, headers=headers, timeout=30, impersonate="chrome124")
+            text = resp.text
+            
+            # 解析 JSONP: jQuery_callback({...})
+            m = re.search(r'jQuery_callback\((\{.*\})\)', text, re.DOTALL)
+            if not m:
+                # 降级：找括号
+                if "jQuery_callback(" not in text:
+                    raise ValueError(f"响应格式异常: {text[:200]}")
+                start = text.index("jQuery_callback(") + 16
+                end = text.rindex(")")
+                data = json.loads(text[start:end])
+            else:
+                data = json.loads(m.group(1))
+            
+            if not data.get('data') or not data['data'].get('klines'):
+                raise Exception("API 返回数据为空")
+            
+            # 解析 klines
+            klines = data['data']['klines']
+            rows = []
+            for line in klines:
+                fields = line.split(',')
+                rows.append({
+                    "日期": fields[0],
+                    "主力净流入-净额": float(fields[1]),
+                    "小单净流入-净额": float(fields[2]),
+                    "中单净流入-净额": float(fields[3]),
+                    "大单净流入-净额": float(fields[4]),
+                    "超大单净流入-净额": float(fields[5]),
+                    "主力净流入-净占比": float(fields[6]),
+                    "小单净流入-净占比": float(fields[7]),
+                    "中单净流入-净占比": float(fields[8]),
+                    "大单净流入-净占比": float(fields[9]),
+                    "超大单净流入-净占比": float(fields[10]),
+                    "上证-收盘价": float(fields[11]),
+                    "上证-涨跌幅": float(fields[12]),
+                    "深证-收盘价": float(fields[13]),
+                    "深证-涨跌幅": float(fields[14]),
+                })
+            df = pd.DataFrame(rows)
+            break
+        except Exception as e:
+            last_err = e
+            sched_log("warn", f"[大盘资金流向] 第 {attempt} 次拉取失败: {e}，{'重试中...' if attempt < 3 else '已达最大重试次数'}", source="market_flow")
+            if attempt < 3:
+                _time.sleep(5)
+
+    if df is None or df.empty:
+        sched_log("warn", f"[大盘资金流向] 拉取失败，同步终止: {last_err}", source="market_flow")
+        raise RuntimeError(f"东方财富 API 拉取失败: {last_err}")
+
+    total_rows = len(df)
+    sched_log("info", f"[大盘资金流向] 获取到 {total_rows} 条历史记录，开始写库...", source="market_flow")
+
+    session = SessionLocal()
+    inserted = 0
+    skipped = 0
+    try:
+        for _, row in df.iterrows():
+            trade_date = str(row["日期"])  # date → str YYYY-MM-DD
+            exists = session.query(MarketDailyFundFlow).filter_by(trade_date=trade_date).first()
+            if exists:
+                skipped += 1
+                continue
+            obj = MarketDailyFundFlow(
+                trade_date=trade_date,
+                sh_close=float(row.get("上证-收盘价") or 0),
+                sh_change_pct=float(row.get("上证-涨跌幅") or 0),
+                sz_close=float(row.get("深证-收盘价") or 0),
+                sz_change_pct=float(row.get("深证-涨跌幅") or 0),
+                main_net=float(row.get("主力净流入-净额") or 0),
+                main_net_pct=float(row.get("主力净流入-净占比") or 0),
+                super_net=float(row.get("超大单净流入-净额") or 0),
+                super_net_pct=float(row.get("超大单净流入-净占比") or 0),
+                big_net=float(row.get("大单净流入-净额") or 0),
+                big_net_pct=float(row.get("大单净流入-净占比") or 0),
+                mid_net=float(row.get("中单净流入-净额") or 0),
+                mid_net_pct=float(row.get("中单净流入-净占比") or 0),
+                small_net=float(row.get("小单净流入-净额") or 0),
+                small_net_pct=float(row.get("小单净流入-净占比") or 0),
+            )
+            session.add(obj)
+            inserted += 1
+        session.commit()
+        sched_log("success", f"[大盘资金流向] 同步完成，新增 {inserted} 条，跳过已有 {skipped} 条", source="market_flow")
+        return inserted
+    except Exception as e:
+        session.rollback()
+        sched_log("warn", f"[大盘资金流向] 写库失败: {e}", source="market_flow")
+        raise
+    finally:
+        session.close()
+
+
+@router.get("/daily-history")
+def get_market_daily_fund_flow_history(
+    page: int = Query(1, ge=1, description="页码，从1开始"),
+    page_size: int = Query(10, ge=1, le=100, description="每页条数"),
+):
+    """
+    分页查询大盘资金流向历史（来源：AKShare stock_market_fund_flow 落库数据）
+
+    返回：
+    {
+      "total": 120,
+      "page": 1,
+      "page_size": 10,
+      "items": [
+        {
+          "trade_date": "2026-07-14",
+          "sh_close": 3456.78,
+          "sh_change_pct": 1.23,
+          "sz_close": 11234.56,
+          "sz_change_pct": 0.98,
+          "main_net": 1234567890,
+          "main_net_pct": 2.34,
+          "super_net": 987654321,
+          "super_net_pct": 1.89,
+          "big_net": 246913569,
+          "big_net_pct": 0.45,
+          "mid_net": -123456789,
+          "mid_net_pct": -0.23,
+          "small_net": -456789012,
+          "small_net_pct": -0.87
+        }, ...
+      ]
+    }
+    """
+    session = SessionLocal()
+    try:
+        query = session.query(MarketDailyFundFlow).order_by(
+            MarketDailyFundFlow.trade_date.desc()
+        )
+        total = query.count()
+        rows = query.offset((page - 1) * page_size).limit(page_size).all()
+        items = []
+        for r in rows:
+            items.append({
+                "trade_date": r.trade_date,
+                "sh_close": r.sh_close,
+                "sh_change_pct": r.sh_change_pct,
+                "sz_close": r.sz_close,
+                "sz_change_pct": r.sz_change_pct,
+                "main_net": r.main_net,
+                "main_net_pct": r.main_net_pct,
+                "super_net": r.super_net,
+                "super_net_pct": r.super_net_pct,
+                "big_net": r.big_net,
+                "big_net_pct": r.big_net_pct,
+                "mid_net": r.mid_net,
+                "mid_net_pct": r.mid_net_pct,
+                "small_net": r.small_net,
+                "small_net_pct": r.small_net_pct,
+            })
+        return {
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "items": items,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        session.close()
+
+
+@router.post("/daily-history/sync")
+def trigger_sync_market_daily_fund_flow():
+    """手动触发大盘资金流向数据同步（后台线程执行）"""
+    import threading
+
+    def _run():
+        try:
+            sync_market_daily_fund_flow()
+        except Exception as e:
+            print(f"[market_flow] 手动同步失败: {e}")
+
+    threading.Thread(target=_run, daemon=True).start()
+    return {"status": "started", "message": "大盘资金流向同步已在后台启动"}
 
 
 @router.get("/futures/citic")

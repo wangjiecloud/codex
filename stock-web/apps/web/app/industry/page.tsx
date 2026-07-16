@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   ChevronRight,
@@ -84,7 +84,7 @@ const ICONS: Record<string, React.ElementType> = {
   Zap,
 };
 
-export default function IndustryPage() {
+function IndustryPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [activeTab, setActiveTab] = useState<
@@ -839,5 +839,13 @@ export default function IndustryPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function IndustryPage() {
+  return (
+    <Suspense fallback={null}>
+      <IndustryPageContent />
+    </Suspense>
   );
 }

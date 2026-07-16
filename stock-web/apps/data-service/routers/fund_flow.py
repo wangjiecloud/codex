@@ -1,3 +1,4 @@
+from typing import Optional
 """
 板块主力资金流向
 数据来源：akshare -> 同花顺数据中心
@@ -172,7 +173,7 @@ def _load_snapshot(board_type: str, trade_date: str, period: str) -> list[dict]:
         db.close()
 
 
-def _latest_snapshot_date(board_type: str, period: str) -> str | None:
+def _latest_snapshot_date(board_type: str, period: str) -> Optional[str]:
     """返回指定 board_type + period 下库中最新的快照日期，无数据返回 None"""
     db = SessionLocal()
     try:
@@ -254,7 +255,7 @@ def _get_fund_flow(
     sort: str,
     order: str,
     limit: int,
-    trade_date: str | None,
+    trade_date: Optional[str],
 ) -> dict:
     """
     取数优先级：
@@ -315,7 +316,7 @@ def get_concept_fund_flow(
     sort: str = Query(default="netflow"),
     order: str = Query(default="desc"),
     limit: int = Query(default=50, ge=1, le=500),
-    trade_date: str | None = Query(default=None, description="指定历史日期 YYYY-MM-DD"),
+    trade_date: Optional[str] = Query(default=None, description="指定历史日期 YYYY-MM-DD"),
 ):
     """同花顺概念板块主力资金流向排行"""
     return _get_fund_flow("concept", period, sort, order, limit, trade_date)
@@ -327,7 +328,7 @@ def get_industry_fund_flow(
     sort: str = Query(default="netflow"),
     order: str = Query(default="desc"),
     limit: int = Query(default=50, ge=1, le=2000),
-    trade_date: str | None = Query(default=None, description="指定历史日期 YYYY-MM-DD"),
+    trade_date: Optional[str] = Query(default=None, description="指定历史日期 YYYY-MM-DD"),
 ):
     """同花顺行业板块主力资金流向排行"""
     return _get_fund_flow("industry", period, sort, order, limit, trade_date)

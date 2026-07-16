@@ -1,3 +1,4 @@
+from typing import Optional
 """
 股票关联关系路由
 - 爬取东方财富股吧帖子正文（type=0，全部帖子），识别共现股票
@@ -54,7 +55,7 @@ def _get_all_stock_names(db: Session) -> dict[str, str]:
     return {r.name: r.code for r in rows if r.name}
 
 
-def _build_name_pattern(name_to_code: dict[str, str]) -> re.Pattern | None:
+def _build_name_pattern(name_to_code: dict[str, str]) -> Optional[re.Pattern]:
     """构建股票名称识别正则（按名称长度倒序，避免短名吃掉长名）"""
     names = sorted(name_to_code.keys(), key=len, reverse=True)
     if not names:
@@ -66,7 +67,7 @@ def _build_name_pattern(name_to_code: dict[str, str]) -> re.Pattern | None:
 def _extract_codes_from_text(
     text: str,
     name_to_code: dict[str, str],
-    name_pattern: re.Pattern | None,
+    name_pattern: Optional[re.Pattern],
 ) -> set[str]:
     """从正文中提取股票代码（链接格式 + 6位代码正则 + 名称识别）"""
     found: set[str] = set()

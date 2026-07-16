@@ -1,11 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Star, DollarSign, Layers } from "lucide-react";
 import { WatchlistPanel } from "@/components/watchlist/WatchlistPanel";
 import { PortfolioPanel } from "@/components/watchlist/PortfolioPanel";
 import { CustomWatchlistPanel } from "@/components/watchlist/CustomWatchlistPanel";
 import { cn } from "@/lib/utils";
+import { saveWatchlistPageState, loadWatchlistPageState } from "@/lib/navStore";
 
 const TABS = [
   { key: "industry", label: "产业股", icon: Layers },
@@ -17,6 +18,20 @@ type TabKey = (typeof TABS)[number]["key"];
 
 export default function WatchlistPage() {
   const [activeTab, setActiveTab] = useState<TabKey>("industry");
+  const [mounted, setMounted] = useState(false);
+
+  // 客户端挂载后恢复 sessionStorage 状态
+  useEffect(() => {
+    const s = loadWatchlistPageState();
+    if (s?.activeTab) setActiveTab(s.activeTab as TabKey);
+    setMounted(true);
+  }, []);
+
+  // 仅在挂载后（用户主动切换时）才持久化，避免覆盖已保存的值
+  useEffect(() => {
+    if (!mounted) return;
+    saveWatchlistPageState({ activeTab });
+  }, [activeTab, mounted]);
 
   return (
     <div className="flex flex-col h-full overflow-hidden">

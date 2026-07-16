@@ -286,16 +286,91 @@ export default function StockDetailPage() {
   const fromPath = searchParams.get("from") ?? null;
   const fromTab = searchParams.get("tab") ?? null;
   const fromNode = searchParams.get("node") ?? null;
+  // 来源类型：sw（板块详情→个股）/ sw_list（板块列表→个股）/ watchlist / null
+  const fromSource = searchParams.get("src") ?? null;
+  // 来源板块信息（来自申万板块时使用）
+  const fromBoardCode = searchParams.get("bc") ?? null;
+  const fromBoardName = searchParams.get("bn") ?? null;
+  // 来自自选股产业股Tab时的产业名和层级名
+  const fromIndustryName = searchParams.get("in")
+    ? decodeURIComponent(searchParams.get("in")!)
+    : null;
+  const fromSubGroupName = searchParams.get("isn")
+    ? decodeURIComponent(searchParams.get("isn")!)
+    : null;
+
   const fromIndustryId = fromPath?.match(/^\/industry\/(.+)$/)?.[1] ?? null;
   const fromLabel = fromIndustryId
     ? (INDUSTRY_LABELS[fromIndustryId] ?? fromIndustryId)
     : null;
-  const backUrl = (() => {
-    if (!fromPath) return "/stock/search";
-    const parts: string[] = [];
-    if (fromTab) parts.push(`tab=${fromTab}`);
-    if (fromNode) parts.push(`node=${fromNode}`);
-    return parts.length > 0 ? `${fromPath}?${parts.join("&")}` : fromPath;
+
+  // 构建面包屑显示文本和返回 URL
+  const { backUrl, backLabel, backParentLabel, backParentUrl } = (() => {
+    // 来自申万板块详情（板块列表 → 板块详情 → 个股）
+    if (fromSource === "sw" && fromBoardCode) {
+      return {
+        backUrl: `/sw/${fromBoardCode}?bn=${encodeURIComponent(fromBoardName ?? fromBoardCode)}`,
+        backLabel: fromBoardName ?? fromBoardCode,
+        backParentLabel: "板块",
+        backParentUrl: "/sw",
+      };
+    }
+    // 来自板块列表直接跳转（板块列表 → 个股）
+    if (fromSource === "sw_list") {
+      return {
+        backUrl: "/sw",
+        backLabel: fromBoardName ? `${fromBoardName}成分股` : "板块列表",
+        backParentLabel: null,
+        backParentUrl: null,
+      };
+    }
+    // 来自自选股
+    if (fromSource === "watchlist") {
+      // 如果有产业名和层级名，展示更细致的面包屑
+      if (fromIndustryName && fromSubGroupName) {
+        return {
+          backUrl: "/watchlist",
+          backLabel: `${fromSubGroupName}`,
+          backParentLabel: `自选股 · ${fromIndustryName}`,
+          backParentUrl: "/watchlist",
+        };
+      }
+      if (fromIndustryName) {
+        return {
+          backUrl: "/watchlist",
+          backLabel: fromIndustryName,
+          backParentLabel: "自选股",
+          backParentUrl: "/watchlist",
+        };
+      }
+      return {
+        backUrl: "/watchlist",
+        backLabel: "自选股",
+        backParentLabel: null,
+        backParentUrl: null,
+      };
+    }
+    // 来自产业详情（原有逻辑）
+    if (fromPath) {
+      const parts: string[] = [];
+      if (fromTab) parts.push(`tab=${fromTab}`);
+      if (fromNode) parts.push(`node=${fromNode}`);
+      const url =
+        parts.length > 0 ? `${fromPath}?${parts.join("&")}` : fromPath;
+      return {
+        backUrl: url,
+        backLabel: fromLabel ?? fromPath,
+        backParentLabel: "产业分析",
+        backParentUrl: "/industry",
+      };
+    }
+    // 默认返回选股页
+    return {
+      backUrl: "/stock/search",
+      backLabel: "选股",
+      backParentLabel: null,
+      backParentUrl: null,
+    };
   })();
 
   const [quote, setQuote] = useState<QuoteData>(DEFAULT_QUOTE);
@@ -615,12 +690,27 @@ export default function StockDetailPage() {
     <div className="flex flex-col h-full text-xs overflow-hidden">
       {/* Top toolbar */}
       <div className="flex items-center gap-1 px-3 py-1.5 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] shrink-0 overflow-x-auto">
+        {/* 面包屑导航返回按钮 */}
+        {backParentUrl && (
+          <>
+            <button
+              onClick={() => router.push(backParentUrl)}
+              className="flex items-center gap-0.5 text-[var(--text-tertiary)] hover:text-[var(--text-primary)] shrink-0 transition-colors"
+            >
+              <span className="text-[11px]">{backParentLabel}</span>
+            </button>
+            <span className="text-[var(--text-tertiary)] text-[11px] shrink-0">
+              /
+            </span>
+          </>
+        )}
         <button
           onClick={() => router.push(backUrl)}
-          className="flex items-center gap-1 text-[var(--text-tertiary)] hover:text-[var(--text-primary)] mr-2 shrink-0"
+          className="flex items-center gap-1 text-[var(--text-tertiary)] hover:text-[var(--text-primary)] mr-2 shrink-0 transition-colors"
+          title={`返回${backLabel}`}
         >
           <ArrowLeft size={13} />
-          {fromLabel && <span className="text-[11px]">{fromLabel}</span>}
+          <span className="text-[11px]">{backLabel}</span>
         </button>
         <button
           onClick={() => setIsStarred((s) => !s)}

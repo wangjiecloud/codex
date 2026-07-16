@@ -1,20 +1,15 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   TrendingUp,
   RefreshCw,
   Calendar,
   BarChart3,
-  Building2,
-  Zap,
-  Users,
-  DollarSign,
-  ArrowUpRight,
-  ArrowDownRight,
   Activity,
   Target,
-  Globe,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -60,6 +55,31 @@ interface FuturesPosition {
   netPosition: number;
 }
 
+interface MarketDailyRecord {
+  trade_date: string;
+  sh_close: number;
+  sh_change_pct: number;
+  sz_close: number;
+  sz_change_pct: number;
+  main_net: number;
+  main_net_pct: number;
+  super_net: number;
+  super_net_pct: number;
+  big_net: number;
+  big_net_pct: number;
+  mid_net: number;
+  mid_net_pct: number;
+  small_net: number;
+  small_net_pct: number;
+}
+
+interface DailyHistoryResp {
+  total: number;
+  page: number;
+  page_size: number;
+  items: MarketDailyRecord[];
+}
+
 // 工具函数
 function formatMoney(val: number | null): string {
   if (val === null || val === undefined) return "--";
@@ -74,81 +94,386 @@ function formatPercent(val: number | null): string {
   return `${val > 0 ? "+" : ""}${val.toFixed(2)}%`;
 }
 
-// 资金卡片组件
-function FundCard({
-  title,
-  subtitle,
-  icon,
-  inflow,
-  outflow,
-  color,
-}: {
-  title: string;
-  subtitle?: string;
-  icon: React.ReactNode;
-  inflow: number;
-  outflow: number;
-  color: string;
-}) {
-  const netflow = inflow - outflow;
-  const isPositive = netflow > 0;
+// 大盘资金流向历史分页列表
+function MarketDailyHistoryTable() {
+  const [data, setData] = useState<DailyHistoryResp | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 10;
+
+  const fetchData = useCallback(async (p: number) => {
+    setLoading(true);
+    try {
+      const res = await fetch(
+        `${API_BASE}/api/market-flow/daily-history?page=${p}&page_size=${PAGE_SIZE}`,
+      );
+      if (res.ok) {
+        const json = await res.json();
+        setData(json);
+      }
+    } catch (e) {
+      console.error("Failed to fetch daily history:", e);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchData(page);
+  }, [page, fetchData]);
+
+  const totalPages = data ? Math.ceil(data.total / PAGE_SIZE) : 0;
+
+  function NetCell({ val, pct }: { val: number; pct: number }) {
+    const pos = val >= 0;
+    return (
+      <td className="px-3 py-2.5 text-right tabular-nums">
+        <div
+          className={cn(
+            "text-sm font-medium",
+            pos ? "text-[#e84444]" : "text-[#09d464]",
+          )}
+        >
+          {pos ? "+" : ""}
+          {formatMoney(val)}
+        </div>
+        <div
+          className={cn(
+            "text-[10px]",
+            pos ? "text-[#e84444]/70" : "text-[#09d464]/70",
+          )}
+        >
+          {pos ? "+" : ""}
+          {pct.toFixed(2)}%
+        </div>
+      </td>
+    );
+  }
+
+  function ChangePctBadge({ val }: { val: number }) {
+    const pos = val >= 0;
+    return (
+      <span
+        className={cn(
+          "text-[10px] font-medium",
+          pos ? "text-[#e84444]/80" : "text-[#09d464]/80",
+        )}
+      >
+        {pos ? "+" : ""}
+        {val.toFixed(2)}%
+      </span>
+    );
+  }
 
   return (
-    <div className="bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-xl p-5">
-      <div className="flex items-center gap-2 mb-4">
-        <div
-          className="w-9 h-9 rounded-lg flex items-center justify-center"
-          style={{ backgroundColor: `${color}15` }}
-        >
-          <div style={{ color }}>{icon}</div>
-        </div>
-        <div className="flex-1">
-          <div className="text-sm font-medium text-[var(--text-primary)]">
-            {title}
-          </div>
-          {subtitle && (
-            <div className="text-[10px] text-[var(--text-tertiary)] mt-0.5">
-              {subtitle}
-            </div>
+    <div className="bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-xl overflow-hidden">
+      {/* 标题栏 */}
+      <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border-color)]">
+        <div className="flex items-center gap-2">
+          <TrendingUp size={16} className="text-[#f5a623]" />
+          <h3 className="text-base font-semibold text-[var(--text-primary)]">
+            大盘资金流向历史
+          </h3>
+          {data && (
+            <span className="text-xs text-[var(--text-tertiary)] bg-[var(--bg-tertiary)] px-2 py-0.5 rounded">
+              共 {data.total} 个交易日
+            </span>
           )}
         </div>
+        <button
+          onClick={() => fetchData(page)}
+          disabled={loading}
+          className="flex items-center gap-1.5 text-xs text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors disabled:opacity-50"
+        >
+          <RefreshCw size={12} className={cn(loading && "animate-spin")} />
+          刷新
+        </button>
       </div>
-      <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <span className="text-xs text-[var(--text-tertiary)]">流入</span>
-          <span className="text-sm font-medium text-[#e84444] tabular-nums">
-            {formatMoney(inflow)}
+
+      {/* 表格 */}
+      <div className="overflow-x-auto">
+        <table className="w-full">
+          <thead>
+            <tr className="bg-[var(--bg-tertiary)] text-[11px] text-[var(--text-tertiary)]">
+              <th className="px-3 py-3 text-left font-medium min-w-[90px] sticky left-0 bg-[var(--bg-tertiary)]">
+                日期
+              </th>
+              <th className="px-3 py-3 text-right font-medium min-w-[80px]">
+                上证-收盘价
+              </th>
+              <th className="px-3 py-3 text-right font-medium min-w-[80px]">
+                上证-涨跌幅
+              </th>
+              <th className="px-3 py-3 text-right font-medium min-w-[80px]">
+                深证-收盘价
+              </th>
+              <th className="px-3 py-3 text-right font-medium min-w-[80px]">
+                深证-涨跌幅
+              </th>
+              <th className="px-3 py-3 text-right font-medium min-w-[110px]">
+                主力净流入-净额
+              </th>
+              <th className="px-3 py-3 text-right font-medium min-w-[80px]">
+                主力净流入-净占比
+              </th>
+              <th className="px-3 py-3 text-right font-medium min-w-[110px]">
+                超大单净流入-净额
+              </th>
+              <th className="px-3 py-3 text-right font-medium min-w-[80px]">
+                超大单净流入-净占比
+              </th>
+              <th className="px-3 py-3 text-right font-medium min-w-[110px]">
+                大单净流入-净额
+              </th>
+              <th className="px-3 py-3 text-right font-medium min-w-[80px]">
+                大单净流入-净占比
+              </th>
+              <th className="px-3 py-3 text-right font-medium min-w-[110px]">
+                中单净流入-净额
+              </th>
+              <th className="px-3 py-3 text-right font-medium min-w-[80px]">
+                中单净流入-净占比
+              </th>
+              <th className="px-3 py-3 text-right font-medium min-w-[110px]">
+                小单净流入-净额
+              </th>
+              <th className="px-3 py-3 text-right font-medium min-w-[80px]">
+                小单净流入-净占比
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading ? (
+              <tr>
+                <td colSpan={15} className="px-4 py-10 text-center">
+                  <div className="flex items-center justify-center gap-2 text-[var(--text-tertiary)]">
+                    <RefreshCw size={16} className="animate-spin" />
+                    <span className="text-sm">加载中...</span>
+                  </div>
+                </td>
+              </tr>
+            ) : !data || data.items.length === 0 ? (
+              <tr>
+                <td colSpan={15} className="px-4 py-10 text-center">
+                  <span className="text-sm text-[var(--text-tertiary)]">
+                    暂无数据，请先触发同步
+                  </span>
+                </td>
+              </tr>
+            ) : (
+              data.items.map((row) => (
+                <tr
+                  key={row.trade_date}
+                  className="border-t border-[var(--border-color)] hover:bg-[var(--bg-hover)] transition-colors"
+                >
+                  {/* 日期 */}
+                  <td className="px-3 py-2.5 text-sm text-[var(--text-secondary)] tabular-nums font-medium sticky left-0 bg-[var(--bg-secondary)]">
+                    {row.trade_date}
+                  </td>
+                  {/* 上证收盘价 */}
+                  <td className="px-3 py-2.5 text-right text-sm tabular-nums text-[var(--text-primary)]">
+                    {row.sh_close.toFixed(2)}
+                  </td>
+                  {/* 上证涨跌幅 */}
+                  <td
+                    className={cn(
+                      "px-3 py-2.5 text-right text-sm tabular-nums font-medium",
+                      row.sh_change_pct >= 0
+                        ? "text-[#e84444]"
+                        : "text-[#09d464]",
+                    )}
+                  >
+                    {row.sh_change_pct >= 0 ? "+" : ""}
+                    {row.sh_change_pct.toFixed(2)}%
+                  </td>
+                  {/* 深证收盘价 */}
+                  <td className="px-3 py-2.5 text-right text-sm tabular-nums text-[var(--text-primary)]">
+                    {row.sz_close.toFixed(2)}
+                  </td>
+                  {/* 深证涨跌幅 */}
+                  <td
+                    className={cn(
+                      "px-3 py-2.5 text-right text-sm tabular-nums font-medium",
+                      row.sz_change_pct >= 0
+                        ? "text-[#e84444]"
+                        : "text-[#09d464]",
+                    )}
+                  >
+                    {row.sz_change_pct >= 0 ? "+" : ""}
+                    {row.sz_change_pct.toFixed(2)}%
+                  </td>
+                  {/* 主力净流入-净额 */}
+                  <td
+                    className={cn(
+                      "px-3 py-2.5 text-right text-sm tabular-nums font-medium",
+                      row.main_net >= 0 ? "text-[#e84444]" : "text-[#09d464]",
+                    )}
+                  >
+                    {row.main_net >= 0 ? "+" : ""}
+                    {formatMoney(row.main_net)}
+                  </td>
+                  {/* 主力净流入-净占比 */}
+                  <td
+                    className={cn(
+                      "px-3 py-2.5 text-right text-sm tabular-nums",
+                      row.main_net_pct >= 0
+                        ? "text-[#e84444]"
+                        : "text-[#09d464]",
+                    )}
+                  >
+                    {row.main_net_pct >= 0 ? "+" : ""}
+                    {row.main_net_pct.toFixed(2)}%
+                  </td>
+                  {/* 超大单净流入-净额 */}
+                  <td
+                    className={cn(
+                      "px-3 py-2.5 text-right text-sm tabular-nums font-medium",
+                      row.super_net >= 0 ? "text-[#e84444]" : "text-[#09d464]",
+                    )}
+                  >
+                    {row.super_net >= 0 ? "+" : ""}
+                    {formatMoney(row.super_net)}
+                  </td>
+                  {/* 超大单净流入-净占比 */}
+                  <td
+                    className={cn(
+                      "px-3 py-2.5 text-right text-sm tabular-nums",
+                      row.super_net_pct >= 0
+                        ? "text-[#e84444]"
+                        : "text-[#09d464]",
+                    )}
+                  >
+                    {row.super_net_pct >= 0 ? "+" : ""}
+                    {row.super_net_pct.toFixed(2)}%
+                  </td>
+                  {/* 大单净流入-净额 */}
+                  <td
+                    className={cn(
+                      "px-3 py-2.5 text-right text-sm tabular-nums font-medium",
+                      row.big_net >= 0 ? "text-[#e84444]" : "text-[#09d464]",
+                    )}
+                  >
+                    {row.big_net >= 0 ? "+" : ""}
+                    {formatMoney(row.big_net)}
+                  </td>
+                  {/* 大单净流入-净占比 */}
+                  <td
+                    className={cn(
+                      "px-3 py-2.5 text-right text-sm tabular-nums",
+                      row.big_net_pct >= 0
+                        ? "text-[#e84444]"
+                        : "text-[#09d464]",
+                    )}
+                  >
+                    {row.big_net_pct >= 0 ? "+" : ""}
+                    {row.big_net_pct.toFixed(2)}%
+                  </td>
+                  {/* 中单净流入-净额 */}
+                  <td
+                    className={cn(
+                      "px-3 py-2.5 text-right text-sm tabular-nums font-medium",
+                      row.mid_net >= 0 ? "text-[#e84444]" : "text-[#09d464]",
+                    )}
+                  >
+                    {row.mid_net >= 0 ? "+" : ""}
+                    {formatMoney(row.mid_net)}
+                  </td>
+                  {/* 中单净流入-净占比 */}
+                  <td
+                    className={cn(
+                      "px-3 py-2.5 text-right text-sm tabular-nums",
+                      row.mid_net_pct >= 0
+                        ? "text-[#e84444]"
+                        : "text-[#09d464]",
+                    )}
+                  >
+                    {row.mid_net_pct >= 0 ? "+" : ""}
+                    {row.mid_net_pct.toFixed(2)}%
+                  </td>
+                  {/* 小单净流入-净额 */}
+                  <td
+                    className={cn(
+                      "px-3 py-2.5 text-right text-sm tabular-nums font-medium",
+                      row.small_net >= 0 ? "text-[#e84444]" : "text-[#09d464]",
+                    )}
+                  >
+                    {row.small_net >= 0 ? "+" : ""}
+                    {formatMoney(row.small_net)}
+                  </td>
+                  {/* 小单净流入-净占比 */}
+                  <td
+                    className={cn(
+                      "px-3 py-2.5 text-right text-sm tabular-nums",
+                      row.small_net_pct >= 0
+                        ? "text-[#e84444]"
+                        : "text-[#09d464]",
+                    )}
+                  >
+                    {row.small_net_pct >= 0 ? "+" : ""}
+                    {row.small_net_pct.toFixed(2)}%
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {/* 分页 */}
+      {data && totalPages > 1 && (
+        <div className="flex items-center justify-between px-5 py-3 border-t border-[var(--border-color)]">
+          <span className="text-xs text-[var(--text-tertiary)]">
+            第 {page} / {totalPages} 页，共 {data.total} 条
           </span>
-        </div>
-        <div className="flex items-center justify-between">
-          <span className="text-xs text-[var(--text-tertiary)]">流出</span>
-          <span className="text-sm font-medium text-[#09d464] tabular-nums">
-            {formatMoney(outflow)}
-          </span>
-        </div>
-        <div className="pt-2 border-t border-[var(--border-color)]">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-[var(--text-secondary)]">
-              净流入
-            </span>
-            <div className="flex items-center gap-1">
-              {isPositive ? (
-                <ArrowUpRight size={14} className="text-[#e84444]" />
-              ) : (
-                <ArrowDownRight size={14} className="text-[#09d464]" />
-              )}
-              <span
-                className={cn(
-                  "text-base font-bold tabular-nums",
-                  isPositive ? "text-[#e84444]" : "text-[#09d464]",
-                )}
-              >
-                {formatMoney(netflow)}
-              </span>
-            </div>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page <= 1 || loading}
+              className="p-1.5 rounded hover:bg-[var(--bg-tertiary)] disabled:opacity-30 transition-colors"
+            >
+              <ChevronLeft size={14} className="text-[var(--text-secondary)]" />
+            </button>
+            {/* 页码按钮（最多显示5个） */}
+            {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => {
+              let pageNum: number;
+              if (totalPages <= 5) {
+                pageNum = i + 1;
+              } else if (page <= 3) {
+                pageNum = i + 1;
+              } else if (page >= totalPages - 2) {
+                pageNum = totalPages - 4 + i;
+              } else {
+                pageNum = page - 2 + i;
+              }
+              return (
+                <button
+                  key={pageNum}
+                  onClick={() => setPage(pageNum)}
+                  disabled={loading}
+                  className={cn(
+                    "min-w-[28px] h-7 rounded text-xs transition-colors",
+                    page === pageNum
+                      ? "bg-[#f5a623] text-black font-medium"
+                      : "hover:bg-[var(--bg-tertiary)] text-[var(--text-secondary)]",
+                  )}
+                >
+                  {pageNum}
+                </button>
+              );
+            })}
+            <button
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={page >= totalPages || loading}
+              className="p-1.5 rounded hover:bg-[var(--bg-tertiary)] disabled:opacity-30 transition-colors"
+            >
+              <ChevronRight
+                size={14}
+                className="text-[var(--text-secondary)]"
+              />
+            </button>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
@@ -597,62 +922,23 @@ export default function MarketPage() {
         </div>
       </div>
 
-      {/* 市场资金流向分类（5个卡片一排：北向+主力+机构+游资+散户） */}
-      {marketSummary && (
-        <div className="mb-6">
-          <div className="flex items-center gap-2 mb-4">
-            <TrendingUp size={16} className="text-[#f5a623]" />
-            <h2 className="text-lg font-semibold text-[var(--text-primary)]">
-              市场资金流向分类
-            </h2>
-            <span className="text-xs text-[var(--text-tertiary)]">
-              今日A股整体资金流向
-            </span>
-          </div>
-          <div className="grid grid-cols-5 gap-4">
-            <FundCard
-              title="北向资金"
-              subtitle="沪股通 + 深股通"
-              icon={<Globe size={18} />}
-              inflow={marketSummary.north_bound.inflow}
-              outflow={marketSummary.north_bound.outflow}
-              color="#10b981"
-            />
-            <FundCard
-              title="主力资金"
-              subtitle="机构 + 游资"
-              icon={<DollarSign size={18} />}
-              inflow={marketSummary.investor_type.main.inflow}
-              outflow={marketSummary.investor_type.main.outflow}
-              color="#f5a623"
-            />
-            <FundCard
-              title="机构资金"
-              subtitle="公募/私募/保险/社保等"
-              icon={<Building2 size={18} />}
-              inflow={marketSummary.investor_type.institution.inflow}
-              outflow={marketSummary.investor_type.institution.outflow}
-              color="#3b82f6"
-            />
-            <FundCard
-              title="游资"
-              subtitle="短线大户/营业部席位"
-              icon={<Zap size={18} />}
-              inflow={marketSummary.investor_type.hot_money.inflow}
-              outflow={marketSummary.investor_type.hot_money.outflow}
-              color="#ef4444"
-            />
-            <FundCard
-              title="散户资金"
-              subtitle="个人投资者"
-              icon={<Users size={18} />}
-              inflow={marketSummary.investor_type.retail.inflow}
-              outflow={marketSummary.investor_type.retail.outflow}
-              color="#8b5cf6"
-            />
-          </div>
+      {/* 大盘资金流向分类（标题行） */}
+      <div className="mb-4">
+        <div className="flex items-center gap-2">
+          <TrendingUp size={16} className="text-[#f5a623]" />
+          <h2 className="text-lg font-semibold text-[var(--text-primary)]">
+            市场资金流向分类
+          </h2>
+          <span className="text-xs text-[var(--text-tertiary)]">
+            今日A股整体资金流向
+          </span>
         </div>
-      )}
+      </div>
+
+      {/* 大盘资金流向历史分页表（替换原5卡片区域） */}
+      <div className="mb-6">
+        <MarketDailyHistoryTable />
+      </div>
 
       {/* 板块资金流向 */}
       <div className="grid grid-cols-2 gap-6 mb-6">

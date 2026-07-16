@@ -281,6 +281,7 @@ function GlobalIndexMonitorInline({
   onTaskClick?: (taskId: string) => void;
 }) {
   const [indexCount, setIndexCount] = useState(0);
+  const [lastSync, setLastSync] = useState<string | null>(null);
   useEffect(() => {
     const fetch_ = async () => {
       try {
@@ -288,6 +289,15 @@ function GlobalIndexMonitorInline({
         if (r.ok) {
           const d = await r.json();
           setIndexCount(Array.isArray(d) ? d.length : 0);
+          // 找出最近更新的时间
+          if (Array.isArray(d) && d.length > 0) {
+            const times = d
+              .map((item: { updatedAt?: string }) => item.updatedAt)
+              .filter(Boolean) as string[];
+            if (times.length > 0) {
+              setLastSync(times.sort().reverse()[0]);
+            }
+          }
         }
       } catch {}
     };
@@ -298,10 +308,10 @@ function GlobalIndexMonitorInline({
       <div className="flex items-center gap-1.5 mb-2">
         <Activity size={12} className="text-[#f59e0b]" />
         <span className="text-xs font-semibold text-[var(--text-primary)]">
-          全球指数K线
+          全球指数
         </span>
         <span className="ml-auto text-[10px] text-[var(--text-tertiary)]">
-          每日 18:00
+          每日 17:00/18:00
         </span>
       </div>
       <div className="flex gap-4">
@@ -310,11 +320,23 @@ function GlobalIndexMonitorInline({
             指数数量
           </div>
           <button
-            onClick={() => onTaskClick?.("global_index_kline_sync")}
+            onClick={() => onTaskClick?.("global_index_snapshot_sync")}
             className="text-sm font-semibold text-[var(--text-primary)] cursor-pointer hover:text-[var(--accent)] hover:underline underline-offset-2 transition-colors text-left"
           >
             {indexCount > 0 ? indexCount : "--"}
           </button>
+        </div>
+        <div>
+          <div className="text-[10px] text-[var(--text-tertiary)]">
+            最近同步
+          </div>
+          <div className="text-xs text-[var(--text-secondary)]">
+            {lastSync
+              ? new Date(lastSync)
+                  .toLocaleString("zh-CN", { hour12: false })
+                  .slice(5)
+              : "--"}
+          </div>
         </div>
       </div>
     </div>
@@ -701,6 +723,7 @@ const TASK_LABELS_MAP: Record<string, string> = {
   guba_daily_sync: "股吧资讯同步",
   minute_daily_sync: "产业链分时",
   fund_flow_snapshot: "资金流向快照",
+  global_index_snapshot_sync: "全球指数快照",
   global_index_kline_sync: "全球指数K线",
   indices_minute_daily_sync: "宽基指数分时",
   news_flash_sync: "快讯同步",
@@ -711,6 +734,7 @@ const TASK_LABELS_MAP: Record<string, string> = {
   weekly_fundamental_sync: "F10财务（周日低频）",
   market_breadth_daily_sync: "市场情绪·涨跌统计",
   wal_checkpoint: "WAL合并清理",
+  market_daily_fund_flow_sync: "大盘资金流向历史",
 };
 
 // 直接调用同步接口（而非 trigger-task）的任务映射
@@ -879,16 +903,20 @@ function TaskStatusTable({
     }
   };
 
-  const handleTrigger = async (taskId: string) => {
-    setTriggering(taskId);
+  const handleTrigger = async (taskId: string, force?: boolean) => {
+    const triggerKey = force ? `${taskId}__force` : taskId;
+    setTriggering(triggerKey);
     setTaskResults((prev) => ({
       ...prev,
-      [taskId]: { status: "triggered", msg: "执行中…" },
+      [taskId]: {
+        status: "triggered",
+        msg: force ? "强制全量执行中…" : "执行中…",
+      },
     }));
     try {
       const directUrl = DIRECT_SYNC_URLS[taskId];
       const label = TASK_LABELS_MAP[taskId] || taskId;
-      if (directUrl) {
+      if (directUrl && !force) {
         onLog?.("info", `[触发] ${label} 开始执行…`);
         const r = await fetch(directUrl, { method: "POST" });
         const data = await r.json();
@@ -911,16 +939,23 @@ function TaskStatusTable({
           onLog?.("error", `[失败] ${label}: ${errMsg}`);
         }
       } else {
-        onLog?.("info", `[触发] ${label} 已提交，后台执行中…`);
+        const forceParam = force ? "?force=true" : "";
+        onLog?.(
+          "info",
+          `[触发] ${label}${force ? "（强制全量）" : ""} 已提交，后台执行中…`,
+        );
         const r = await fetch(
-          `http://localhost:8000/api/system/trigger-task/${taskId}`,
+          `http://localhost:8000/api/system/trigger-task/${taskId}${forceParam}`,
           { method: "POST" },
         );
         const data = await r.json();
         if (data.status === "triggered") {
           setTaskResults((prev) => ({
             ...prev,
-            [taskId]: { status: "ok", msg: "已触发，后台执行中" },
+            [taskId]: {
+              status: "ok",
+              msg: force ? "已触发强制全量，后台执行中" : "已触发，后台执行中",
+            },
           }));
           onLog?.("success", `[触发成功] ${label} 已加入调度队列`);
           // daily_sync 有进度接口，轮询；其他任务只标 running
@@ -1087,7 +1122,10 @@ function TaskStatusTable({
                       <div className="flex items-center gap-2">
                         <button
                           onClick={() => handleTrigger(task.id)}
-                          disabled={triggering === task.id}
+                          disabled={
+                            triggering === task.id ||
+                            triggering === `${task.id}__force`
+                          }
                           className="flex items-center gap-1 px-2 py-1 text-xs bg-blue-500/10 border border-blue-500/30 text-blue-400 rounded hover:bg-blue-500/20 transition-colors disabled:opacity-40"
                         >
                           <Play
@@ -1098,25 +1136,54 @@ function TaskStatusTable({
                           />
                           {triggering === task.id ? "执行中…" : "立即触发"}
                         </button>
-                        {taskResults[task.id] && triggering !== task.id && (
-                          <span
-                            className="text-xs"
-                            style={{
-                              color:
-                                taskResults[task.id].status === "ok"
-                                  ? "#22c55e"
-                                  : taskResults[task.id].status === "triggered"
-                                    ? "#f5a623"
-                                    : "#ef4444",
-                            }}
-                          >
-                            {taskResults[task.id].status === "ok"
-                              ? "✓ "
-                              : taskResults[task.id].status === "error"
-                                ? "✗ "
-                                : ""}
-                            {taskResults[task.id].msg}
-                          </span>
+                        {taskResults[task.id] &&
+                          triggering !== task.id &&
+                          triggering !== `${task.id}__force` && (
+                            <span
+                              className="text-xs"
+                              style={{
+                                color:
+                                  taskResults[task.id].status === "ok"
+                                    ? "#22c55e"
+                                    : taskResults[task.id].status ===
+                                        "triggered"
+                                      ? "#f5a623"
+                                      : "#ef4444",
+                              }}
+                            >
+                              {taskResults[task.id].status === "ok"
+                                ? "✓ "
+                                : taskResults[task.id].status === "error"
+                                  ? "✗ "
+                                  : ""}
+                              {taskResults[task.id].msg}
+                            </span>
+                          )}
+                        {/* 强制全量按钮（仅 weekly_fundamental_sync） */}
+                        {task.id === "weekly_fundamental_sync" && (
+                          <div className="flex items-center gap-1.5 ml-2 pl-2 border-l border-[var(--border-color)]">
+                            <button
+                              onClick={() => handleTrigger(task.id, true)}
+                              disabled={
+                                triggering === task.id ||
+                                triggering === `${task.id}__force`
+                              }
+                              className="flex items-center gap-1 px-2 py-1 text-xs bg-orange-500/10 border border-orange-500/30 text-orange-400 rounded hover:bg-orange-500/20 transition-colors disabled:opacity-40"
+                              title="忽略已有数据，强制重新同步所有股票的F10财务数据（用于补二季报等）"
+                            >
+                              <RefreshCw
+                                size={9}
+                                className={
+                                  triggering === `${task.id}__force`
+                                    ? "animate-spin"
+                                    : ""
+                                }
+                              />
+                              {triggering === `${task.id}__force`
+                                ? "同步中…"
+                                : "强制全量"}
+                            </button>
+                          </div>
                         )}
                         {/* 补历史按钮（仅 market_breadth_daily_sync） */}
                         {BACKFILL_TASK_IDS.has(task.id) && (
@@ -2133,7 +2200,11 @@ export default function SystemMonitorPage() {
                             {item.name}
                           </span>
                           <span className="text-xs px-1.5 py-0.5 bg-red-500/10 text-red-400 rounded">
-                            {item.syncType === "kline" ? "K线" : item.syncType}
+                            {item.syncType === "kline"
+                              ? "K线"
+                              : item.syncType === "sw_kline"
+                                ? "申万板块K线"
+                                : item.syncType}
                           </span>
                         </div>
                         <div className="text-xs text-red-400 mt-1">

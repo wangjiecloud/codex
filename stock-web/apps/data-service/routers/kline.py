@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Response
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from datetime import datetime, date, timedelta
@@ -187,7 +187,14 @@ async def get_kline(
     code: str,
     period: str = Query(default="daily"),
     count: int = Query(default=110, ge=10, le=1000),
+    response: Response = None,
 ):
+    # 设置不缓存响应头，确保返回最新数据
+    if response:
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    
     # 按周期决定默认返回条数：日K 110（约5个月），周K 156（3年），月K 120（10年）
     if count == 110:
         if period == "weekly":

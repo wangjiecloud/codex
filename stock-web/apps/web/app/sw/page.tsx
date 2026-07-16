@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
+import { saveSwPageState, loadSwPageState } from "@/lib/navStore";
 import {
   ArrowUpDown,
   RefreshCw,
@@ -12,6 +13,7 @@ import {
   BarChart2,
   Trash2,
   TrendingUp,
+  Activity,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -426,6 +428,677 @@ function heatColor(v: number | null): string {
 // ──────────────────────────────────────────────────────────────────────────────
 // 资金流向弹窗
 // ──────────────────────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────────
+// 实时流向弹窗（直接调东方财富 push2delay 接口，无需后端）
+// ─────────────────────────────────────────────────────────────────
+
+interface LiveFlowSector {
+  /** 板块代码 */
+  code: string;
+  /** 板块名称 */
+  name: string;
+  /** 涨跌幅 % */
+  changePct: number;
+  /** 主力净流入（元） */
+  mainNetflow: number;
+  /** 主力净占比 % */
+  mainNetRatio: number;
+  /** 超大单净流入（元） */
+  superNetflow: number;
+  /** 超大单净占比 % */
+  superNetRatio: number;
+  /** 大单净流入（元） */
+  bigNetflow: number;
+  /** 大单净占比 % */
+  bigNetRatio: number;
+  /** 中单净流入（元） */
+  midNetflow: number;
+  /** 中单净占比 % */
+  midNetRatio: number;
+  /** 小单净流入（元） */
+  smallNetflow: number;
+  /** 小单净占比 % */
+  smallNetRatio: number;
+  /** 主力净流入最大股名称 */
+  topStockName: string;
+  /** 主力净流入最大股代码 */
+  topStockCode: string;
+  /** 数据时间戳（秒） */
+  ts: number;
+}
+
+const EM_FIELDS =
+  "f12,f14,f3,f62,f184,f66,f69,f72,f75,f78,f81,f84,f87,f204,f205,f124";
+const EM_BASE = "https://push2delay.eastmoney.com/api/qt/clist/get";
+
+function buildEmUrl(
+  boardType: "concept" | "industry",
+  order: "desc" | "asc",
+  pz = 200,
+) {
+  const t = boardType === "concept" ? 3 : 2;
+  const po = order === "desc" ? 1 : 0;
+  return `${EM_BASE}?pn=1&pz=${pz}&po=${po}&np=1&ut=bd1d9ddb04089700cf9c27f6f7426281&fltt=2&invt=2&fid=f62&fs=m:90+t:${t}&fields=${EM_FIELDS}`;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function parseEmItem(raw: any): LiveFlowSector {
+  return {
+    code: raw.f12 ?? "",
+    name: raw.f14 ?? "",
+    changePct: raw.f3 ?? 0,
+    mainNetflow: raw.f62 ?? 0,
+    mainNetRatio: raw.f184 ?? 0,
+    superNetflow: raw.f66 ?? 0,
+    superNetRatio: raw.f69 ?? 0,
+    bigNetflow: raw.f72 ?? 0,
+    bigNetRatio: raw.f75 ?? 0,
+    midNetflow: raw.f78 ?? 0,
+    midNetRatio: raw.f81 ?? 0,
+    smallNetflow: raw.f84 ?? 0,
+    smallNetRatio: raw.f87 ?? 0,
+    topStockName: raw.f204 ?? "",
+    topStockCode: raw.f205 ?? "",
+    ts: raw.f124 ?? 0,
+  };
+}
+
+function fmtYi(val: number): string {
+  const yi = val / 1e8;
+  return (yi >= 0 ? "+" : "") + yi.toFixed(2) + "亿";
+}
+
+type LiveSortField =
+  | "mainNetflow"
+  | "mainNetRatio"
+  | "superNetflow"
+  | "superNetRatio"
+  | "bigNetflow"
+  | "bigNetRatio"
+  | "midNetflow"
+  | "smallNetflow"
+  | "changePct";
+
+function LiveFlowModal({ onClose }: { onClose: () => void }) {
+  const [boardType, setBoardType] = useState<"concept" | "industry">("concept");
+  const [sortOrder, setLiveSortOrder] = useState<"desc" | "asc">("desc");
+  const [items, setItems] = useState<LiveFlowSector[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [lastUpdated, setLastUpdated] = useState<string>("");
+  const [searchText, setSearchText] = useState("");
+  const [autoRefresh, setAutoRefresh] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // 本地列排序（独立于接口排序参数）
+  const [localSortField, setLocalSortField] = useState<LiveSortField | null>(
+    null,
+  );
+  const [localSortDir, setLocalSortDir] = useState<"desc" | "asc">("desc");
+
+  const fetchLive = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const url = buildEmUrl(boardType, sortOrder);
+      const res = await fetch(url, { cache: "no-store" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json();
+      const raw = json?.data?.diff ?? [];
+      setItems(raw.map(parseEmItem));
+      if (raw.length > 0) {
+        const ts: number = raw[0].f124 ?? 0;
+        if (ts) {
+          setLastUpdated(
+            new Date(ts * 1000).toLocaleTimeString("zh-CN", { hour12: false }),
+          );
+        } else {
+          setLastUpdated(
+            new Date().toLocaleTimeString("zh-CN", { hour12: false }),
+          );
+        }
+      }
+    } catch {
+      setError("数据获取失败（东方财富接口，请稍后重试）");
+      setItems([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [boardType, sortOrder]);
+
+  // 首次加载 & 依赖变更时拉数据
+  useEffect(() => {
+    fetchLive();
+  }, [fetchLive]);
+
+  // 自动刷新
+  useEffect(() => {
+    if (autoRefresh) {
+      timerRef.current = setInterval(fetchLive, 30000);
+    } else {
+      if (timerRef.current) clearInterval(timerRef.current);
+    }
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [autoRefresh, fetchLive]);
+
+  const filtered = searchText.trim()
+    ? items.filter(
+        (i) =>
+          i.name.includes(searchText.trim()) ||
+          i.topStockName.includes(searchText.trim()) ||
+          i.topStockCode.includes(searchText.trim()),
+      )
+    : items;
+
+  // 本地列排序
+  const sorted = localSortField
+    ? [...filtered].sort((a, b) => {
+        const av = a[localSortField] as number;
+        const bv = b[localSortField] as number;
+        return localSortDir === "desc" ? bv - av : av - bv;
+      })
+    : filtered;
+
+  const toggleLocalSort = (field: LiveSortField) => {
+    if (localSortField === field) {
+      setLocalSortDir((d) => (d === "desc" ? "asc" : "desc"));
+    } else {
+      setLocalSortField(field);
+      setLocalSortDir("desc");
+    }
+  };
+
+  // 用于横向条形图的最大绝对值
+  const maxAbs = Math.max(...sorted.map((i) => Math.abs(i.mainNetflow)), 1);
+
+  // 统计摘要
+  const topIn = sorted.reduce<LiveFlowSector | null>(
+    (a, b) => (a === null || b.mainNetflow > a.mainNetflow ? b : a),
+    null,
+  );
+  const topOut = sorted.reduce<LiveFlowSector | null>(
+    (a, b) => (a === null || b.mainNetflow < a.mainNetflow ? b : a),
+    null,
+  );
+  const totalIn = sorted
+    .filter((i) => i.mainNetflow > 0)
+    .reduce((s, i) => s + i.mainNetflow, 0);
+  const totalOut = sorted
+    .filter((i) => i.mainNetflow < 0)
+    .reduce((s, i) => s + i.mainNetflow, 0);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70"
+      onClick={onClose}
+    >
+      <div
+        className="relative flex flex-col bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-xl shadow-2xl overflow-hidden"
+        style={{ width: "min(1200px, 96vw)", maxHeight: "92vh" }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* ── 标题栏 ── */}
+        <div className="flex flex-col gap-2 px-5 pt-3 pb-2.5 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] flex-shrink-0">
+          {/* 第一行 */}
+          <div className="flex items-center gap-3 flex-wrap">
+            <Activity size={15} className="text-[#e84444] flex-shrink-0" />
+            <span className="text-[14px] font-bold text-[var(--text-primary)]">
+              实时资金流向
+            </span>
+            <span className="text-[11px] text-[var(--text-tertiary)]">
+              来源：东方财富
+            </span>
+
+            {/* 板块类型切换 */}
+            <div className="flex items-center gap-1">
+              {(["concept", "industry"] as const).map((t) => (
+                <button
+                  key={t}
+                  onClick={() => setBoardType(t)}
+                  className={cn(
+                    "px-2.5 py-0.5 rounded text-[11px] transition-colors",
+                    boardType === t
+                      ? "bg-[#e84444] text-white font-medium"
+                      : "text-[var(--text-tertiary)] hover:text-[var(--text-primary)] border border-[var(--border-color)]",
+                  )}
+                >
+                  {t === "concept" ? "概念板块" : "行业板块"}
+                </button>
+              ))}
+            </div>
+
+            {/* 排序方向 */}
+            <div className="flex items-center gap-1">
+              {(["desc", "asc"] as const).map((o) => (
+                <button
+                  key={o}
+                  onClick={() => setLiveSortOrder(o)}
+                  className={cn(
+                    "px-2.5 py-0.5 rounded text-[11px] transition-colors",
+                    sortOrder === o
+                      ? "bg-[var(--accent)] text-black font-medium"
+                      : "text-[var(--text-tertiary)] hover:text-[var(--text-primary)] border border-[var(--border-color)]",
+                  )}
+                >
+                  {o === "desc" ? "净流入↓" : "净流出↓"}
+                </button>
+              ))}
+            </div>
+
+            <div className="ml-auto flex items-center gap-2">
+              {/* 搜索 */}
+              <input
+                type="text"
+                value={searchText}
+                onChange={(e) => setSearchText(e.target.value)}
+                placeholder="搜索板块/股票..."
+                className="px-2 py-0.5 rounded border border-[var(--border-color)] bg-[var(--bg-primary)] text-[11px] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] outline-none focus:border-[var(--accent)] transition-colors w-28"
+              />
+              {/* 自动刷新 */}
+              <label className="flex items-center gap-1 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={autoRefresh}
+                  onChange={(e) => setAutoRefresh(e.target.checked)}
+                  className="w-3 h-3 accent-[var(--accent)]"
+                />
+                <span className="text-[11px] text-[var(--text-secondary)]">
+                  30s自动刷新
+                </span>
+              </label>
+              {/* 手动刷新 */}
+              <button
+                onClick={fetchLive}
+                disabled={loading}
+                className="flex items-center gap-1 px-2 py-0.5 rounded border border-[var(--border-color)] text-[11px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
+              >
+                <RefreshCw
+                  size={11}
+                  className={cn(loading && "animate-spin")}
+                />
+                刷新
+              </button>
+              <button
+                onClick={onClose}
+                className="p-1 rounded hover:bg-[var(--bg-hover)] text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors"
+              >
+                <X size={14} />
+              </button>
+            </div>
+          </div>
+
+          {/* 第二行：摘要统计 */}
+          {!loading && sorted.length > 0 && (
+            <div className="flex items-center gap-4 text-[11px]">
+              <span className="text-[var(--text-tertiary)]">
+                共 <b className="text-[var(--text-primary)]">{sorted.length}</b>{" "}
+                个板块
+              </span>
+              {topIn && (
+                <span>
+                  <span className="text-[var(--text-tertiary)]">
+                    净流入最多：
+                  </span>
+                  <span className="text-[#e84444] font-medium">
+                    {topIn.name}
+                  </span>
+                  <span className="text-[#e84444] ml-1">
+                    {fmtYi(topIn.mainNetflow)}
+                  </span>
+                </span>
+              )}
+              {topOut && (
+                <span>
+                  <span className="text-[var(--text-tertiary)]">
+                    净流出最多：
+                  </span>
+                  <span className="text-[#09d464] font-medium">
+                    {topOut.name}
+                  </span>
+                  <span className="text-[#09d464] ml-1">
+                    {fmtYi(topOut.mainNetflow)}
+                  </span>
+                </span>
+              )}
+              <span>
+                <span className="text-[var(--text-tertiary)]">流入合计：</span>
+                <span className="text-[#e84444]">{fmtYi(totalIn)}</span>
+              </span>
+              <span>
+                <span className="text-[var(--text-tertiary)]">流出合计：</span>
+                <span className="text-[#09d464]">{fmtYi(totalOut)}</span>
+              </span>
+              {lastUpdated && (
+                <span className="ml-auto text-[var(--text-tertiary)]">
+                  数据时间 {lastUpdated}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* ── 内容区 ── */}
+        <div className="flex-1 overflow-auto">
+          {loading ? (
+            <div className="flex items-center justify-center py-24 text-[var(--text-tertiary)] text-sm gap-2">
+              <RefreshCw size={14} className="animate-spin" />
+              拉取东方财富实时数据...
+            </div>
+          ) : error ? (
+            <div className="flex flex-col items-center justify-center py-24 gap-3">
+              <span className="text-[var(--text-tertiary)] text-sm">
+                {error}
+              </span>
+              <button
+                onClick={fetchLive}
+                className="px-3 py-1.5 rounded bg-[var(--accent)]/15 text-[var(--accent)] text-sm"
+              >
+                重试
+              </button>
+            </div>
+          ) : sorted.length === 0 ? (
+            <div className="flex items-center justify-center py-24 text-[var(--text-tertiary)] text-sm">
+              暂无数据
+            </div>
+          ) : (
+            <table className="w-full text-xs border-collapse">
+              <thead className="sticky top-0 bg-[var(--bg-secondary)] z-10">
+                <tr>
+                  <th className="px-3 py-2 text-center text-[var(--text-tertiary)] font-medium w-8">
+                    #
+                  </th>
+                  <th className="px-3 py-2 text-left text-[var(--text-tertiary)] font-medium whitespace-nowrap min-w-[90px]">
+                    板块名称
+                  </th>
+                  <th className="px-3 py-2 text-right text-[var(--text-tertiary)] font-medium whitespace-nowrap w-40">
+                    净流向可视化
+                  </th>
+                  {(
+                    [
+                      {
+                        field: "mainNetflow" as LiveSortField,
+                        label: "主力净流入",
+                        align: "right",
+                      },
+                      {
+                        field: "mainNetRatio" as LiveSortField,
+                        label: "主力净占比",
+                        align: "right",
+                      },
+                      {
+                        field: "superNetflow" as LiveSortField,
+                        label: "超大单净流入",
+                        align: "right",
+                      },
+                      {
+                        field: "superNetRatio" as LiveSortField,
+                        label: "超大单占比",
+                        align: "right",
+                      },
+                      {
+                        field: "bigNetflow" as LiveSortField,
+                        label: "大单净流入",
+                        align: "right",
+                      },
+                      {
+                        field: "bigNetRatio" as LiveSortField,
+                        label: "大单占比",
+                        align: "right",
+                      },
+                      {
+                        field: "midNetflow" as LiveSortField,
+                        label: "中单净流入",
+                        align: "right",
+                      },
+                      {
+                        field: "smallNetflow" as LiveSortField,
+                        label: "小单净流入",
+                        align: "right",
+                      },
+                      {
+                        field: "changePct" as LiveSortField,
+                        label: "涨跌幅",
+                        align: "right",
+                      },
+                    ] as const
+                  ).map(({ field, label }) => {
+                    const active = localSortField === field;
+                    return (
+                      <th
+                        key={field}
+                        onClick={() => toggleLocalSort(field)}
+                        className={cn(
+                          "px-3 py-2 text-right font-medium whitespace-nowrap cursor-pointer select-none transition-colors",
+                          active
+                            ? "text-[var(--accent)]"
+                            : "text-[var(--text-tertiary)] hover:text-[var(--text-primary)]",
+                        )}
+                      >
+                        <span className="inline-flex items-center justify-end gap-0.5">
+                          {label}
+                          {active ? (
+                            localSortDir === "desc" ? (
+                              <ChevronDown
+                                size={10}
+                                className="text-[var(--accent)]"
+                              />
+                            ) : (
+                              <ChevronUp
+                                size={10}
+                                className="text-[var(--accent)]"
+                              />
+                            )
+                          ) : (
+                            <ArrowUpDown size={10} className="opacity-30" />
+                          )}
+                        </span>
+                      </th>
+                    );
+                  })}
+                  <th className="px-3 py-2 text-left text-[var(--text-tertiary)] font-medium whitespace-nowrap">
+                    领涨股
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {sorted.map((item, idx) => {
+                  const isPos = item.mainNetflow >= 0;
+                  const barPct = Math.abs(item.mainNetflow) / maxAbs;
+                  return (
+                    <tr
+                      key={item.code + idx}
+                      className="border-b border-[var(--border-color)] hover:bg-[var(--bg-hover)] transition-colors"
+                    >
+                      {/* # */}
+                      <td className="px-3 py-1.5 text-center text-[var(--text-tertiary)]">
+                        {idx + 1}
+                      </td>
+
+                      {/* 板块名称 */}
+                      <td className="px-3 py-1.5 font-medium text-[var(--text-primary)] whitespace-nowrap">
+                        {item.name}
+                      </td>
+
+                      {/* 条形图（仿图2样式，左侧板块名，右侧横向条+数值） */}
+                      <td className="px-3 py-1.5">
+                        <div className="flex items-center justify-end gap-1.5">
+                          <div
+                            className="relative h-3.5 rounded overflow-hidden bg-[var(--bg-tertiary)]"
+                            style={{ width: 120 }}
+                          >
+                            {isPos ? (
+                              <div
+                                className="absolute right-0 top-0 h-full rounded bg-[#e84444]"
+                                style={{ width: `${barPct * 100}%` }}
+                              />
+                            ) : (
+                              <div
+                                className="absolute left-0 top-0 h-full rounded bg-[#09d464]"
+                                style={{ width: `${barPct * 100}%` }}
+                              />
+                            )}
+                          </div>
+                        </div>
+                      </td>
+
+                      {/* 主力净流入 */}
+                      <td
+                        className={cn(
+                          "px-3 py-1.5 text-right font-mono font-semibold whitespace-nowrap",
+                          isPos ? "text-[#e84444]" : "text-[#09d464]",
+                        )}
+                      >
+                        {fmtYi(item.mainNetflow)}
+                      </td>
+
+                      {/* 主力净占比 */}
+                      <td
+                        className={cn(
+                          "px-3 py-1.5 text-right font-mono whitespace-nowrap text-[11px]",
+                          item.mainNetRatio > 0
+                            ? "text-[#e84444]"
+                            : "text-[#09d464]",
+                        )}
+                      >
+                        {item.mainNetRatio > 0 ? "+" : ""}
+                        {item.mainNetRatio.toFixed(2)}%
+                      </td>
+
+                      {/* 超大单净流入 */}
+                      <td
+                        className={cn(
+                          "px-3 py-1.5 text-right font-mono whitespace-nowrap text-[11px]",
+                          item.superNetflow >= 0
+                            ? "text-[#e84444]"
+                            : "text-[#09d464]",
+                        )}
+                      >
+                        {fmtYi(item.superNetflow)}
+                      </td>
+
+                      {/* 超大单净占比 */}
+                      <td
+                        className={cn(
+                          "px-3 py-1.5 text-right font-mono whitespace-nowrap text-[11px]",
+                          item.superNetRatio > 0
+                            ? "text-[#e84444]"
+                            : "text-[#09d464]",
+                        )}
+                      >
+                        {item.superNetRatio > 0 ? "+" : ""}
+                        {item.superNetRatio.toFixed(2)}%
+                      </td>
+
+                      {/* 大单净流入 */}
+                      <td
+                        className={cn(
+                          "px-3 py-1.5 text-right font-mono whitespace-nowrap text-[11px]",
+                          item.bigNetflow >= 0
+                            ? "text-[#e84444]"
+                            : "text-[#09d464]",
+                        )}
+                      >
+                        {fmtYi(item.bigNetflow)}
+                      </td>
+
+                      {/* 大单占比 */}
+                      <td
+                        className={cn(
+                          "px-3 py-1.5 text-right font-mono whitespace-nowrap text-[11px]",
+                          item.bigNetRatio > 0
+                            ? "text-[#e84444]"
+                            : "text-[#09d464]",
+                        )}
+                      >
+                        {item.bigNetRatio > 0 ? "+" : ""}
+                        {item.bigNetRatio.toFixed(2)}%
+                      </td>
+
+                      {/* 中单净流入 */}
+                      <td
+                        className={cn(
+                          "px-3 py-1.5 text-right font-mono whitespace-nowrap text-[11px]",
+                          item.midNetflow >= 0
+                            ? "text-[#e84444]"
+                            : "text-[#09d464]",
+                        )}
+                      >
+                        {fmtYi(item.midNetflow)}
+                      </td>
+
+                      {/* 小单净流入 */}
+                      <td
+                        className={cn(
+                          "px-3 py-1.5 text-right font-mono whitespace-nowrap text-[11px]",
+                          item.smallNetflow >= 0
+                            ? "text-[#e84444]"
+                            : "text-[#09d464]",
+                        )}
+                      >
+                        {fmtYi(item.smallNetflow)}
+                      </td>
+
+                      {/* 涨跌幅 */}
+                      <td
+                        className={cn(
+                          "px-3 py-1.5 text-right font-mono whitespace-nowrap",
+                          item.changePct > 0
+                            ? "text-[#e84444]"
+                            : item.changePct < 0
+                              ? "text-[#09d464]"
+                              : "text-[var(--text-secondary)]",
+                        )}
+                      >
+                        {item.changePct > 0 ? "+" : ""}
+                        {item.changePct.toFixed(2)}%
+                      </td>
+
+                      {/* 领涨股 */}
+                      <td className="px-3 py-1.5 whitespace-nowrap">
+                        <div className="flex flex-col">
+                          <span className="text-[var(--text-primary)] text-[11px]">
+                            {item.topStockName || "--"}
+                          </span>
+                          {item.topStockCode && (
+                            <span className="text-[9px] text-[var(--text-tertiary)]">
+                              {item.topStockCode}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        {/* ── 底栏 ── */}
+        <div className="flex items-center gap-4 px-5 py-2.5 border-t border-[var(--border-color)] bg-[var(--bg-secondary)] flex-shrink-0 text-[10px] text-[var(--text-tertiary)]">
+          <div className="flex items-center gap-1.5">
+            <div className="w-3 h-2 rounded-sm bg-[#e84444]" />
+            主力净流入
+          </div>
+          <div className="flex items-center gap-1.5">
+            <div className="w-3 h-2 rounded-sm bg-[#09d464]" />
+            主力净流出
+          </div>
+          <span>
+            超大单 = 单笔 ≥ 100万；大单 = 20~100万；中单 = 4~20万；小单 &lt; 4万
+          </span>
+          <span className="ml-auto">
+            数据来源：东方财富 · 仅供参考，不构成投资建议
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────
 
 interface FundFlowItem {
   name: string;
@@ -922,9 +1595,9 @@ function RotationModal({ onClose }: { onClose: () => void }) {
   const [data, setData] = useState<RotationData | null>(null);
   const [loading, setLoading] = useState(true);
   const [days, setDays] = useState(14);
-  const [sortBy, setSortBy] = useState<"name" | "recent" | "cumulative">(
-    "recent",
-  );
+  const [sortBy, setSortBy] = useState<
+    "name" | "recent" | "cumulative" | `date_${number}`
+  >("recent");
   const [rotationSortOrder, setRotationSortOrder] = useState<"desc" | "asc">(
     "desc",
   );
@@ -1059,6 +1732,12 @@ function RotationModal({ onClose }: { onClose: () => void }) {
           b.data.reduce<number>((acc, v) => acc + (v ?? 0), 0) +
           b.currentChangePct;
         return rotationSortOrder === "desc" ? sumB - sumA : sumA - sumB;
+      }
+      if (sortBy.startsWith("date_")) {
+        const idx = parseInt(sortBy.slice(5), 10);
+        const av = a.data[idx] ?? -Infinity;
+        const bv = b.data[idx] ?? -Infinity;
+        return rotationSortOrder === "desc" ? bv - av : av - bv;
       }
       return a.name.localeCompare(b.name);
     });
@@ -1382,15 +2061,56 @@ function RotationModal({ onClose }: { onClose: () => void }) {
                     <th className="sticky left-0 z-10 bg-[var(--bg-primary)] px-3 py-1.5 text-left text-[var(--text-tertiary)] font-medium whitespace-nowrap w-44 min-w-44">
                       板块
                     </th>
-                    {dates.map((d) => (
-                      <th
-                        key={d}
-                        className="px-1 py-1.5 text-center text-[var(--text-tertiary)] font-normal whitespace-nowrap"
-                        style={{ minWidth: 48 }}
-                      >
-                        <span className="text-[10px]">{d.slice(5)}</span>
-                      </th>
-                    ))}
+                    {dates.map((d, i) => {
+                      const dateKey = `date_${i}` as const;
+                      const active = sortBy === dateKey;
+                      return (
+                        <th
+                          key={d}
+                          className={cn(
+                            "px-1 py-1.5 text-center font-normal whitespace-nowrap cursor-pointer select-none transition-colors group",
+                            active
+                              ? "text-[var(--accent)]"
+                              : "text-[var(--text-tertiary)] hover:text-[var(--text-primary)]",
+                          )}
+                          style={{ minWidth: 48 }}
+                          onClick={() => {
+                            if (active) {
+                              setRotationSortOrder((o) =>
+                                o === "desc" ? "asc" : "desc",
+                              );
+                            } else {
+                              setSortBy(dateKey);
+                              setRotationSortOrder("desc");
+                            }
+                          }}
+                        >
+                          <span className="inline-flex flex-col items-center gap-0">
+                            <span className="text-[10px]">{d.slice(5)}</span>
+                            <span className="h-2.5 flex items-center">
+                              {active ? (
+                                rotationSortOrder === "desc" ? (
+                                  <ChevronDown
+                                    size={9}
+                                    className="text-[var(--accent)]"
+                                  />
+                                ) : (
+                                  <ChevronUp
+                                    size={9}
+                                    className="text-[var(--accent)]"
+                                  />
+                                )
+                              ) : (
+                                <ArrowUpDown
+                                  size={8}
+                                  className="opacity-0 group-hover:opacity-30 transition-opacity"
+                                />
+                              )}
+                            </span>
+                          </span>
+                        </th>
+                      );
+                    })}
                     <th className="px-3 py-1.5 text-center font-medium whitespace-nowrap text-[10px]">
                       <span className="text-[var(--accent)]">今日实时</span>
                     </th>
@@ -2033,29 +2753,75 @@ function RotationModal({ onClose }: { onClose: () => void }) {
 
 export default function SwIndustryPage() {
   const router = useRouter();
+
+  // ── 从 sessionStorage 恢复上次的 UI 状态 ──
+  const restoredState = useRef<ReturnType<typeof loadSwPageState>>(null);
+  useEffect(() => {
+    restoredState.current = loadSwPageState();
+  }, []);
+
   const [boards, setBoards] = useState<SwBoard[]>([]);
   const [loading, setLoading] = useState(true);
-  const [sortKey, setSortKey] = useState<SortKey>("changePct");
-  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
+  const [sortKey, setSortKey] = useState<SortKey>(() => {
+    const s = loadSwPageState();
+    return (s?.sortKey as SortKey) ?? "changePct";
+  });
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">(() => {
+    const s = loadSwPageState();
+    return s?.sortOrder ?? "desc";
+  });
   const [selectedBoard, setSelectedBoard] = useState<SwBoard | null>(null);
   const [constituents, setConstituents] = useState<SwConstituent[]>([]);
   const [consLoading, setConsLoading] = useState(false);
-  const [consSortKey, setConsSortKey] = useState<ConsSortKey>("changePct");
-  const [consSortOrder, setConsSortOrder] = useState<"asc" | "desc">("desc");
+  const [consSortKey, setConsSortKey] = useState<ConsSortKey>(() => {
+    const s = loadSwPageState();
+    return (s?.consSortKey as ConsSortKey) ?? "changePct";
+  });
+  const [consSortOrder, setConsSortOrder] = useState<"asc" | "desc">(() => {
+    const s = loadSwPageState();
+    return s?.consSortOrder ?? "desc";
+  });
   const [syncing, setSyncing] = useState(false);
   const [showRotation, setShowRotation] = useState(false);
   const [showFundFlow, setShowFundFlow] = useState(false);
-  const [onlyIndustryBoards, setOnlyIndustryBoards] = useState(false);
+  const [showLiveFlow, setShowLiveFlow] = useState(false);
+  const [onlyIndustryBoards, setOnlyIndustryBoards] = useState(() => {
+    const s = loadSwPageState();
+    return s?.onlyIndustryBoards ?? false;
+  });
   const [deletingBoard, setDeletingBoard] = useState<string | null>(null);
-  // 板块列表三层折叠状态
-  const [listExpandedL1, setListExpandedL1] = useState<Set<string>>(new Set());
-  const [listExpandedL2, setListExpandedL2] = useState<Set<string>>(new Set());
-  const [listExpandedL3, setListExpandedL3] = useState<Set<string>>(new Set());
+  // 高亮股票（从个股详情返回时使用）
+  const [highlightStockCode, setHighlightStockCode] = useState<string | null>(
+    () => {
+      const s = loadSwPageState();
+      return s?.highlightStockCode ?? null;
+    },
+  );
+  // 板块列表三层折叠状态（从 sessionStorage 恢复）
+  const [listExpandedL1, setListExpandedL1] = useState<Set<string>>(() => {
+    const s = loadSwPageState();
+    return s?.listExpandedL1 ? new Set(s.listExpandedL1) : new Set();
+  });
+  const [listExpandedL2, setListExpandedL2] = useState<Set<string>>(() => {
+    const s = loadSwPageState();
+    return s?.listExpandedL2 ? new Set(s.listExpandedL2) : new Set();
+  });
+  const [listExpandedL3, setListExpandedL3] = useState<Set<string>>(() => {
+    const s = loadSwPageState();
+    return s?.listExpandedL3 ? new Set(s.listExpandedL3) : new Set();
+  });
+
+  // 滚动容器 ref（板块列表区域）
+  const boardListScrollRef = useRef<HTMLDivElement>(null);
+  const consScrollRef = useRef<HTMLDivElement>(null);
+  // 高亮行的 ref，用于自动滚动
+  const highlightRowRef = useRef<HTMLTableRowElement>(null);
 
   function toggleListL1(label: string) {
     setListExpandedL1((prev) => {
       const n = new Set(prev);
       n.has(label) ? n.delete(label) : n.add(label);
+      saveSwPageState({ listExpandedL1: Array.from(n) });
       return n;
     });
   }
@@ -2063,6 +2829,7 @@ export default function SwIndustryPage() {
     setListExpandedL2((prev) => {
       const n = new Set(prev);
       n.has(id) ? n.delete(id) : n.add(id);
+      saveSwPageState({ listExpandedL2: Array.from(n) });
       return n;
     });
   }
@@ -2070,11 +2837,73 @@ export default function SwIndustryPage() {
     setListExpandedL3((prev) => {
       const n = new Set(prev);
       n.has(key) ? n.delete(key) : n.add(key);
+      saveSwPageState({ listExpandedL3: Array.from(n) });
       return n;
     });
   }
 
-  const [topHeight, setTopHeight] = useState(300);
+  // ── 状态持久化：关键状态变化时同步保存 ──
+  useEffect(() => {
+    saveSwPageState({ sortKey, sortOrder, onlyIndustryBoards });
+  }, [sortKey, sortOrder, onlyIndustryBoards]);
+
+  useEffect(() => {
+    saveSwPageState({ consSortKey, consSortOrder });
+  }, [consSortKey, consSortOrder]);
+
+  useEffect(() => {
+    if (selectedBoard) {
+      saveSwPageState({ selectedBoardCode: selectedBoard.code });
+    }
+  }, [selectedBoard]);
+
+  // ── 滚动位置恢复 ──
+  // 1. 板块列表滚动位置（返回页面时恢复）
+  const savedScrollRestored = useRef(false);
+  useEffect(() => {
+    if (loading || savedScrollRestored.current) return;
+    const savedState = loadSwPageState();
+    if (!savedState) return;
+    savedScrollRestored.current = true;
+    // 延迟一帧等待渲染完成
+    requestAnimationFrame(() => {
+      if (boardListScrollRef.current && savedState.scrollTop) {
+        boardListScrollRef.current.scrollTop = savedState.scrollTop;
+      }
+    });
+  }, [loading]);
+
+  // 2. 高亮股票自动滚动（从个股详情返回，成分股列表中找到对应股票）
+  useEffect(() => {
+    if (!highlightStockCode || !highlightRowRef.current) return;
+    const timer = setTimeout(() => {
+      highlightRowRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+      // 高亮3秒后自动清除
+      const clearTimer = setTimeout(() => {
+        setHighlightStockCode(null);
+        saveSwPageState({ highlightStockCode: null });
+      }, 3000);
+      return () => clearTimeout(clearTimer);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [highlightStockCode, constituents]);
+
+  // ── 板块列表滚动时保存位置 ──
+  const handleBoardListScroll = useCallback(() => {
+    if (boardListScrollRef.current) {
+      saveSwPageState({
+        scrollTop: boardListScrollRef.current.scrollTop,
+      });
+    }
+  }, []);
+
+  const [topHeight, setTopHeight] = useState(() => {
+    const s = loadSwPageState();
+    return s?.topHeight ?? 300;
+  });
   const containerRef = useRef<HTMLDivElement>(null);
   const isDragging = useRef(false);
   const dragStartY = useRef(0);
@@ -2106,6 +2935,8 @@ export default function SwIndustryPage() {
       isDragging.current = false;
       document.body.style.cursor = "";
       document.body.style.userSelect = "";
+      // 拖拽结束时保存分割线位置
+      saveSwPageState({ topHeight: dragStartHeight.current });
     };
     window.addEventListener("mousemove", onMouseMove);
     window.addEventListener("mouseup", onMouseUp);
@@ -2137,6 +2968,22 @@ export default function SwIndustryPage() {
       if (r.ok) {
         const data = await r.json();
         setBoards(data);
+        // 恢复上次选中的板块（数据加载完后）
+        const savedState = loadSwPageState();
+        if (savedState?.selectedBoardCode) {
+          const board = data.find(
+            (b: SwBoard) => b.code === savedState.selectedBoardCode,
+          );
+          if (board) {
+            // 自动加载成分股（不清除高亮）
+            setSelectedBoard(board);
+            const endpoint = `${API}/api/sw-industry/constituents/${board.code}`;
+            fetch(endpoint)
+              .then((r2) => r2.json())
+              .then((cons: SwConstituent[]) => setConstituents(cons))
+              .catch(() => {});
+          }
+        }
       }
     } finally {
       setLoading(false);
@@ -2234,6 +3081,12 @@ export default function SwIndustryPage() {
   const fetchConstituents = async (board: SwBoard) => {
     setSelectedBoard(board);
     setConsLoading(true);
+    // 清除高亮（手动点击选择新板块时，清除之前的高亮）
+    setHighlightStockCode(null);
+    saveSwPageState({
+      selectedBoardCode: board.code,
+      highlightStockCode: null,
+    });
     try {
       const endpoint = onlyIndustryBoards
         ? `${API}/api/board/industry-constituents/${board.code}`
@@ -2602,6 +3455,14 @@ export default function SwIndustryPage() {
         </button>
 
         <button
+          onClick={() => setShowLiveFlow(true)}
+          className="flex items-center gap-1.5 text-xs text-[var(--text-secondary)] hover:text-[#e84444] transition-colors border border-[var(--border-color)] hover:border-[#e84444]/50 px-2.5 py-1 rounded-md"
+        >
+          <Activity size={13} />
+          实时流向
+        </button>
+
+        <button
           onClick={() => setShowFundFlow(true)}
           className="flex items-center gap-1.5 text-xs text-[var(--text-secondary)] hover:text-[#e84444] transition-colors border border-[var(--border-color)] hover:border-[#e84444]/50 px-2.5 py-1 rounded-md"
         >
@@ -2633,8 +3494,10 @@ export default function SwIndustryPage() {
 
       <div ref={containerRef} className="flex-1 flex flex-col overflow-hidden">
         <div
+          ref={boardListScrollRef}
           className="border-b border-[var(--border-color)] overflow-auto flex-shrink-0"
           style={{ height: topHeight }}
+          onScroll={handleBoardListScroll}
         >
           <table className="w-full text-xs border-collapse">
             <thead className="sticky top-0 bg-[var(--bg-secondary)] z-10">
@@ -2879,8 +3742,15 @@ export default function SwIndustryPage() {
                                                       <button
                                                         onClick={(e) => {
                                                           e.stopPropagation();
+                                                          saveSwPageState({
+                                                            scrollTop:
+                                                              boardListScrollRef
+                                                                .current
+                                                                ?.scrollTop ??
+                                                              0,
+                                                          });
                                                           router.push(
-                                                            `/sw/${b.code}`,
+                                                            `/sw/${b.code}?bn=${encodeURIComponent(b.name)}`,
                                                           );
                                                         }}
                                                         className="text-[#3b82f6] hover:underline transition-colors text-[11px]"
@@ -2982,7 +3852,14 @@ export default function SwIndustryPage() {
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              router.push(`/sw/${b.code}`);
+                              // 保存当前状态，传递板块名称给详情页
+                              saveSwPageState({
+                                scrollTop:
+                                  boardListScrollRef.current?.scrollTop ?? 0,
+                              });
+                              router.push(
+                                `/sw/${b.code}?bn=${encodeURIComponent(b.name)}`,
+                              );
                             }}
                             className="text-[#3b82f6] hover:underline transition-colors"
                           >
@@ -3135,14 +4012,22 @@ export default function SwIndustryPage() {
                   {!consLoading &&
                     sortedCons.map((s, idx) => {
                       const isSearchedStock = selectedStock?.code === s.code;
+                      const isHighlighted = highlightStockCode === s.code;
+                      // 构建跳转到个股详情的 URL，携带来源（板块列表页+当前板块）
+                      const stockDetailUrl = selectedBoard
+                        ? `/stock/${s.code}?src=sw_list&bc=${encodeURIComponent(selectedBoard.code)}&bn=${encodeURIComponent(selectedBoard.name)}`
+                        : `/stock/${s.code}?src=sw_list`;
                       return (
                         <tr
                           key={s.code}
+                          ref={isHighlighted ? highlightRowRef : undefined}
                           className={cn(
                             "border-b border-[var(--border-color)] transition-colors",
-                            isSearchedStock
-                              ? "bg-[#3b82f6]/10 border-l-2 border-l-[#3b82f6]"
-                              : "hover:bg-[var(--bg-hover)]",
+                            isHighlighted
+                              ? "bg-[var(--accent)]/10 border-l-2 border-l-[var(--accent)]"
+                              : isSearchedStock
+                                ? "bg-[#3b82f6]/10 border-l-2 border-l-[#3b82f6]"
+                                : "hover:bg-[var(--bg-hover)]",
                           )}
                         >
                           <td className="px-3 py-1.5 text-center text-[var(--text-tertiary)]">
@@ -3150,16 +4035,16 @@ export default function SwIndustryPage() {
                           </td>
                           <td
                             className="px-3 py-1.5 cursor-pointer"
-                            onClick={() =>
-                              window.open(`/stock/${s.code}`, "_blank")
-                            }
+                            onClick={() => router.push(stockDetailUrl)}
                           >
                             <div
                               className={cn(
                                 "font-medium hover:underline",
-                                isSearchedStock
-                                  ? "text-[#3b82f6]"
-                                  : "text-[var(--text-primary)]",
+                                isHighlighted
+                                  ? "text-[var(--accent)]"
+                                  : isSearchedStock
+                                    ? "text-[#3b82f6]"
+                                    : "text-[var(--text-primary)]",
                               )}
                             >
                               {s.name}
@@ -3194,12 +4079,15 @@ export default function SwIndustryPage() {
                           </td>
                           <td className="px-3 py-1.5">
                             <button
-                              onClick={() =>
-                                window.open(`/stock/${s.code}`, "_blank")
-                              }
+                              onClick={() => {
+                                const url = selectedBoard
+                                  ? `/stock/${s.code}?src=sw_list&bc=${encodeURIComponent(selectedBoard.code)}&bn=${encodeURIComponent(selectedBoard.name)}`
+                                  : `/stock/${s.code}?src=sw_list`;
+                                router.push(url);
+                              }}
                               className="text-[10px] text-[#3b82f6] hover:underline whitespace-nowrap"
                             >
-                              详情↗
+                              详情
                             </button>
                           </td>
                         </tr>
@@ -3214,6 +4102,7 @@ export default function SwIndustryPage() {
 
       {showRotation && <RotationModal onClose={() => setShowRotation(false)} />}
       {showFundFlow && <FundFlowModal onClose={() => setShowFundFlow(false)} />}
+      {showLiveFlow && <LiveFlowModal onClose={() => setShowLiveFlow(false)} />}
     </div>
   );
 }

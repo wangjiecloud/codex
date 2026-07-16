@@ -4,6 +4,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from datetime import datetime, date, timedelta
+from typing import Optional
 
 from db import SessionLocal, StockQuote, StockMeta
 from bs_session import get_bs, reset_bs
@@ -303,7 +304,7 @@ def _fetch_and_cache_quote(code: str, update_market_cap: bool = False) -> dict:
         db.close()
 
 
-def _row_to_dict(r: StockQuote, warning: str | None = None) -> dict:
+def _row_to_dict(r: StockQuote, warning: Optional[str] = None) -> dict:
     d = {
         "code": r.code,
         "name": r.name,

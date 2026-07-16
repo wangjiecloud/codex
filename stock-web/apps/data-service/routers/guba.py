@@ -1,3 +1,4 @@
+from typing import Optional
 """
 股吧资讯与公告抓取路由
 数据来源：
@@ -221,7 +222,7 @@ def sync_guba_stock(code: str) -> int:
     return total_saved
 
 
-def sync_all_guba(codes: list[str] | None = None):
+def sync_all_guba(codes: Optional[list[str]] = None):
     """同步所有股票的股吧数据（定时任务/一键更新调用）"""
     global _sync_status
     with _sync_lock:

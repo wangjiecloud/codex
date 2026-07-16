@@ -1,6 +1,7 @@
 import json
 import threading
 from collections import deque
+from typing import Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -74,7 +75,7 @@ def record_task_last_run(task_id: str):
     threading.Thread(target=_persist, daemon=True).start()
 
 
-def get_task_last_run_dt(task_id: str) -> datetime | None:
+def get_task_last_run_dt(task_id: str) -> Optional[datetime]:
     """返回指定任务的上次完成时间（datetime，UTC），从 DB 读取；未执行过返回 None"""
     db = SessionLocal()
     try:
@@ -113,7 +114,7 @@ def sched_log(level: str, message: str, source: str = "manual"):
         )
 
 
-def _get_last_sync(table_class, field_name="updated_at") -> str | None:
+def _get_last_sync(table_class, field_name="updated_at") -> Optional[str]:
     from db import SessionLocal
     from sqlalchemy import func as _func
 
@@ -229,15 +230,17 @@ async def retry_failed_stocks(codes: list[str] = None):
 
     def _retry():
         with _failed_stocks_lock:
-            targets = (
-                [
-                    _failed_stocks.get(f"kline:{c}")
-                    for c in codes
-                    if f"kline:{c}" in _failed_stocks
-                ]
-                if codes
-                else list(_failed_stocks.values())
-            )
+            targets = []
+            if codes:
+                # 如果指定了代码列表，查找所有类型的失败记录
+                for c in codes:
+                    for key in _failed_stocks.keys():
+                        if _failed_stocks[key]["code"] == c:
+                            targets.append(_failed_stocks[key])
+            else:
+                # 重试所有失败记录
+                targets = list(_failed_stocks.values())
+        
         for item in targets:
             if not item:
                 continue
@@ -247,6 +250,65 @@ async def retry_failed_stocks(codes: list[str] = None):
                     with _failed_stocks_lock:
                         _failed_stocks.pop(f"kline:{item['code']}", None)
                     sched_log("success", f"重试成功: {item['code']} {item['name']}")
+                elif item["syncType"] == "sw_kline":
+                    # 重试申万板块K线
+                    from routers.sw_industry import _fetch_sw_kline
+                    from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+                    from db import StockKline, SessionLocal
+                    from datetime import datetime
+                    
+                    # 从名称中提取周期类型（如"通信设备(daily K)"）
+                    period = "daily"
+                    if "(weekly" in item["name"].lower():
+                        period = "weekly"
+                    elif "(monthly" in item["name"].lower():
+                        period = "monthly"
+                    
+                    count = {"daily": 60, "weekly": 104, "monthly": 100}.get(period, 60)
+                    bars = _fetch_sw_kline(item["code"], count, period)
+                    
+                    if bars:
+                        db = SessionLocal()
+                        try:
+                            for bar in bars:
+                                stmt = sqlite_insert(StockKline).values(
+                                    code=item["code"],
+                                    period=period,
+                                    trade_date=bar["time"],
+                                    open=bar["open"],
+                                    high=bar["high"],
+                                    low=bar["low"],
+                                    close=bar["close"],
+                                    volume=bar["volume"],
+                                    turnover=0.0,
+                                    turn_rate=0.0,
+                                    change_pct=bar["changePct"],
+                                    updated_at=datetime.utcnow(),
+                                )
+                                stmt = stmt.on_conflict_do_update(
+                                    index_elements=["code", "period", "trade_date"],
+                                    set_={
+                                        "open": stmt.excluded.open,
+                                        "high": stmt.excluded.high,
+                                        "low": stmt.excluded.low,
+                                        "close": stmt.excluded.close,
+                                        "volume": stmt.excluded.volume,
+                                        "change_pct": stmt.excluded.change_pct,
+                                        "updated_at": stmt.excluded.updated_at,
+                                    },
+                                )
+                                db.execute(stmt)
+                            db.commit()
+                            with _failed_stocks_lock:
+                                _failed_stocks.pop(f"sw_kline:{item['code']}", None)
+                            sched_log("success", f"重试成功: {item['code']} {item['name']}")
+                        except Exception as db_err:
+                            db.rollback()
+                            sched_log("error", f"重试失败: {item['code']} - 数据库写入失败: {db_err}")
+                        finally:
+                            db.close()
+                    else:
+                        sched_log("error", f"重试失败: {item['code']} - 无法获取K线数据")
             except Exception as e:
                 sched_log("error", f"重试失败: {item['code']} - {e}")
 
@@ -264,7 +326,11 @@ async def clear_failed_stocks():
 @router.get("/scheduler-logs")
 async def get_scheduler_logs(since: int = Query(0)):
     with _sched_logs_lock:
-        logs = [e for e in _sched_logs if e["seq"] > since]
+        # 若 since >= 当前最大 seq，说明前端 seq 比服务端新（服务重启过），返回全部日志
+        if since >= _sched_log_seq and since > 0:
+            logs = list(_sched_logs)
+        else:
+            logs = [e for e in _sched_logs if e["seq"] > since]
     return {"logs": logs, "latest_seq": _sched_log_seq}
 
 
@@ -306,8 +372,9 @@ async def get_task_status():
 
 
 @router.post("/trigger-task/{task_id}")
-async def trigger_task(task_id: str):
-    """手动立即触发指定调度任务（通过 modify_job 将 next_run_time 设为 now）"""
+async def trigger_task(task_id: str, force: bool = Query(default=False)):
+    """手动立即触发指定调度任务（通过 modify_job 将 next_run_time 设为 now）
+    force=true 时对支持强制模式的任务（如 weekly_fundamental_sync）强制全量重新同步。"""
     scheduler = _get_scheduler()
     if scheduler is None:
         return {"status": "error", "message": "scheduler not found"}
@@ -322,10 +389,16 @@ async def trigger_task(task_id: str):
         }
 
     try:
+        # 对 weekly_fundamental_sync 支持 force 模式
+        if force and task_id == "weekly_fundamental_sync":
+            import main as _main
+            _main._f10_force_flag["force"] = True
+            sched_log("info", "[task-trigger] 强制全量模式：weekly_fundamental_sync 将重新同步所有股票")
+
         from apscheduler.util import datetime_ceil
         job.modify(next_run_time=datetime.now())
-        sched_log("info", f"[task-trigger] 手动触发任务: {task_id}")
-        return {"status": "triggered", "task_id": task_id}
+        sched_log("info", f"[task-trigger] 手动触发任务: {task_id}" + (" (force)" if force else ""))
+        return {"status": "triggered", "task_id": task_id, "force": force}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 

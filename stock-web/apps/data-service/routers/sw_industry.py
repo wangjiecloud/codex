@@ -638,6 +638,33 @@ def _fetch_sw_kline(board_code: str, count: int, period: str = "daily") -> list[
     return bars  # 返回全量，由调用方决定截取条数
 
 
+def _dedup_period_bars(bars: list, period: str) -> list:
+    """对周K/月K去重：申万接口在当周/当月未收盘时每天都会返回一条记录，
+    按周/月分组后只保留每组中日期最大（最新）的一条。"""
+    if period not in ("weekly", "monthly"):
+        return bars
+    # 按周/月分组 key
+    if period == "weekly":
+        def _group_key(bar):
+            d = bar["time"]  # "YYYY-MM-DD"
+            from datetime import date as _date
+            dt = _date.fromisoformat(d)
+            # ISO 周号（周一为第一天）
+            return dt.isocalendar()[:2]  # (year, week)
+    else:
+        def _group_key(bar):
+            return bar["time"][:7]  # "YYYY-MM"
+
+    # 每组只保留日期最大的一条
+    group: dict = {}
+    for bar in bars:
+        key = _group_key(bar)
+        if key not in group or bar["time"] > group[key]["time"]:
+            group[key] = bar
+    # 按时间升序返回
+    return sorted(group.values(), key=lambda x: x["time"])
+
+
 @router.get("/kline/{board_code}")
 async def get_sw_kline(
     board_code: str,
@@ -645,6 +672,13 @@ async def get_sw_kline(
     count: int = Query(default=110, ge=10, le=500),
 ):
     from fastapi.concurrency import run_in_threadpool
+
+    # 按周期调整默认返回条数（与 kline.py 保持一致）
+    if count == 110:
+        if period == "weekly":
+            count = 156
+        elif period == "monthly":
+            count = 120
 
     def _read_cached():
         db = SessionLocal()
@@ -658,7 +692,7 @@ async def get_sw_kline(
                 db.query(StockKline)
                 .filter(StockKline.code == board_code, StockKline.period == period)
                 .order_by(StockKline.trade_date.desc())
-                .limit(count)
+                .limit(count + 20)  # 多取一些，去重后再截取
                 .all()
             )
             return total, rows
@@ -672,7 +706,7 @@ async def get_sw_kline(
     min_required = _min_cache.get(period, 100)
 
     if total >= min_required:
-        return [
+        bars = [
             {
                 "time": r.trade_date,
                 "open": r.open,
@@ -685,6 +719,9 @@ async def get_sw_kline(
             }
             for r in reversed(rows)
         ]
+        # 对周K/月K去重，去除同周/同月内的重复记录
+        bars = _dedup_period_bars(bars, period)
+        return bars[-count:]
 
     def _fetch_and_cache():
         try:
@@ -728,7 +765,8 @@ async def get_sw_kline(
             db.rollback()
         finally:
             db.close()
-        # 写入全量后，返回最新 count 条
+        # 写入全量后，对周K/月K去重，返回最新 count 条
+        bars = _dedup_period_bars(bars, period)
         return bars[-count:]
 
     return await run_in_threadpool(_fetch_and_cache)
@@ -858,6 +896,7 @@ async def get_sw_rotation(days: int = Query(default=14, ge=5, le=60)):
 def _sync_rotation_klines(force: bool = False):
     """后台同步板块轮动所需的 K 线数据（top20 + 产业关联 + 所有申万二级，含日/周/月K）"""
     from routers.industry import is_trading_day
+    from routers.system import record_failed_stock
 
     # 1) 非交易日不同步（force 模式跳过此判断，允许补历史数据）
     if not force and not is_trading_day():
@@ -884,9 +923,11 @@ def _sync_rotation_klines(force: bool = False):
             return
 
     db = SessionLocal()
+    board_name_map = {}  # 用于记录板块代码和名称的映射
     try:
         all_boards = db.query(SwIndustry).order_by(SwIndustry.change_pct.desc()).all()
         all_sw_codes = [b.code for b in all_boards]
+        board_name_map = {b.code: b.name for b in all_boards}  # 构建板块代码->名称的映射
         if force:
             # force 模式：找出日K数据落后的板块单独补，速度更快
             from sqlalchemy import text as _text
@@ -919,6 +960,7 @@ def _sync_rotation_klines(force: bool = False):
     ]
 
     for code in codes_to_sync:
+        board_name = board_name_map.get(code, code)  # 获取板块名称，没有则使用代码
         for period, count in period_counts:
             try:
                 bars = _fetch_sw_kline(code, count, period)
@@ -955,11 +997,27 @@ def _sync_rotation_klines(force: bool = False):
                         )
                         db2.execute(stmt)
                     db2.commit()
-                except Exception:
+                except Exception as db_err:
                     db2.rollback()
+                    # 记录数据库写入失败
+                    record_failed_stock(
+                        code=code,
+                        name=f"{board_name}({period}K)",
+                        reason=f"数据库写入失败: {str(db_err)[:100]}",
+                        sync_type="sw_kline"
+                    )
+                    print(f"[sync_rotation_klines] DB error for {code} {period}: {db_err}")
                 finally:
                     db2.close()
-            except Exception:
+            except Exception as fetch_err:
+                # 记录K线获取失败
+                record_failed_stock(
+                    code=code,
+                    name=f"{board_name}({period}K)",
+                    reason=f"K线获取失败: {str(fetch_err)[:100]}",
+                    sync_type="sw_kline"
+                )
+                print(f"[sync_rotation_klines] Fetch error for {code} {period}: {fetch_err}")
                 continue
 
 

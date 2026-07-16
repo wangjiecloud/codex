@@ -1,3 +1,4 @@
+from typing import Optional
 from fastapi import APIRouter, Query
 import requests
 import threading
@@ -644,7 +645,7 @@ def _get_theme_list() -> list[dict]:
     return result
 
 
-def _fetch_theme_news_page(theme_id: str, content_id: int | None, page: int) -> list[dict]:
+def _fetch_theme_news_page(theme_id: str, content_id: Optional[int], page: int) -> list[dict]:
     """拉取单个主题第 page 页新闻列表（最多30条）"""
     if theme_id == "headline":
         # 头条使用独立接口
@@ -681,7 +682,7 @@ def _fetch_theme_news_page(theme_id: str, content_id: int | None, page: int) -> 
     ]
 
 
-def _get_theme_content_id(theme_id: str) -> int | None:
+def _get_theme_content_id(theme_id: str) -> Optional[int]:
     """通过主题 meta 接口获取 contentId"""
     if theme_id == "headline":
         return None
@@ -695,7 +696,7 @@ def _get_theme_content_id(theme_id: str) -> int | None:
     return None
 
 
-def _get_latest_pub_time(theme_id: str) -> str | None:
+def _get_latest_pub_time(theme_id: str) -> Optional[str]:
     """从数据库查询该主题最新一条新闻的 pub_time"""
     try:
         conn = sqlite3.connect(_db_path_theme())

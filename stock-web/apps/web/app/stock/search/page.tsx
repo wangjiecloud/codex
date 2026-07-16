@@ -1,7 +1,18 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import {
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+  useMemo,
+  Fragment,
+} from "react";
 import { useRouter } from "next/navigation";
+import {
+  saveStockSearchPageState,
+  loadStockSearchPageState,
+} from "@/lib/navStore";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
@@ -37,6 +48,10 @@ import {
   CalendarDays,
   FileText,
   LineChart,
+  Plus,
+  LayoutGrid,
+  ChevronUp,
+  ArrowUpDown,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import ReviewTab from "@/components/stock/ReviewTab";
@@ -74,6 +89,323 @@ function parseStocks(raw: Record<string, unknown>[]): PopularStock[] {
     hisRc: typeof s.hisRc === "number" ? s.hisRc : 0,
     industry: typeof s.industry === "string" ? s.industry : null,
   }));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 板块分布弹框组件
+// ─────────────────────────────────────────────────────────────────────────────
+interface BoardDistRow {
+  boardCode: string;
+  boardName: string;
+  stockCount: number;
+  avgPct: number;
+  stocks: { code: string; name: string; pct: number | null }[];
+}
+
+type BoardSortKey = "avgPct" | "stockCount";
+
+function SectorDistModal({
+  open,
+  onClose,
+  stocks,
+  sortMode,
+}: {
+  open: boolean;
+  onClose: () => void;
+  stocks: PopularStock[];
+  sortMode: SortMode;
+}) {
+  const [rows, setRows] = useState<BoardDistRow[]>([]);
+  const [loadingRows, setLoadingRows] = useState(false);
+  const [sortKey, setSortKey] = useState<BoardSortKey>("stockCount");
+  const [sortAsc, setSortAsc] = useState(false);
+  const [expandedBoard, setExpandedBoard] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open || stocks.length === 0) return;
+    let cancelled = false;
+    setLoadingRows(true);
+    setRows([]);
+    setExpandedBoard(null);
+
+    (async () => {
+      // 批量并发查每只股票所属板块（每批10个）
+      const codeToBoards: Record<string, { code: string; name: string }[]> = {};
+      const batchSize = 10;
+      for (let i = 0; i < stocks.length; i += batchSize) {
+        if (cancelled) return;
+        const batch = stocks.slice(i, i + batchSize);
+        await Promise.all(
+          batch.map(async (s) => {
+            try {
+              const res = await fetch(
+                `/api/sw-industry/boards-by-stock/${s.code}`,
+                { cache: "no-store" },
+              );
+              if (res.ok) {
+                const boards: { code: string; name: string }[] =
+                  await res.json();
+                codeToBoards[s.code] = boards;
+              } else {
+                codeToBoards[s.code] = [];
+              }
+            } catch {
+              codeToBoards[s.code] = [];
+            }
+          }),
+        );
+      }
+
+      if (cancelled) return;
+
+      // 3. 按板块 code 聚合
+      const boardMap: Record<
+        string,
+        {
+          boardCode: string;
+          boardName: string;
+          stockList: { code: string; name: string; pct: number | null }[];
+        }
+      > = {};
+
+      stocks.forEach((s) => {
+        const boards = codeToBoards[s.code] ?? [];
+        boards.forEach((b) => {
+          if (!boardMap[b.code]) {
+            boardMap[b.code] = {
+              boardCode: b.code,
+              boardName: b.name,
+              stockList: [],
+            };
+          }
+          boardMap[b.code].stockList.push({
+            code: s.code,
+            name: s.name,
+            pct: s.pct,
+          });
+        });
+      });
+
+      // 4. 计算均值涨幅
+      const result: BoardDistRow[] = Object.values(boardMap).map((b) => {
+        const validPcts = b.stockList
+          .filter((s) => s.pct !== null)
+          .map((s) => s.pct as number);
+        const avgPct =
+          validPcts.length > 0
+            ? validPcts.reduce((a, c) => a + c, 0) / validPcts.length
+            : 0;
+        return {
+          boardCode: b.boardCode,
+          boardName: b.boardName,
+          stockCount: b.stockList.length,
+          avgPct,
+          stocks: b.stockList,
+        };
+      });
+
+      if (!cancelled) {
+        setRows(result);
+        setLoadingRows(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, stocks, sortMode]);
+
+  const sorted = useMemo(() => {
+    return [...rows].sort((a, b) => {
+      const va = a[sortKey];
+      const vb = b[sortKey];
+      return sortAsc ? va - vb : vb - va;
+    });
+  }, [rows, sortKey, sortAsc]);
+
+  const handleSort = (key: BoardSortKey) => {
+    if (sortKey === key) {
+      setSortAsc((v) => !v);
+    } else {
+      setSortKey(key);
+      setSortAsc(false);
+    }
+  };
+
+  const SortIcon = ({ k }: { k: BoardSortKey }) => {
+    if (sortKey !== k) return <ArrowUpDown size={11} className="opacity-30" />;
+    return sortAsc ? (
+      <ChevronUp size={11} className="text-[var(--accent)]" />
+    ) : (
+      <ChevronDown size={11} className="text-[var(--accent)]" />
+    );
+  };
+
+  const fmtPct = (v: number) => {
+    const sign = v >= 0 ? "+" : "";
+    return `${sign}${v.toFixed(2)}%`;
+  };
+  const pctColor = (v: number) =>
+    v > 0
+      ? "text-[var(--color-up)]"
+      : v < 0
+        ? "text-[var(--color-down)]"
+        : "text-[var(--text-tertiary)]";
+
+  if (!open) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center"
+      onClick={onClose}
+    >
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
+      <div
+        className="relative z-10 w-[680px] max-h-[80vh] flex flex-col rounded-xl border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-2xl overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* 头部 */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border-color)] shrink-0">
+          <div className="flex items-center gap-2">
+            <LayoutGrid size={15} className="text-[var(--accent)]" />
+            <span className="text-sm font-semibold text-[var(--text-primary)]">
+              板块分布
+            </span>
+            <span className="text-xs text-[var(--text-tertiary)] ml-1">
+              {sortMode === "hot" ? "人气榜" : "飙升榜"} · Top {stocks.length}
+            </span>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors p-1 rounded"
+          >
+            <X size={14} />
+          </button>
+        </div>
+
+        {/* 说明 */}
+        <div className="px-5 pt-3 pb-0 shrink-0">
+          <p className="text-[11px] text-[var(--text-tertiary)]">
+            统计榜单内股票所属申万二级板块，涨幅均值为该板块内上榜股票的平均涨跌幅，点击行可展开查看成分股
+          </p>
+        </div>
+
+        {/* 表格 */}
+        <div className="flex-1 overflow-y-auto px-5 py-3">
+          {loadingRows ? (
+            <div className="flex flex-col items-center justify-center py-16 gap-3">
+              <Loader2
+                size={22}
+                className="animate-spin text-[var(--accent)]"
+              />
+              <span className="text-xs text-[var(--text-tertiary)]">
+                正在查询 {stocks.length} 支股票所属板块…
+              </span>
+            </div>
+          ) : sorted.length === 0 ? (
+            <div className="flex items-center justify-center py-16 text-xs text-[var(--text-tertiary)]">
+              暂无数据
+            </div>
+          ) : (
+            <table className="w-full text-xs border-collapse">
+              <thead>
+                <tr className="text-[var(--text-tertiary)] border-b border-[var(--border-color)]">
+                  <th className="text-left py-2 pr-3 font-medium">板块名称</th>
+                  <th
+                    className="text-right py-2 px-2 font-medium cursor-pointer hover:text-[var(--text-primary)] transition-colors select-none whitespace-nowrap"
+                    onClick={() => handleSort("stockCount")}
+                  >
+                    <span className="inline-flex items-center justify-end gap-1">
+                      上榜股数 <SortIcon k="stockCount" />
+                    </span>
+                  </th>
+                  <th
+                    className="text-right py-2 pl-2 font-medium cursor-pointer hover:text-[var(--text-primary)] transition-colors select-none whitespace-nowrap"
+                    onClick={() => handleSort("avgPct")}
+                  >
+                    <span className="inline-flex items-center justify-end gap-1">
+                      均值涨幅 <SortIcon k="avgPct" />
+                    </span>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {sorted.map((row) => (
+                  <Fragment key={row.boardCode}>
+                    <tr
+                      className="border-b border-[var(--border-color)]/40 hover:bg-[var(--bg-secondary)] cursor-pointer transition-colors"
+                      onClick={() =>
+                        setExpandedBoard(
+                          expandedBoard === row.boardCode
+                            ? null
+                            : row.boardCode,
+                        )
+                      }
+                    >
+                      <td className="py-2.5 pr-3">
+                        <span className="font-medium text-[var(--text-primary)]">
+                          {row.boardName}
+                        </span>
+                      </td>
+                      <td className="py-2.5 px-2 text-right text-[var(--text-secondary)]">
+                        {row.stockCount}
+                      </td>
+                      <td
+                        className={cn(
+                          "py-2.5 pl-2 text-right font-bold text-sm",
+                          pctColor(row.avgPct),
+                        )}
+                      >
+                        {fmtPct(row.avgPct)}
+                      </td>
+                    </tr>
+                    {expandedBoard === row.boardCode && (
+                      <tr key={`${row.boardCode}-detail`}>
+                        <td colSpan={3} className="pb-2 pt-0">
+                          <div className="ml-0 bg-[var(--bg-secondary)] rounded-lg px-3 py-2 flex flex-wrap gap-x-4 gap-y-1">
+                            {row.stocks.map((s) => (
+                              <span
+                                key={s.code}
+                                className="flex items-center gap-1.5 text-[11px]"
+                              >
+                                <span className="text-[var(--text-secondary)]">
+                                  {s.name}
+                                </span>
+                                <span
+                                  className={cn(
+                                    "font-bold text-sm",
+                                    pctColor(s.pct ?? 0),
+                                  )}
+                                >
+                                  {s.pct !== null ? fmtPct(s.pct) : "--"}
+                                </span>
+                              </span>
+                            ))}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        {/* 底部统计 */}
+        {!loadingRows && sorted.length > 0 && (
+          <div className="px-5 py-3 border-t border-[var(--border-color)] shrink-0 flex items-center justify-between">
+            <span className="text-[11px] text-[var(--text-tertiary)]">
+              共 {sorted.length} 个板块
+            </span>
+            <span className="text-[11px] text-[var(--text-tertiary)]">
+              点击行展开 / 收起成分股
+            </span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2131,6 +2463,69 @@ export default function StockSearchPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const [visibleCount, setVisibleCount] = useState(VISIBLE_DEFAULT);
+  const [watchlistCodes, setWatchlistCodes] = useState<string[]>([]);
+  const [addAllToast, setAddAllToast] = useState<string | null>(null);
+  const [sectorModalOpen, setSectorModalOpen] = useState(false);
+
+  // 客户端挂载后从 localStorage 恢复持久化状态（避免 SSR hydration 不匹配）
+  useEffect(() => {
+    const s = loadStockSearchPageState();
+    if (s?.mainTab) setMainTab(s.mainTab as MainTab);
+    if (s?.sortMode) setSortMode(s.sortMode as SortMode);
+  }, []);
+
+  // 读取自选股列表
+  useEffect(() => {
+    fetch(`${REL_API}/api/watchlist`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((data) => setWatchlistCodes(data.codes || []))
+      .catch(() => {
+        // API 不可用时降级读 localStorage
+        try {
+          const saved = localStorage.getItem("custom-watchlist");
+          if (saved) setWatchlistCodes(JSON.parse(saved) as string[]);
+        } catch {
+          /* ignore */
+        }
+      });
+  }, []);
+
+  // 一键加入自选股（去重）
+  const handleAddAllToWatchlist = useCallback(async () => {
+    if (stocks.length === 0) return;
+    try {
+      // 从 API 读取当前自选股
+      let existing: string[] = watchlistCodes;
+      try {
+        const res = await fetch(`${REL_API}/api/watchlist`, {
+          cache: "no-store",
+        });
+        if (res.ok) existing = (await res.json()).codes || [];
+      } catch {
+        /* 用 state 中的数据 */
+      }
+
+      const newCodes = stocks
+        .map((s) => s.code)
+        .filter((c) => !existing.includes(c));
+      const merged = [...existing, ...newCodes];
+
+      await fetch(`${REL_API}/api/watchlist`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ codes: merged }),
+      });
+      setWatchlistCodes(merged);
+      const msg =
+        newCodes.length > 0
+          ? `已添加 ${newCodes.length} 只（跳过 ${stocks.length - newCodes.length} 只重复）`
+          : `全部 ${stocks.length} 只已在自选股中，无需重复添加`;
+      setAddAllToast(msg);
+      setTimeout(() => setAddAllToast(null), 3000);
+    } catch {
+      // ignore
+    }
+  }, [stocks]);
 
   // 从数据库缓存读取榜单
   const fetchFromCache = useCallback(async (mode: SortMode) => {
@@ -2176,6 +2571,11 @@ export default function StockSearchPage() {
     setVisibleCount(VISIBLE_DEFAULT);
     fetchFromCache(sortMode);
   }, [sortMode, fetchFromCache, mainTab]);
+
+  // 持久化 mainTab 和 sortMode
+  useEffect(() => {
+    saveStockSearchPageState({ mainTab, sortMode });
+  }, [mainTab, sortMode]);
 
   const formatUpdatedAt = (iso: string | null) => {
     if (!iso) return "";
@@ -2348,6 +2748,15 @@ export default function StockSearchPage() {
                     Top {stocks.length}
                   </span>
                 )}
+                {stocks.length > 0 && (
+                  <button
+                    onClick={() => setSectorModalOpen(true)}
+                    className="flex items-center gap-1.5 px-2.5 py-1 text-[11px] rounded-md border border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--accent)]/50 hover:bg-[var(--accent)]/5 transition-all"
+                  >
+                    <LayoutGrid size={11} />
+                    板块分布
+                  </button>
+                )}
               </div>
 
               <div className="flex items-center gap-2">
@@ -2371,6 +2780,15 @@ export default function StockSearchPage() {
                   />
                   {refreshing ? "更新中..." : "刷新"}
                 </button>
+                {stocks.length > 0 && (
+                  <button
+                    onClick={handleAddAllToWatchlist}
+                    className="flex items-center gap-1 px-2 py-1 text-[11px] rounded border border-[var(--accent)]/40 text-[var(--accent)] hover:bg-[var(--accent)]/10 transition-colors"
+                  >
+                    <Plus size={11} />
+                    全部加入自选
+                  </button>
+                )}
               </div>
             </div>
 
@@ -2577,6 +2995,22 @@ export default function StockSearchPage() {
                   : "数据来源：东方财富飙升榜（今日排名上升幅度）· 点击刷新获取最新数据"}
               </p>
             </div>
+
+            {/* 添加成功 Toast */}
+            {addAllToast && (
+              <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-lg bg-[var(--bg-primary)] border border-[var(--accent)]/40 shadow-xl text-[12px] text-[var(--text-primary)] flex items-center gap-2 animate-fade-in">
+                <span className="text-[var(--accent)]">✓</span>
+                {addAllToast}
+              </div>
+            )}
+
+            {/* 板块分布弹框 */}
+            <SectorDistModal
+              open={sectorModalOpen}
+              onClose={() => setSectorModalOpen(false)}
+              stocks={stocks}
+              sortMode={sortMode}
+            />
           </div>
         </>
       ) : mainTab === "news" ? (
@@ -3560,7 +3994,7 @@ function MemoPanel() {
 
                                 return (
                                   <div
-                                    key={entry.date}
+                                    key={`${entry.date}-${ei}`}
                                     className={cn(
                                       "relative pl-4",
                                       ei < dailyEntries.length - 1 && "pb-3",

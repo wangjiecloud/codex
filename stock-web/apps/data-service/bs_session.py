@@ -7,7 +7,8 @@ from datetime import datetime, timedelta
 _lock = threading.Lock()
 _logged_in = False
 _last_login_attempt = None
-_login_failure_backoff = timedelta(seconds=60)
+# 退避时间：10 秒（原 60 秒太长，批量同步期间连续失败会卡很久）
+_login_failure_backoff = timedelta(seconds=10)
 
 
 def get_bs():
@@ -18,8 +19,9 @@ def get_bs():
                 _last_login_attempt
                 and datetime.utcnow() - _last_login_attempt < _login_failure_backoff
             ):
+                elapsed = (datetime.utcnow() - _last_login_attempt).seconds
                 raise RuntimeError(
-                    "baostock login recently failed, backing off for 60s"
+                    f"baostock login recently failed, backing off ({elapsed}s / 10s)"
                 )
 
             try:
@@ -39,6 +41,7 @@ def get_bs():
 
 
 def reset_bs():
+    """重置 baostock session，同时清除退避计时，允许立即重连。"""
     global _logged_in, _last_login_attempt
     with _lock:
         try:
@@ -46,4 +49,4 @@ def reset_bs():
         except Exception:
             pass
         _logged_in = False
-        _last_login_attempt = None
+        _last_login_attempt = None  # 清除退避，下次 get_bs() 立即尝试重连

@@ -1,10 +1,11 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, ArrowUpDown, ChevronUp, ChevronDown } from "lucide-react";
 import { StockChart, generateMockData } from "@/components/stock/StockChart";
 import { cn } from "@/lib/utils";
+import { saveSwPageState } from "@/lib/navStore";
 
 const API = "http://localhost:8000";
 
@@ -114,7 +115,15 @@ function SortIcon({
 export default function SwBoardDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const code = params.code as string;
+  // 从 URL 读取板块名称（由列表页传入）
+  const boardNameFromUrl = searchParams.get("bn");
+
+  // 返回板块列表
+  const handleBack = () => {
+    router.push("/sw");
+  };
 
   const [board, setBoard] = useState<BoardDetail | null>(null);
   const [klineData, setKlineData] = useState<KLineBar[]>(
@@ -251,14 +260,17 @@ export default function SwBoardDetailPage() {
       {/* Header */}
       <div className="flex items-center gap-3 px-5 py-3 border-b border-[var(--border-color)] flex-shrink-0">
         <button
-          onClick={() => router.back()}
-          className="flex items-center gap-1 text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors"
+          onClick={handleBack}
+          className="flex items-center gap-1.5 text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors"
+          title="返回板块列表"
         >
           <ArrowLeft size={15} />
+          <span className="text-[11px]">板块</span>
         </button>
+        <span className="text-[var(--text-tertiary)] text-[11px]">/</span>
         <div className="flex items-center gap-2">
           <span className="text-[15px] font-bold text-[var(--text-primary)]">
-            {board?.name ?? code}
+            {board?.name ?? boardNameFromUrl ?? code}
           </span>
           <span className="text-xs text-[var(--text-tertiary)]">{code}</span>
           {board && (
@@ -489,63 +501,75 @@ export default function SwBoardDetailPage() {
                     </tr>
                   ))}
                 {!consLoading &&
-                  sortedCons.map((s, idx) => (
-                    <tr
-                      key={s.code}
-                      className="border-b border-[var(--border-color)] hover:bg-[var(--bg-hover)] transition-colors"
-                    >
-                      <td className="px-3 py-1.5 text-center text-[var(--text-tertiary)]">
-                        {idx + 1}
-                      </td>
-                      <td
-                        className="px-3 py-1.5 cursor-pointer"
-                        onClick={() =>
-                          window.open(`/stock/${s.code}`, "_blank")
-                        }
+                  sortedCons.map((s, idx) => {
+                    // 跳转到个股详情，携带来源信息（板块列表→板块详情→个股）
+                    const boardName = board?.name ?? boardNameFromUrl ?? code;
+                    const stockDetailUrl = `/stock/${s.code}?src=sw&bc=${encodeURIComponent(code)}&bn=${encodeURIComponent(boardName)}`;
+                    return (
+                      <tr
+                        key={s.code}
+                        className="border-b border-[var(--border-color)] hover:bg-[var(--bg-hover)] transition-colors"
                       >
-                        <div className="font-medium text-[var(--text-primary)] hover:underline">
-                          {s.name}
-                        </div>
-                        <div className="text-[10px] text-[var(--text-tertiary)]">
-                          {s.code}
-                        </div>
-                      </td>
-                      <td
-                        className={cn(
-                          "px-3 py-1.5 font-mono font-semibold",
-                          pct(s.changePct),
-                        )}
-                      >
-                        {sgn(s.changePct)}
-                        {fmt(s.changePct)}%
-                      </td>
-                      <td className="px-3 py-1.5 font-mono text-[var(--text-primary)]">
-                        {fmt(s.price)}
-                      </td>
-                      <td className="px-3 py-1.5 text-[var(--text-secondary)]">
-                        {fmtNum(s.turnover)}
-                      </td>
-                      <td className="px-3 py-1.5 text-[var(--text-secondary)]">
-                        {fmtNum(s.marketCap)}
-                      </td>
-                      <td className="px-3 py-1.5 text-[var(--text-secondary)]">
-                        {fmt(s.pe, 1)}
-                      </td>
-                      <td className="px-3 py-1.5 text-[var(--text-secondary)]">
-                        {fmt(s.pb, 2)}
-                      </td>
-                      <td className="px-3 py-1.5">
-                        <button
-                          onClick={() =>
-                            window.open(`/stock/${s.code}`, "_blank")
-                          }
-                          className="text-[10px] text-[#3b82f6] hover:underline whitespace-nowrap"
+                        <td className="px-3 py-1.5 text-center text-[var(--text-tertiary)]">
+                          {idx + 1}
+                        </td>
+                        <td
+                          className="px-3 py-1.5 cursor-pointer"
+                          onClick={() => {
+                            // 保存高亮信息（返回板块列表时高亮该股票）
+                            saveSwPageState({ highlightStockCode: s.code });
+                            router.push(stockDetailUrl);
+                          }}
                         >
-                          详情↗
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                          <div className="font-medium text-[var(--text-primary)] hover:underline">
+                            {s.name}
+                          </div>
+                          <div className="text-[10px] text-[var(--text-tertiary)]">
+                            {s.code}
+                          </div>
+                        </td>
+                        <td
+                          className={cn(
+                            "px-3 py-1.5 font-mono font-semibold",
+                            pct(s.changePct),
+                          )}
+                        >
+                          {sgn(s.changePct)}
+                          {fmt(s.changePct)}%
+                        </td>
+                        <td className="px-3 py-1.5 font-mono text-[var(--text-primary)]">
+                          {fmt(s.price)}
+                        </td>
+                        <td className="px-3 py-1.5 text-[var(--text-secondary)]">
+                          {fmtNum(s.turnover)}
+                        </td>
+                        <td className="px-3 py-1.5 text-[var(--text-secondary)]">
+                          {fmtNum(s.marketCap)}
+                        </td>
+                        <td className="px-3 py-1.5 text-[var(--text-secondary)]">
+                          {fmt(s.pe, 1)}
+                        </td>
+                        <td className="px-3 py-1.5 text-[var(--text-secondary)]">
+                          {fmt(s.pb, 2)}
+                        </td>
+                        <td className="px-3 py-1.5">
+                          <button
+                            onClick={() => {
+                              saveSwPageState({ highlightStockCode: s.code });
+                              const boardName =
+                                board?.name ?? boardNameFromUrl ?? code;
+                              router.push(
+                                `/stock/${s.code}?src=sw&bc=${encodeURIComponent(code)}&bn=${encodeURIComponent(boardName)}`,
+                              );
+                            }}
+                            className="text-[10px] text-[#3b82f6] hover:underline whitespace-nowrap"
+                          >
+                            详情
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
               </tbody>
             </table>
           </div>

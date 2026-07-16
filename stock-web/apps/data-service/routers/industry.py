@@ -1,3 +1,4 @@
+from typing import Optional
 from fastapi import APIRouter, BackgroundTasks, Query, HTTPException
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
@@ -25,7 +26,7 @@ from bs_session import get_bs, reset_bs
 router = APIRouter()
 
 
-def is_trading_day(d: date | None = None) -> bool:
+def is_trading_day(d: Optional[date] = None) -> bool:
     """判断指定日期（默认今天）是否为 A 股交易日（周一至周五，排除节假日）。
     使用 baostock 查询准确结果；若 baostock 不可用则降级为仅判断周末。
     """
@@ -50,7 +51,7 @@ def is_trading_day(d: date | None = None) -> bool:
     return True
 
 
-def _latest_kline_date(code: str) -> str | None:
+def _latest_kline_date(code: str) -> Optional[str]:
     """查询数据库中该股票日 K 线的最新日期，不存在则返回 None。"""
     db = SessionLocal()
     try:
@@ -149,7 +150,7 @@ def _get_non_a_shares(db: Session) -> list[dict]:
     return [{"code": r.code, "name": r.name, "market": r.market} for r in rows]
 
 
-def get_stock_name(code: str, db: Session | None = None) -> str:
+def get_stock_name(code: str, db: Optional[Session] = None) -> str:
     """Get stock name from DB; fall back to empty string."""
     if db is None:
         db = SessionLocal()
@@ -277,6 +278,8 @@ def _sync_all_quotes():
     total_codes = len(all_codes)
     skipped_count = 0
     count = 0
+    # 本次同步中已触发过 kline 修复的股票集合，避免重复触发
+    _kline_repair_triggered: set = set()
 
     try:
         bs = get_bs()
@@ -340,13 +343,29 @@ def _sync_all_quotes():
                     except FuturesTimeout:
                         print(f"[sync_quotes] {raw_code} timed out, skipping")
                         reset_bs()
-                        bs = get_bs()
+                        try:
+                            bs = get_bs()
+                        except Exception as _re:
+                            print(f"[sync_quotes] 超时后重连失败: {_re}，终止本次同步")
+                            return
                         continue
 
                 if rs.error_code != "0":
                     print(f"[sync_quotes] {raw_code} baostock error: {rs.error_msg}")
                     reset_bs()
-                    bs = get_bs()
+                    # 等待重连，最多重试 3 次，每次间隔 5 秒
+                    reconnected = False
+                    for _retry in range(3):
+                        import time as _t; _t.sleep(5)
+                        try:
+                            bs = get_bs()
+                            reconnected = True
+                            break
+                        except Exception as _re:
+                            print(f"[sync_quotes] baostock 重连第{_retry+1}次失败: {_re}")
+                    if not reconnected:
+                        print("[sync_quotes] baostock 重连失败，终止本次同步")
+                        return
                     continue
 
                 row_data = []
@@ -357,6 +376,22 @@ def _sync_all_quotes():
                     row_count += 1
             except Exception as e:
                 print(f"[sync_quotes] {raw_code} fetch error: {e}")
+                # 若是网络断连错误，重置 session 并等待重连
+                err_str = str(e)
+                if "Broken pipe" in err_str or "login failed" in err_str or "接收数据异常" in err_str:
+                    reset_bs()
+                    reconnected = False
+                    for _retry in range(3):
+                        import time as _t; _t.sleep(5)
+                        try:
+                            bs = get_bs()
+                            reconnected = True
+                            break
+                        except Exception as _re:
+                            print(f"[sync_quotes] baostock 重连第{_retry+1}次失败: {_re}")
+                    if not reconnected:
+                        print("[sync_quotes] baostock 重连失败，终止本次同步")
+                        return
                 continue
 
             if not row_data:
@@ -376,7 +411,11 @@ def _sync_all_quotes():
             if returned_bs_code != bs_code.lower():
                 print(f"[sync_quotes] {raw_code} 串码：请求 {bs_code}，返回 {returned_bs_code}，重置session跳过")
                 reset_bs()
-                bs = get_bs()
+                try:
+                    bs = get_bs()
+                except Exception as _re:
+                    print(f"[sync_quotes] 串码后重连失败: {_re}，终止本次同步")
+                    return
                 continue
 
             row_trade_date = r[0]  # baostock 返回的行情日期
@@ -412,6 +451,19 @@ def _sync_all_quotes():
                 if diff_pct > 60:
                     print(f"[sync_quotes] {raw_code} 价格异常：baostock={close}, kline={kline_ref[1]}, 偏差={diff_pct:.1f}%，跳过写入")
                     sched_log("warning", f"[行情同步] {raw_code} 价格异常（baostock={close}, kline={kline_ref[1]}, 偏差={diff_pct:.1f}%），已跳过", source="scheduler")
+                    # kline 数据陈旧或错误导致偏差过大，后台异步重新拉取全量 kline 修复
+                    if raw_code not in _kline_repair_triggered:
+                        _kline_repair_triggered.add(raw_code)
+                        import threading as _threading
+                        def _repair_kline(_code=raw_code):
+                            try:
+                                print(f"[sync_quotes] 触发 kline 修复：{_code}")
+                                sched_log("info", f"[行情同步] 触发 kline 修复：{_code}（价格偏差过大，重新拉取全量K线）", source="scheduler")
+                                _sync_klines(_code, "daily", force=True)
+                                print(f"[sync_quotes] kline 修复完成：{_code}")
+                            except Exception as _e:
+                                print(f"[sync_quotes] kline 修复失败：{_code}: {_e}")
+                        _threading.Thread(target=_repair_kline, daemon=True).start()
                     continue
             high = round(_safe_float(r[3]), 4)
             low = round(_safe_float(r[4]), 4)
@@ -517,9 +569,10 @@ def _sync_all_quotes():
         _quotes_lock.release()
 
 
-def _sync_klines(code: str, period: str = "daily"):
+def _sync_klines(code: str, period: str = "daily", force: bool = False):
     # 今日已有最新 K 线则跳过（避免重复全量拉取）
-    if period == "daily":
+    # force=True 时跳过此检查，用于修复陈旧/错误的 kline 数据
+    if period == "daily" and not force:
         latest = _latest_kline_date(code)
         today_str = date.today().strftime("%Y-%m-%d")
         if latest and latest >= today_str:

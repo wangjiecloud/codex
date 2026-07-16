@@ -10,6 +10,7 @@ import {
   Search,
   X,
 } from "lucide-react";
+import { saveWatchlistPageState, loadWatchlistPageState } from "@/lib/navStore";
 
 /* ─────────────────────────────────────────────
    Types
@@ -220,12 +221,16 @@ function StockTable({
   loading,
   highlightCode,
   highlightRowRef,
+  scrollRef,
+  onRowClick,
 }: {
   stocks: StockQuote[];
   groups?: { name: string; stocks: string[] }[];
   loading: boolean;
   highlightCode?: string | null;
   highlightRowRef?: React.MutableRefObject<HTMLTableRowElement | null>;
+  scrollRef?: React.RefObject<HTMLDivElement | null>;
+  onRowClick?: (code: string) => void;
 }) {
   const router = useRouter();
   const [sortKey, setSortKey] = useState("change");
@@ -294,7 +299,11 @@ function StockTable({
       <tr
         key={s.code}
         ref={isHighlight ? highlightRowRef : undefined}
-        onClick={() => router.push(`/stock/${s.code}`)}
+        onClick={() =>
+          onRowClick
+            ? onRowClick(s.code)
+            : router.push(`/stock/${s.code}?src=watchlist`)
+        }
         className={
           "border-b border-[var(--border-color)]/30 cursor-pointer transition-colors " +
           (isHighlight
@@ -381,7 +390,7 @@ function StockTable({
   const colCount = COLS.length;
 
   return (
-    <div className="flex-1 overflow-auto">
+    <div ref={scrollRef} className="flex-1 overflow-auto">
       <table
         className="w-full text-[11px] border-collapse"
         style={{ minWidth: "960px" }}
@@ -505,9 +514,16 @@ function isMarketHours(): boolean {
    Main Component
 ───────────────────────────────────────────── */
 export function WatchlistPanel() {
+  // 从 sessionStorage 读取上次状态
+  const _savedWL = useRef(loadWatchlistPageState());
+
   const [industries, setIndustries] = useState<Industry[]>([]);
-  const [activeIndustry, setActiveIndustry] = useState("");
-  const [activeSubGroup, setActiveSubGroup] = useState("");
+  const [activeIndustry, setActiveIndustry] = useState(
+    _savedWL.current?.industryActiveId ?? "",
+  );
+  const [activeSubGroup, setActiveSubGroup] = useState(
+    _savedWL.current?.subGroupActiveId ?? "",
+  );
 
   const [subGroupsMap, setSubGroupsMap] = useState<Record<string, SubGroup[]>>(
     {},
@@ -528,6 +544,10 @@ export function WatchlistPanel() {
   const quotesLoaded = useRef(false);
   // 搜索选中后，记录待切换的 subGroup，防止被 activeIndustry effect 覆盖
   const pendingSubGroupRef = useRef<string | null>(null);
+  // 滚动容器 ref，用于保存/恢复滚动位置
+  const tableScrollRef = useRef<HTMLDivElement>(null);
+  // 标记是否已经恢复过滚动（只执行一次）
+  const scrollRestoredRef = useRef(false);
 
   // ── 搜索相关 state ──
   const [searchQuery, setSearchQuery] = useState("");
@@ -646,7 +666,21 @@ export function WatchlistPanel() {
             (i) => i.id !== "overview",
           );
           setIndustries(filtered);
-          if (filtered.length > 0) setActiveIndustry(filtered[0].id);
+          // 恢复上次选中的产业，没有持久化状态时才默认选第一个
+          if (filtered.length > 0) {
+            const savedId = _savedWL.current?.industryActiveId;
+            const savedExists =
+              savedId && filtered.some((i) => i.id === savedId);
+            if (savedExists) {
+              // 恢复保存的产业：同时把 pendingSubGroupRef 设为保存的层级
+              if (_savedWL.current?.subGroupActiveId) {
+                pendingSubGroupRef.current = _savedWL.current.subGroupActiveId;
+              }
+              setActiveIndustry(savedId!);
+            } else {
+              setActiveIndustry(filtered[0].id);
+            }
+          }
 
           const allQuotes = stocksData.quotes ?? {};
           setQuotes(allQuotes);
@@ -743,6 +777,38 @@ export function WatchlistPanel() {
     });
   }, [Object.keys(quotes).length, Object.keys(subGroupsMap).length]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  /* ── 持久化当前选中的产业和层级 ── */
+  useEffect(() => {
+    if (!activeIndustry) return;
+    const indObj = industries.find((i) => i.id === activeIndustry);
+    const sgObj = subGroupsMap[activeIndustry]?.find(
+      (sg) => sg.id === activeSubGroup,
+    );
+    saveWatchlistPageState({
+      industryActiveId: activeIndustry,
+      industryActiveName: indObj?.name ?? activeIndustry,
+      subGroupActiveId: activeSubGroup,
+      subGroupActiveName: sgObj?.name ?? "",
+    });
+  }, [activeIndustry, activeSubGroup]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* ── 返回后恢复滚动位置（只执行一次，等 activeSubGroup 稳定后） ── */
+  useEffect(() => {
+    if (scrollRestoredRef.current) return;
+    const saved = _savedWL.current;
+    if (!saved?.listScrollTop || !saved.industryActiveId) return;
+    // 等待目标产业图谱加载完成且 activeSubGroup 已匹配
+    if (activeIndustry !== saved.industryActiveId) return;
+    if (activeSubGroup !== saved.subGroupActiveId) return;
+    const timer = setTimeout(() => {
+      if (tableScrollRef.current) {
+        tableScrollRef.current.scrollTop = saved.listScrollTop;
+      }
+      scrollRestoredRef.current = true;
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [activeIndustry, activeSubGroup]); // eslint-disable-line react-hooks/exhaustive-deps
+
   /* ── Load quotes for missing stocks ── */
   const currentSgs = subGroupsMap[activeIndustry] ?? [];
   const currentSg = currentSgs.find((sg) => sg.id === activeSubGroup);
@@ -817,6 +883,31 @@ export function WatchlistPanel() {
 
   const upCount = displayStocks.filter((s) => s.change > 0).length;
   const dnCount = displayStocks.filter((s) => s.change < 0).length;
+
+  /* ── 点击股票行：保存当前状态后跳转 ── */
+  const router = useRouter();
+  const handleRowClick = useCallback(
+    (code: string) => {
+      // 保存跳转前的完整状态（产业、层级、滚动位置、产业/层级名称）
+      const indObj = industries.find((i) => i.id === activeIndustry);
+      const sgObj = subGroupsMap[activeIndustry]?.find(
+        (sg) => sg.id === activeSubGroup,
+      );
+      saveWatchlistPageState({
+        activeTab: "industry",
+        industryActiveId: activeIndustry,
+        industryActiveName: indObj?.name ?? activeIndustry,
+        subGroupActiveId: activeSubGroup,
+        subGroupActiveName: sgObj?.name ?? "",
+        listScrollTop: tableScrollRef.current?.scrollTop ?? 0,
+      });
+      // URL 携带产业名和层级名，用于个股页面包屑
+      const indName = encodeURIComponent(indObj?.name ?? activeIndustry);
+      const sgName = encodeURIComponent(sgObj?.name ?? "");
+      router.push(`/stock/${code}?src=watchlist&in=${indName}&isn=${sgName}`);
+    },
+    [activeIndustry, activeSubGroup, industries, subGroupsMap, router],
+  );
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -1033,6 +1124,8 @@ export function WatchlistPanel() {
         loading={graphLoading || (quotesLoading && displayStocks.length === 0)}
         highlightCode={highlightCode}
         highlightRowRef={highlightRowRef}
+        scrollRef={tableScrollRef}
+        onRowClick={handleRowClick}
       />
     </div>
   );

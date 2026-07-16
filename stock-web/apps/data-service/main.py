@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
+import os
 from routers import (
     quote,
     kline,
@@ -22,6 +23,7 @@ from routers import (
     memo,
     market_breadth,
     market_flow,
+    watchlist,
 )
 import akshare as ak
 from fastapi import HTTPException
@@ -60,9 +62,15 @@ app.include_router(fund_flow.router, prefix="/api/fund-flow", tags=["资金流�
 app.include_router(market_flow.router, prefix="/api/market-flow", tags=["市场资金流向"])
 app.include_router(relation.router, prefix="/api/relation", tags=["股票关联"])
 app.include_router(memo.router, prefix="/api/memo", tags=["备忘录"])
-app.include_router(market_breadth.router, prefix="/api/market-breadth", tags=["市场情绪"])
+app.include_router(watchlist.router)
+app.include_router(
+    market_breadth.router, prefix="/api/market-breadth", tags=["市场情绪"]
+)
 
 _scheduler = BackgroundScheduler(timezone="Asia/Shanghai")
+
+# F10 强制全量同步标志：被 trigger-task?force=true 设置，任务执行时消费后重置
+_f10_force_flag = {"force": False}
 
 
 def _warmup_caches():
@@ -125,6 +133,7 @@ def _warmup_caches():
 def _init_popular_stock_cache_table():
     """建立人气榜缓存表（如不存在）"""
     import sqlite3, os
+
     db_path = os.path.join(os.path.dirname(__file__), "stock_data.db")
     try:
         conn = sqlite3.connect(db_path)
@@ -160,21 +169,26 @@ def startup():
 
     # 从数据库预热任务完成时间缓存（进程重启后恢复 lastRun 显示）
     from routers.system import _load_task_last_run_from_db
+
     _load_task_last_run_from_db()
 
     # 启动时后台异步同步全球指数 K 线（如果数据库中缺少数据）
     def _maybe_sync_global_klines():
         from db import SessionLocal, GlobalIndexKline
+
         db = SessionLocal()
         try:
             count = db.query(GlobalIndexKline).count()
         finally:
             db.close()
         if count < 100:  # 数据不足时触发全量同步
-            print(f"[startup] global_index_kline has only {count} rows, triggering sync")
+            print(
+                f"[startup] global_index_kline has only {count} rows, triggering sync"
+            )
             global_market.sync_all_review_index_klines()
         else:
             print(f"[startup] global_index_kline has {count} rows, skip sync")
+
     threading.Thread(target=_maybe_sync_global_klines, daemon=True).start()
 
     _scheduler.add_job(
@@ -236,24 +250,44 @@ def startup():
         replace_existing=True,
     )
 
+    # 每天16:30收盘后同步大盘资金流向历史数据（AKShare stock_market_fund_flow 落库）
+    _scheduler.add_job(
+        market_flow.sync_market_daily_fund_flow,
+        trigger="cron",
+        hour=16,
+        minute=30,
+        id="market_daily_fund_flow_sync",
+        replace_existing=True,
+    )
+
     # 每个工作日15:32收盘后自动同步产业链股票当日5分钟K线数据入库（baostock，支持任意历史日期）
     def _auto_sync_minute():
         """收盘后批量同步产业链全部A股 + A股宽基指数当日分时数据，持续积累历史"""
         from db import SessionLocal
         from routers.industry import is_trading_day
+
         if not is_trading_day():
             return
         db = SessionLocal()
         try:
             from sqlalchemy import text as _text
-            rows = db.execute(_text("""
+
+            rows = db.execute(
+                _text("""
                 SELECT DISTINCT json_each.value as code
                 FROM industry_node, json_each(industry_node.stocks)
                 WHERE industry_node.stocks IS NOT NULL AND industry_node.stocks != '[]'
-            """)).fetchall()
-            codes = [r[0] for r in rows if r[0] and (
-                r[0].startswith("0") or r[0].startswith("3") or r[0].startswith("6")
-            ) and len(r[0]) == 6]
+            """)
+            ).fetchall()
+            codes = [
+                r[0]
+                for r in rows
+                if r[0]
+                and (
+                    r[0].startswith("0") or r[0].startswith("3") or r[0].startswith("6")
+                )
+                and len(r[0]) == 6
+            ]
         except Exception:
             codes = []
         finally:
@@ -271,6 +305,7 @@ def startup():
         print(f"[minute_sync] 开始同步 {len(codes)} 只产业链A股+宽基指数的当日分时数据")
         from routers.minute import _fetch_one_code, _get_latest_trade_date
         import time as _t
+
         trade_date = _get_latest_trade_date()
         ok, cached, skip, error = 0, 0, 0, 0
         for code in codes:
@@ -299,9 +334,11 @@ def startup():
     # 每个工作日15:35收盘后快速同步 A 股宽基指数分时数据（6只，约2分钟完成）
     def _auto_sync_indices_minute():
         from routers.industry import is_trading_day
+
         if not is_trading_day():
             return
         from routers.minute import _run_indices_sync, _get_latest_trade_date
+
         trade_date = _get_latest_trade_date()
         print(f"[indices_minute_sync] 同步 A 股宽基指数分时 {trade_date}")
         _run_indices_sync(trade_date)
@@ -322,6 +359,16 @@ def startup():
         hour=18,
         minute=0,
         id="global_index_kline_sync",
+        replace_existing=True,
+    )
+
+    # 每天17:00同步全球指数快照（复盘Tab展示的最新价/涨跌幅等）
+    _scheduler.add_job(
+        global_market.sync_global_indices,
+        trigger="cron",
+        hour=17,
+        minute=0,
+        id="global_index_snapshot_sync",
         replace_existing=True,
     )
 
@@ -351,86 +398,209 @@ def startup():
         try:
             from sqlalchemy import text as _text
             from db import StockMeta as _SM
+
             already = {
-                r[0] for r in db.execute(_text(
-                    "SELECT DISTINCT code FROM stock_kline WHERE period='daily' AND trade_date=:today"
-                ), {"today": today_str}).fetchall()
+                r[0]
+                for r in db.execute(
+                    _text(
+                        "SELECT DISTINCT code FROM stock_kline WHERE period='daily' AND trade_date=:today"
+                    ),
+                    {"today": today_str},
+                ).fetchall()
             }
-            all_codes = [r.code for r in db.query(_SM).filter(_SM.market.in_(["SH", "SZ"])).all()]
+            all_codes = [
+                r.code for r in db.query(_SM).filter(_SM.market.in_(["SH", "SZ"])).all()
+            ]
         finally:
             db.close()
 
         pending = [c for c in all_codes if c not in already]
-        sched_log("info", f"[K线增量] 待同步 {len(pending)}/{len(all_codes)} 只（今日已跳过 {len(already)} 只）")
+        sched_log(
+            "info",
+            f"[K线增量] 待同步 {len(pending)}/{len(all_codes)} 只（今日已跳过 {len(already)} 只）",
+        )
 
         for code in pending:
             try:
                 _sync_klines(code, "daily")
             except Exception as e:
                 print(f"[kline_incr] error {code}: {e}")
-            import time as _t; _t.sleep(0.1)
+            import time as _t
+
+            _t.sleep(0.1)
 
         sched_log("success", f"[K线增量] 完成，共同步 {len(pending)} 只")
 
-    _scheduler.add_job(
-        _daily_klines_incremental,
-        trigger="cron",
-        hour=18,
-        minute=0,
-        id="daily_klines_incremental",
-        replace_existing=True,
-    )
+    # daily_klines_incremental 已取消定时，保留函数供页面手动触发
 
     # 每周日凌晨02:00同步F10财务数据（低频，财报季同步30天内未更新，非财报季只补缺失）
+    # force_sync=True 时忽略已有数据，强制全量重新同步（用于二季报等手动补数据）
+    _F10_CURSOR_FILE = os.path.join(os.path.dirname(__file__), "f10_sync_cursor.json")
+
+    def _save_f10_cursor(mode: str, codes: list, done: int):
+        """保存 F10 同步断点游标"""
+        import json as _json
+
+        try:
+            with open(_F10_CURSOR_FILE, "w", encoding="utf-8") as f:
+                _json.dump({"mode": mode, "codes": codes, "done": done}, f)
+        except Exception as e:
+            print(f"[weekly_f10] 游标保存失败: {e}")
+
+    def _load_f10_cursor(mode: str):
+        """加载 F10 同步断点游标，mode 匹配才返回 (codes, start_index)，否则返回 None"""
+        import json as _json
+
+        try:
+            if not os.path.exists(_F10_CURSOR_FILE):
+                return None
+            with open(_F10_CURSOR_FILE, "r", encoding="utf-8") as f:
+                cursor = _json.load(f)
+            if cursor.get("mode") == mode and isinstance(cursor.get("codes"), list):
+                done = cursor.get("done", 0)
+                codes = cursor["codes"]
+                if 0 <= done < len(codes):
+                    return codes, done
+        except Exception as e:
+            print(f"[weekly_f10] 游标加载失败: {e}")
+        return None
+
+    def _clear_f10_cursor():
+        try:
+            if os.path.exists(_F10_CURSOR_FILE):
+                os.remove(_F10_CURSOR_FILE)
+        except Exception:
+            pass
+
     def _is_reporting_season() -> bool:
         """财报密集披露期：1-4月（年报/一季报）、8月（半年报）、10-11月（三季报）"""
         from datetime import date as _date
+
         return _date.today().month in (1, 2, 3, 4, 8, 10, 11)
 
-    def _weekly_fundamental_sync():
-        """每周日低频同步F10财务数据：财报季同步30天内未更新的，非财报季只同步从未同步过的"""
+    def _weekly_fundamental_sync(force: bool = False):
+        """每周日低频同步F10财务数据，支持断点续传。
+        force=True 时强制全量重新同步所有股票（忽略已有数据，用于手动补二季报等）"""
         from db import SessionLocal
         from routers.system import sched_log
         from routers.fundamental import _scrape_f10, _upsert_f10
         from datetime import date as _date, timedelta as _td
 
+        # 检查是否被 trigger-task?force=true 设置了强制标志
+        _force = force or _f10_force_flag.get("force", False)
+        _f10_force_flag["force"] = False  # 消费后重置
+
         reporting = _is_reporting_season()
-        sched_log("info", f"[weekly_f10] 开始，当前{'财报季' if reporting else '非财报季'}")
+        # 游标 mode 区分强制全量 vs 财报季 vs 普通，避免模式切换后错误续传
+        cursor_mode = "force" if _force else ("reporting" if reporting else "normal")
 
-        db = SessionLocal()
-        try:
-            from db import StockF10Snapshot, StockMeta as _SM
-            all_codes = [r.code for r in db.query(_SM.code).all()]
-
-            if reporting:
-                # 财报季：同步30天内未更新的
-                threshold = (_date.today() - _td(days=30)).strftime("%Y-%m-%d")
-                already = {
-                    r.code for r in db.query(StockF10Snapshot.code, StockF10Snapshot.updated_at).all()
-                    if r.updated_at and r.updated_at.strftime("%Y-%m-%d") >= threshold
-                }
-                sched_log("info", f"[weekly_f10] 财报季：已有{len(already)}只在30天内，待同步{len(all_codes)-len(already)}只")
+        # 尝试加载断点游标
+        resumed = _load_f10_cursor(cursor_mode)
+        if resumed:
+            codes, start_index = resumed
+            sched_log(
+                "info",
+                f"[weekly_f10] 断点续传（{cursor_mode}）：从第 {start_index + 1}/{len(codes)} 只继续",
+            )
+        else:
+            # 无游标，重新计算待同步列表
+            if _force:
+                sched_log(
+                    "info", "[weekly_f10] 强制全量模式：忽略已有数据，重新同步所有股票"
+                )
             else:
-                # 非财报季：只同步从未同步过的
-                already = {r.code for r in db.query(StockF10Snapshot.code).all()}
-                sched_log("info", f"[weekly_f10] 非财报季：已有{len(already)}只，仅补缺失{len(all_codes)-len(already)}只")
-        finally:
-            db.close()
+                sched_log(
+                    "info",
+                    f"[weekly_f10] 开始，当前{'财报季' if reporting else '非财报季'}",
+                )
 
-        codes = [c for c in all_codes if c not in already]
+            db = SessionLocal()
+            try:
+                from db import StockF10Snapshot, StockMeta as _SM
+
+                all_codes = [r.code for r in db.query(_SM.code).all()]
+
+                if _force:
+                    already = set()
+                    sched_log(
+                        "info",
+                        f"[weekly_f10] 强制全量：共 {len(all_codes)} 只股票待同步",
+                    )
+                elif reporting:
+                    threshold = (_date.today() - _td(days=30)).strftime("%Y-%m-%d")
+                    already = {
+                        r.code
+                        for r in db.query(
+                            StockF10Snapshot.code, StockF10Snapshot.updated_at
+                        ).all()
+                        if r.updated_at
+                        and r.updated_at.strftime("%Y-%m-%d") >= threshold
+                    }
+                    sched_log(
+                        "info",
+                        f"[weekly_f10] 财报季：已有{len(already)}只在30天内，待同步{len(all_codes) - len(already)}只",
+                    )
+                else:
+                    already = {r.code for r in db.query(StockF10Snapshot.code).all()}
+                    sched_log(
+                        "info",
+                        f"[weekly_f10] 非财报季：已有{len(already)}只，仅补缺失{len(all_codes) - len(already)}只",
+                    )
+            finally:
+                db.close()
+
+            codes = [c for c in all_codes if c not in already]
+            start_index = 0
+
         if not codes:
             sched_log("info", "[weekly_f10] 无需同步，跳过")
+            _clear_f10_cursor()
             return
 
-        for code in codes:
-            try:
-                data = _scrape_f10(code)
-                _upsert_f10(code, data)
-            except Exception as e:
-                print(f"[weekly_f10] error {code}: {e}")
-            import time as _t; _t.sleep(0.5)
+        total = len(codes)
+        succeeded = 0
+        failed = 0
+        try:
+            for i in range(start_index, total):
+                code = codes[i]
+                pct = round((i + 1) / total * 100) if total else 0
+                try:
+                    data = _scrape_f10(code)
+                    _upsert_f10(code, data)
+                    succeeded += 1
+                    sched_log(
+                        "info",
+                        f"[F10] {i + 1}/{total} ({pct}%) - {code} 同步完成",
+                        source="scheduler",
+                    )
+                except Exception as e:
+                    failed += 1
+                    sched_log(
+                        "error",
+                        f"[F10] {i + 1}/{total} ({pct}%) - {code} 失败: {e}",
+                        source="scheduler",
+                    )
+                # 每10只保存一次游标
+                if (i + 1) % 10 == 0:
+                    _save_f10_cursor(cursor_mode, codes, i + 1)
+                import time as _t
 
-        sched_log("success", f"[weekly_f10] 完成，共同步 {len(codes)} 只")
+                _t.sleep(0.5)
+        except Exception as e:
+            # 意外中断时保存当前进度
+            _save_f10_cursor(cursor_mode, codes, i)
+            sched_log(
+                "error",
+                f"[weekly_f10] 中断于第 {i + 1}/{total} 只，游标已保存，重启后可续传",
+                source="scheduler",
+            )
+            raise
+
+        _clear_f10_cursor()
+        sched_log(
+            "success",
+            f"[weekly_f10] 完成，共同步 {total} 只（成功 {succeeded}，失败 {failed}）",
+        )
 
     _scheduler.add_job(
         _weekly_fundamental_sync,
@@ -445,9 +615,11 @@ def startup():
     # 每个交易日 15:35 收盘后同步市场情绪（涨跌家数/涨跌停家数）
     def _auto_sync_market_breadth():
         from routers.industry import is_trading_day
+
         if not is_trading_day():
             return
         from routers.market_breadth import sync_market_breadth
+
         result = sync_market_breadth()
         print(f"[market_breadth] 定时同步完成: {result}")
 
@@ -500,63 +672,154 @@ def startup():
 
     CATCHUP_RULES = [
         # ---- 日频任务，仅交易日补跑 ----
-        dict(task_id="daily_sync",                max_gap_days=3, trading_day_only=True,  fn=lambda: industry.sync_all_data(),                         desc="每日全量行情"),
-        dict(task_id="daily_klines_incremental",  max_gap_days=3, trading_day_only=True,  fn=lambda: _daily_klines_incremental(),                      desc="K线增量同步"),
-        dict(task_id="fund_flow_snapshot",        max_gap_days=3, trading_day_only=True,  fn=lambda: fund_flow.take_daily_snapshot(),                  desc="资金流向快照"),
-        dict(task_id="market_breadth_daily_sync", max_gap_days=3, trading_day_only=True,  fn=lambda: _auto_sync_market_breadth(),                      desc="涨跌统计"),
-        dict(task_id="minute_daily_sync",         max_gap_days=3, trading_day_only=True,  fn=lambda: _auto_sync_minute(),                              desc="产业链分时数据"),
-        dict(task_id="indices_minute_daily_sync", max_gap_days=3, trading_day_only=True,  fn=lambda: _auto_sync_indices_minute(),                      desc="宽基指数分时"),
-        dict(task_id="guba_daily_sync",           max_gap_days=3, trading_day_only=True,  fn=lambda: guba.sync_all_guba(),                             desc="股吧资讯"),
+        dict(
+            task_id="daily_sync",
+            max_gap_days=3,
+            trading_day_only=True,
+            fn=lambda: industry.sync_all_data(),
+            desc="每日全量行情",
+        ),
+        dict(
+            task_id="daily_klines_incremental",
+            max_gap_days=3,
+            trading_day_only=True,
+            fn=lambda: _daily_klines_incremental(),
+            desc="K线增量同步",
+        ),
+        dict(
+            task_id="fund_flow_snapshot",
+            max_gap_days=3,
+            trading_day_only=True,
+            fn=lambda: fund_flow.take_daily_snapshot(),
+            desc="资金流向快照",
+        ),
+        dict(
+            task_id="market_daily_fund_flow_sync",
+            max_gap_days=3,
+            trading_day_only=True,
+            fn=lambda: market_flow.sync_market_daily_fund_flow(),
+            desc="大盘资金流向历史",
+        ),
+        dict(
+            task_id="market_breadth_daily_sync",
+            max_gap_days=3,
+            trading_day_only=True,
+            fn=lambda: _auto_sync_market_breadth(),
+            desc="涨跌统计",
+        ),
+        dict(
+            task_id="minute_daily_sync",
+            max_gap_days=3,
+            trading_day_only=True,
+            fn=lambda: _auto_sync_minute(),
+            desc="产业链分时数据",
+        ),
+        dict(
+            task_id="indices_minute_daily_sync",
+            max_gap_days=3,
+            trading_day_only=True,
+            fn=lambda: _auto_sync_indices_minute(),
+            desc="宽基指数分时",
+        ),
+        dict(
+            task_id="guba_daily_sync",
+            max_gap_days=3,
+            trading_day_only=True,
+            fn=lambda: guba.sync_all_guba(),
+            desc="股吧资讯",
+        ),
         # ---- 日频任务，不受交易日限制 ----
-        dict(task_id="global_index_kline_sync",   max_gap_days=3, trading_day_only=False, fn=lambda: global_market.sync_all_review_index_klines(),     desc="全球指数K线"),
-        dict(task_id="concept_board_sync",        max_gap_days=3, trading_day_only=False, fn=lambda: concept_board.sync_concept_boards(),              desc="概念板块行情"),
+        dict(
+            task_id="global_index_snapshot_sync",
+            max_gap_days=3,
+            trading_day_only=False,
+            fn=lambda: global_market.sync_global_indices(),
+            desc="全球指数快照",
+        ),
+        dict(
+            task_id="global_index_kline_sync",
+            max_gap_days=3,
+            trading_day_only=False,
+            fn=lambda: global_market.sync_all_review_index_klines(),
+            desc="全球指数K线",
+        ),
+        dict(
+            task_id="concept_board_sync",
+            max_gap_days=3,
+            trading_day_only=False,
+            fn=lambda: concept_board.sync_concept_boards(),
+            desc="概念板块行情",
+        ),
         # ---- 周频任务 ----
-        dict(task_id="weekly_fundamental_sync",   max_gap_days=9, trading_day_only=False, fn=lambda: _weekly_fundamental_sync(),                       desc="F10财务数据"),
+        dict(
+            task_id="weekly_fundamental_sync",
+            max_gap_days=9,
+            trading_day_only=False,
+            fn=lambda: _weekly_fundamental_sync(),
+            desc="F10财务数据",
+        ),
     ]
 
     def _run_catchup_checks():
         """启动后在后台线程里顺序检查所有 A 类任务，缺了就补。"""
         from routers.industry import is_trading_day as _is_trading_day
-        from routers.system import get_task_last_run_dt, sched_log, record_task_last_run as _record
+        from routers.system import (
+            get_task_last_run_dt,
+            sched_log,
+            record_task_last_run as _record,
+        )
         import time as _time
 
         today_is_trading = _is_trading_day()
 
-        sched_log("info", f"[catchup] 开始检查所有任务是否需要补跑（今日{'交易日' if today_is_trading else '非交易日'}）")
+        sched_log(
+            "info",
+            f"[catchup] 开始检查所有任务是否需要补跑（今日{'交易日' if today_is_trading else '非交易日'}）",
+        )
         for rule in CATCHUP_RULES:
-            task_id          = rule["task_id"]
-            max_days         = rule["max_gap_days"]
-            fn               = rule["fn"]
-            desc             = rule["desc"]
+            task_id = rule["task_id"]
+            max_days = rule["max_gap_days"]
+            fn = rule["fn"]
+            desc = rule["desc"]
             trading_day_only = rule["trading_day_only"]
             try:
                 # 非交易日且该任务仅限交易日执行：直接跳过，不更新 lastRun
                 if trading_day_only and not today_is_trading:
-                    sched_log("info", f"[catchup] {desc}（{task_id}）今日非交易日，跳过")
+                    sched_log(
+                        "info", f"[catchup] {desc}（{task_id}）今日非交易日，跳过"
+                    )
                     continue
 
                 last_dt = get_task_last_run_dt(task_id)
                 if last_dt is None:
-                    sched_log("info", f"[catchup] {desc}（{task_id}）从未执行，立即补跑")
+                    sched_log(
+                        "info", f"[catchup] {desc}（{task_id}）从未执行，立即补跑"
+                    )
                     need = True
                 else:
                     gap = (datetime.utcnow() - last_dt).total_seconds() / 86400
                     if gap >= max_days:
-                        sched_log("info", f"[catchup] {desc}（{task_id}）上次 {last_dt.strftime('%m-%d %H:%M')} UTC，距今 {gap:.1f} 天，补跑")
+                        sched_log(
+                            "info",
+                            f"[catchup] {desc}（{task_id}）上次 {last_dt.strftime('%m-%d %H:%M')} UTC，距今 {gap:.1f} 天，补跑",
+                        )
                         need = True
                     else:
-                        sched_log("info", f"[catchup] {desc}（{task_id}）距今 {gap:.1f} 天，无需补跑")
+                        sched_log(
+                            "info",
+                            f"[catchup] {desc}（{task_id}）距今 {gap:.1f} 天，无需补跑",
+                        )
                         need = False
 
                 if need:
                     fn()
-                    _record(task_id)   # 补跑完成，更新持久化 lastRun
+                    _record(task_id)  # 补跑完成，更新持久化 lastRun
                     sched_log("success", f"[catchup] {desc}（{task_id}）补跑完成")
 
             except Exception as e:
                 sched_log("warn", f"[catchup] {desc}（{task_id}）补跑失败: {e}")
 
-            _time.sleep(0.5)   # 任务间短暂间隔，避免并发冲击
+            _time.sleep(0.5)  # 任务间短暂间隔，避免并发冲击
 
         sched_log("info", "[catchup] 全部检查完毕")
 
@@ -564,8 +827,6 @@ def startup():
 
     # 检查是否在生产环境中启用自动同步
     # 可以通过环境变量 AUTO_SYNC_ON_STARTUP=false 来禁用
-    import os
-
     auto_sync = os.getenv("AUTO_SYNC_ON_STARTUP", "true").lower() == "true"
 
     if not auto_sync:
@@ -573,6 +834,7 @@ def startup():
         return
 
     from routers.industry import is_trading_day
+
     if not is_trading_day():
         print("[startup] non-trading day — skipping startup sync")
         return

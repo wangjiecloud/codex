@@ -1,3 +1,4 @@
+from typing import Optional
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
@@ -114,7 +115,7 @@ _SINA_INDEX_MAP: dict[str, tuple[str, str]] = {
 }
 
 
-def _fetch_sina_cn_index_daily(symbol: str) -> pd.DataFrame | None:
+def _fetch_sina_cn_index_daily(symbol: str) -> Optional[pd.DataFrame]:
     """
     通过新浪财经日K接口抓取 A 股指数数据（baostock 不支持的指数，如科创综指 sh000680）。
     symbol: 新浪格式，如 'sh000680'
@@ -161,7 +162,7 @@ def _fetch_sina_cn_index_daily(symbol: str) -> pd.DataFrame | None:
     return df
 
 
-def _fetch_sina_daily(code: str) -> pd.DataFrame | None:
+def _fetch_sina_daily(code: str) -> Optional[pd.DataFrame]:
     """
     从新浪财经抓取全球指数日K数据，返回标准化 DataFrame。
     列：date(str YYYY-MM-DD), open, high, low, close, volume

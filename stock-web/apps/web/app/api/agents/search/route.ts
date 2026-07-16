@@ -180,12 +180,21 @@ function diagnoseEmpty(sql: string): string {
 const SYSTEM_PROMPT = `你是A股智能选股助手，直接将用户的自然语言需求转换为一条可执行的 SQLite SQL。
 
 数据库表（路径已由系统提供）：
-- stock_quote q: code, name, price(现价), change(涨跌幅%), change_amt, open, prev_close, high, low, volume, turnover, market_cap(市值，单位元), pe, pb, turnover_rate(换手率%), updated_at
+- stock_quote q: code, name, price(现价), change(涨跌幅，百分比数值), change_amt(涨跌额), open(今日开盘), prev_close(昨收), high(今日最高), low(今日最低), volume(今日成交量，单位：股), turnover(今日成交额，单位：元), market_cap(总市值，单位：元), pe(市盈率), pb(市净率), turnover_rate(换手率，百分比数值), updated_at
 - stock_meta m: code, name, industry_ids（JSON数组字符串，用 LIKE '%id%' 匹配）
-- stock_kline: code, period('daily'), trade_date(YYYY-MM-DD), open, high, low, close, volume, change_pct
+- stock_kline: code, period('daily'), trade_date(YYYY-MM-DD), open(开盘价), high(最高价), low(最低价), close(收盘价), volume(成交量，单位：股), turnover(成交额，单位：元), change_pct(当日涨跌幅，单位：百分比数值，如10.05表示涨10.05%；A股主板涨停≈+10%，跌停≈-10%；创业板/科创板涨跌停≈±20%；close>open为阳线，close<open为阴线)
 - stock_fundamental f: code, report_date(YYYY-MM-DD), eps(每股收益元), roe(ROE小数，0.15=15%), revenue(营收元), revenue_yoy(营收同比小数，0.2=20%), net_profit(净利润元), net_profit_yoy(净利润同比小数，0.3=30%), gross_margin(净利润率小数), debt_ratio(资产负债率小数)
   注意：roe/revenue_yoy/net_profit_yoy/gross_margin/debt_ratio 全部是小数，用户说"ROE>15%"应写 f.roe > 0.15；"净利润增长20%"应写 f.net_profit_yoy > 0.2
   stock_fundamental 每只股票只有一条记录（PRIMARY KEY code），直接 JOIN 无需子查询取最新报告期
+- sw_industry_constituent c: board_code(申万板块代码), stock_code(股票代码), stock_name(股票名称)
+  一只股票可能属于多个申万板块，JOIN 时需用 GROUP_CONCAT 或子查询聚合；获取板块名称需再 JOIN sw_industry
+- sw_industry si: code(板块代码), name(板块名称), level(级别，'二级'/'三级'), change_pct(今日板块涨跌幅，百分比数值)
+  用法示例（获取股票所属申万二级板块名称）：
+  LEFT JOIN (
+    SELECT c.stock_code, GROUP_CONCAT(si.name, '/') AS sw_board
+    FROM sw_industry_constituent c JOIN sw_industry si ON si.code=c.board_code AND si.level='二级'
+    GROUP BY c.stock_code
+  ) sw ON sw.stock_code=q.code
 
 均线/价格位置：用 stock_kline 窗口函数 CTE 计算，示例：
 WITH kline_ma AS (
@@ -202,6 +211,30 @@ SELECT q.code, q.name, ROUND(q.price,2) AS price, ROUND(q.change,2) AS change,
 FROM stock_quote q
 JOIN kline_ma t ON t.code=q.code AND t.rn=1   -- rn=1 最新, rn=2 昨日
 WHERE ...
+
+成交量/成交额（均需加进 kline_ma CTE）：
+  AVG(volume) OVER (PARTITION BY code ORDER BY trade_date ROWS BETWEEN 4  PRECEDING AND CURRENT ROW) AS vol_avg_5d   -- 5日均量（股）
+  AVG(volume) OVER (PARTITION BY code ORDER BY trade_date ROWS BETWEEN 19 PRECEDING AND CURRENT ROW) AS vol_avg_20d  -- 20日均量（股）
+  AVG(turnover) OVER (PARTITION BY code ORDER BY trade_date ROWS BETWEEN 19 PRECEDING AND CURRENT ROW) AS amt_avg_20d -- 20日均额（元）
+  过滤「日均成交额低于5000万」：amt_avg_20d < 50000000
+
+近3个月相对低位（距最低点涨幅不超过X%）：
+  MIN(low) OVER (PARTITION BY code ORDER BY trade_date ROWS BETWEEN 62 PRECEDING AND CURRENT ROW) AS low_3m
+  过滤：close <= low_3m * 1.10
+
+近N日连续收阳（close > open）：
+  MIN(CASE WHEN close > open THEN 1 ELSE 0 END) OVER (PARTITION BY code ORDER BY trade_date ROWS BETWEEN 4 PRECEDING AND CURRENT ROW) AS consec_up_5d
+  过滤：consec_up_5d = 1
+
+重心稳步上移（最新5日close均值 > 上一个5日close均值）：
+  AVG(close) OVER (PARTITION BY code ORDER BY trade_date ROWS BETWEEN 4 PRECEDING AND CURRENT ROW) AS ma5_now
+  AVG(close) OVER (PARTITION BY code ORDER BY trade_date ROWS BETWEEN 9 PRECEDING AND 5 PRECEDING) AS ma5_prev
+  过滤：ma5_now > ma5_prev
+
+成交量温和放大（5日均量 > 20日均量）：
+  过滤：vol_avg_5d > vol_avg_20d
+
+排除ST股：q.name NOT LIKE '%ST%'
 
 产业链 ID（industry_ids 中的英文标签，LIKE '%id%' 匹配）：
 aigpu / pcb / mlcc / memory / optics / fiber / liquidcool / aipower / coppercable / idc / glasssub / aiserver / semieq
@@ -249,6 +282,17 @@ const COL_NAME_MAP: Record<string, string> = {
   ma60: "MA60",
   dist_ma10_pct: "偏离MA10(%)",
   dist_ma20_pct: "偏离MA20(%)",
+  vol_avg_5d: "5日均量(股)",
+  vol_avg_20d: "20日均量(股)",
+  amt_avg_20d: "20日均额(元)",
+  low_3m: "近3月最低",
+  rise_from_3m_low_pct: "距低点涨幅(%)",
+  consec_up_5d: "连续5日阳线",
+  ma5_now: "MA5",
+  ma5_prev: "前5日MA5",
+  sw_board: "申万板块",
+  industry_board: "申万板块",
+  board_name: "申万板块",
 };
 
 export async function POST(req: NextRequest) {

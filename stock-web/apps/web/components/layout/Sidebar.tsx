@@ -75,6 +75,12 @@ const navItems = [
     match: (p: string) => p.startsWith("/market"),
   },
   {
+    href: "/margin",
+    label: "融资融券",
+    icon: TrendingUp,
+    match: (p: string) => p.startsWith("/margin"),
+  },
+  {
     href: "/global",
     label: "全球",
     icon: Globe,

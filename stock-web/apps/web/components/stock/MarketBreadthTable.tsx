@@ -17,6 +17,52 @@ export interface MarketBreadthRow {
   total: number;
 }
 
+interface MarketBreadthSummary {
+  trade_date: string | null;
+  sentiment_score: number | null;
+  sentiment_level: string | null;
+  sentiment_state: string | null;
+  score_change_1d: number | null;
+  score_change_5d: number | null;
+  recent_5d_avg_score: number | null;
+  latest: {
+    up_count: number;
+    down_count: number;
+    flat_count: number;
+    limit_up: number;
+    limit_down: number;
+    st_limit_up: number;
+    st_limit_down: number;
+    total: number;
+    advance_decline_ratio: number;
+    breadth_pct: number;
+    limit_diff: number;
+  } | null;
+  signals: string[];
+}
+
+function getSentimentTone(level: string | null) {
+  switch (level) {
+    case "过热":
+      return { color: "#ef4444", bg: "rgba(239,68,68,0.12)" };
+    case "偏热":
+      return { color: "#f59e0b", bg: "rgba(245,158,11,0.12)" };
+    case "中性":
+      return { color: "#94a3b8", bg: "rgba(148,163,184,0.14)" };
+    case "偏冷":
+      return { color: "#22c55e", bg: "rgba(34,197,94,0.12)" };
+    case "冰点":
+      return { color: "#38bdf8", bg: "rgba(56,189,248,0.12)" };
+    default:
+      return { color: "var(--text-secondary)", bg: "var(--bg-tertiary)" };
+  }
+}
+
+function formatSigned(value: number | null, digits = 1) {
+  if (value == null || Number.isNaN(value)) return "—";
+  return `${value > 0 ? "+" : ""}${value.toFixed(digits)}`;
+}
+
 /* ─────────────────── Skeleton ─────────────────── */
 function SkeletonRow() {
   return (
@@ -102,6 +148,7 @@ function getRowBg(row: MarketBreadthRow): string {
 /* ─────────────────── Main Component ─────────────────── */
 export function MarketBreadthTable() {
   const [rows, setRows] = useState<MarketBreadthRow[]>([]);
+  const [summary, setSummary] = useState<MarketBreadthSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -113,12 +160,22 @@ export function MarketBreadthTable() {
     setError(null);
 
     try {
-      const res = await fetch("/api/market-breadth?days=60", {
-        cache: "no-store",
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data: MarketBreadthRow[] = await res.json();
-      setRows(data);
+      const [listRes, summaryRes] = await Promise.all([
+        fetch("/api/market-breadth?days=60", {
+          cache: "no-store",
+        }),
+        fetch("/api/market-breadth?summary=1&days=20", {
+          cache: "no-store",
+        }),
+      ]);
+      if (!listRes.ok) throw new Error(`HTTP ${listRes.status}`);
+      if (!summaryRes.ok) throw new Error(`HTTP ${summaryRes.status}`);
+      const [listData, summaryData] = await Promise.all([
+        listRes.json() as Promise<MarketBreadthRow[]>,
+        summaryRes.json() as Promise<MarketBreadthSummary>,
+      ]);
+      setRows(listData);
+      setSummary(summaryData);
       setLastUpdated(new Date().toLocaleTimeString("zh-CN"));
     } catch (e) {
       setError(e instanceof Error ? e.message : "加载失败");
@@ -140,6 +197,214 @@ export function MarketBreadthTable() {
         border: "1px solid var(--border-color)",
       }}
     >
+      {summary?.latest && (
+        <div
+          className="grid grid-cols-1 md:grid-cols-4 gap-3 px-4 py-3 border-b"
+          style={{
+            borderColor: "var(--border-color)",
+            background: "var(--bg-primary)",
+          }}
+        >
+          <div
+            className="rounded-xl px-3 py-3"
+            style={{
+              background: getSentimentTone(summary.sentiment_level).bg,
+              border: `1px solid ${getSentimentTone(summary.sentiment_level).bg}`,
+            }}
+          >
+            <div
+              className="text-[11px] mb-1"
+              style={{ color: "var(--text-tertiary)" }}
+            >
+              情绪分
+            </div>
+            <div className="flex items-end gap-2">
+              <span
+                className="text-2xl font-semibold leading-none"
+                style={{
+                  color: getSentimentTone(summary.sentiment_level).color,
+                }}
+              >
+                {summary.sentiment_score?.toFixed(1) ?? "—"}
+              </span>
+              <span
+                className="text-xs px-2 py-0.5 rounded-md"
+                style={{
+                  color: getSentimentTone(summary.sentiment_level).color,
+                  background: getSentimentTone(summary.sentiment_level).bg,
+                }}
+              >
+                {summary.sentiment_level ?? "未知"}
+              </span>
+            </div>
+            <div
+              className="mt-2 text-xs"
+              style={{ color: "var(--text-secondary)" }}
+            >
+              当前状态：{summary.sentiment_state ?? "—"}
+            </div>
+          </div>
+
+          <div
+            className="rounded-xl px-3 py-3"
+            style={{
+              background: "var(--bg-secondary)",
+              border: "1px solid var(--border-color)",
+            }}
+          >
+            <div
+              className="text-[11px] mb-1"
+              style={{ color: "var(--text-tertiary)" }}
+            >
+              情绪变化
+            </div>
+            <div className="space-y-1.5 text-xs">
+              <div className="flex items-center justify-between gap-3">
+                <span style={{ color: "var(--text-secondary)" }}>较昨日</span>
+                <span
+                  className="font-mono"
+                  style={{
+                    color:
+                      (summary.score_change_1d ?? 0) > 0
+                        ? "#ef4444"
+                        : (summary.score_change_1d ?? 0) < 0
+                          ? "#22c55e"
+                          : "var(--text-secondary)",
+                  }}
+                >
+                  {formatSigned(summary.score_change_1d)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span style={{ color: "var(--text-secondary)" }}>
+                  较5日均值
+                </span>
+                <span
+                  className="font-mono"
+                  style={{
+                    color:
+                      (summary.score_change_5d ?? 0) > 0
+                        ? "#ef4444"
+                        : (summary.score_change_5d ?? 0) < 0
+                          ? "#22c55e"
+                          : "var(--text-secondary)",
+                  }}
+                >
+                  {formatSigned(summary.score_change_5d)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span style={{ color: "var(--text-secondary)" }}>5日均分</span>
+                <span
+                  className="font-mono"
+                  style={{ color: "var(--text-primary)" }}
+                >
+                  {summary.recent_5d_avg_score?.toFixed(1) ?? "—"}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div
+            className="rounded-xl px-3 py-3"
+            style={{
+              background: "var(--bg-secondary)",
+              border: "1px solid var(--border-color)",
+            }}
+          >
+            <div
+              className="text-[11px] mb-1"
+              style={{ color: "var(--text-tertiary)" }}
+            >
+              宽度概览
+            </div>
+            <div className="space-y-1.5 text-xs">
+              <div className="flex items-center justify-between gap-3">
+                <span style={{ color: "var(--text-secondary)" }}>涨跌比</span>
+                <span
+                  className="font-mono"
+                  style={{ color: "var(--text-primary)" }}
+                >
+                  {summary.latest.advance_decline_ratio.toFixed(2)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span style={{ color: "var(--text-secondary)" }}>宽度差</span>
+                <span
+                  className="font-mono"
+                  style={{
+                    color:
+                      summary.latest.breadth_pct > 0
+                        ? "#ef4444"
+                        : summary.latest.breadth_pct < 0
+                          ? "#22c55e"
+                          : "var(--text-secondary)",
+                  }}
+                >
+                  {formatSigned(summary.latest.breadth_pct, 2)}%
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span style={{ color: "var(--text-secondary)" }}>涨跌停差</span>
+                <span
+                  className="font-mono"
+                  style={{
+                    color:
+                      summary.latest.limit_diff > 0
+                        ? "#ef4444"
+                        : summary.latest.limit_diff < 0
+                          ? "#22c55e"
+                          : "var(--text-secondary)",
+                  }}
+                >
+                  {formatSigned(summary.latest.limit_diff, 0)}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div
+            className="rounded-xl px-3 py-3"
+            style={{
+              background: "var(--bg-secondary)",
+              border: "1px solid var(--border-color)",
+            }}
+          >
+            <div
+              className="text-[11px] mb-2"
+              style={{ color: "var(--text-tertiary)" }}
+            >
+              关键信号
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {(summary.signals.length > 0
+                ? summary.signals
+                : [summary.sentiment_state ?? "暂无"]
+              )
+                .slice(0, 3)
+                .map((signal) => (
+                  <span
+                    key={signal}
+                    className="px-2 py-1 rounded-md text-[11px]"
+                    style={{
+                      background: "var(--bg-tertiary)",
+                      color: "var(--text-secondary)",
+                    }}
+                  >
+                    {signal}
+                  </span>
+                ))}
+            </div>
+            <div
+              className="mt-2 text-[11px]"
+              style={{ color: "var(--text-tertiary)" }}
+            >
+              交易日：{summary.trade_date ?? "—"}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Header ── */}
       <div
         className="flex items-center justify-between px-4 py-3 border-b shrink-0"

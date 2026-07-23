@@ -794,6 +794,79 @@ class UserWatchlist(Base):
     added_at = Column(DateTime, default=datetime.utcnow)
 
 
+class MarginTradingDaily(Base):
+    """融资融券每日数据（沪深京三市合计 + 分市场）"""
+
+    __tablename__ = "margin_trading_daily"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    trade_date = Column(String(10), nullable=False)  # YYYY-MM-DD
+    market = Column(String(10), nullable=False)  # total / sh / sz / bj
+
+    # 融资融券余额（亿元）
+    margin_balance = Column(Float)  # 融资融券余额合计
+    rz_balance = Column(Float)  # 融资余额
+    rq_balance = Column(Float)  # 融券余额
+
+    # 融资数据（亿元）
+    rz_buy = Column(Float)  # 融资买入额
+    rz_repay = Column(Float)  # 融资偿还额
+
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (UniqueConstraint("trade_date", "market"),)
+
+
+class MarginTradingStockSnapshot(Base):
+    """融资融券个股每日快照（从同花顺 board/gg/ 抓取，按融资净买入排序，每日一覆盖）"""
+
+    __tablename__ = "margin_trading_stock_snapshot"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    trade_date = Column(String(10), nullable=False, index=True)  # YYYY-MM-DD
+    code = Column(String(10), nullable=False, index=True)  # 股票代码
+    name = Column(String(50))  # 股票名称
+    rz_balance = Column(Float)  # 融资余额（亿元）
+    rz_buy = Column(Float)  # 融资买入额（亿元）
+    rz_repay = Column(Float)  # 融资偿还额（亿元）
+    rz_net = Column(Float)  # 融资净买入（亿元）
+    rq_qty = Column(Float)  # 融券余量（万股）
+    rq_sell = Column(Float)  # 融券卖出量（万股）
+    rq_balance = Column(Float)  # 融券余额（亿元）
+    margin_balance = Column(Float)  # 融资融券余额（亿元）
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    __table_args__ = (UniqueConstraint("trade_date", "code"),)
+
+
+class MarginTradingStockHistory(Base):
+    """融资融券个股历史（从同花顺 rzrqgg/code/{code}/ 抓取，code+trade_date 唯一）"""
+
+    __tablename__ = "margin_trading_stock_history"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    code = Column(String(10), nullable=False, index=True)  # 股票代码
+    trade_date = Column(String(10), nullable=False)  # YYYY-MM-DD
+    rz_balance = Column(Float)  # 融资余额（亿元）
+    rz_buy = Column(Float)  # 融资买入额（亿元）
+    rz_repay = Column(Float)  # 融资偿还额（亿元）
+    rz_net = Column(Float)  # 融资净买入（亿元）
+    rz_balance_ratio = Column(Float)  # 融资余额占流通市值比（%）
+    rq_qty = Column(Float)  # 融券余量（万股）
+    rq_sell = Column(Float)  # 融券卖出量（万股）
+    rq_net = Column(Float)  # 融券净卖出（万股）
+    margin_balance = Column(Float)  # 融资融券余额（亿元）
+    updated_at = Column(DateTime, default=datetime.utcnow)
+    __table_args__ = (UniqueConstraint("code", "trade_date"),)
+
+
+class MarginTradingStockSyncStatus(Base):
+    """个股融资融券历史同步状态（记录每只股票是否已抓取完毕）"""
+
+    __tablename__ = "margin_trading_stock_sync_status"
+    code = Column(String(10), primary_key=True)
+    status = Column(String(20), default="pending")  # pending / syncing / done / failed
+    row_count = Column(Integer, default=0)
+    last_synced_at = Column(DateTime, nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 def get_db():
     db = SessionLocal()
     try:
@@ -805,6 +878,72 @@ def get_db():
 def init_db():
     Base.metadata.create_all(bind=engine)
     with engine.connect() as conn:
+        existing_tables = {
+            row[0]
+            for row in conn.execute(
+                text("SELECT name FROM sqlite_master WHERE type='table'")
+            )
+        }
+
+        if "stock_indicator" not in existing_tables:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE stock_indicator (
+                        code VARCHAR(10) NOT NULL,
+                        trade_date VARCHAR(10) NOT NULL,
+                        period VARCHAR(10) NOT NULL DEFAULT 'daily',
+                        kdj_k FLOAT,
+                        kdj_d FLOAT,
+                        kdj_j FLOAT,
+                        ma5 FLOAT,
+                        ma10 FLOAT,
+                        ma20 FLOAT,
+                        ma60 FLOAT,
+                        macd_diff FLOAT,
+                        macd_dea FLOAT,
+                        macd_hist FLOAT,
+                        rsi14 FLOAT,
+                        boll_upper FLOAT,
+                        boll_middle FLOAT,
+                        boll_lower FLOAT,
+                        UNIQUE(code, period, trade_date)
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_stock_indicator_code_period_date ON stock_indicator (code, period, trade_date)"
+                )
+            )
+            conn.commit()
+
+        si_cols = {
+            row[1] for row in conn.execute(text("PRAGMA table_info(stock_indicator)"))
+        }
+        for col_def in [
+            ("macd_diff", "FLOAT"),
+            ("macd_dea", "FLOAT"),
+            ("macd_hist", "FLOAT"),
+            ("rsi14", "FLOAT"),
+            ("boll_upper", "FLOAT"),
+            ("boll_middle", "FLOAT"),
+            ("boll_lower", "FLOAT"),
+        ]:
+            if col_def[0] not in si_cols:
+                conn.execute(
+                    text(
+                        f"ALTER TABLE stock_indicator ADD COLUMN {col_def[0]} {col_def[1]}"
+                    )
+                )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_stock_indicator_code_period_date ON stock_indicator (code, period, trade_date)"
+            )
+        )
+        conn.commit()
+
         nf_cols = {
             row[1] for row in conn.execute(text("PRAGMA table_info(news_flash)"))
         }
@@ -904,12 +1043,6 @@ def init_db():
             conn.commit()
 
         # user_watchlist 表（自选股，若不存在则建表）
-        existing_tables = {
-            row[0]
-            for row in conn.execute(
-                text("SELECT name FROM sqlite_master WHERE type='table'")
-            )
-        }
         if "user_watchlist" not in existing_tables:
             conn.execute(
                 text("""
@@ -924,6 +1057,31 @@ def init_db():
             conn.execute(
                 text(
                     "CREATE INDEX ix_user_watchlist_sort ON user_watchlist (sort_order)"
+                )
+            )
+            conn.commit()
+
+        # margin_trading_daily 表（融资融券每日数据）
+        if "margin_trading_daily" not in existing_tables:
+            conn.execute(
+                text("""
+                CREATE TABLE margin_trading_daily (
+                    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                    trade_date     VARCHAR(10) NOT NULL,
+                    market         VARCHAR(10) NOT NULL,
+                    margin_balance FLOAT,
+                    rz_balance     FLOAT,
+                    rq_balance     FLOAT,
+                    rz_buy         FLOAT,
+                    rz_repay       FLOAT,
+                    updated_at     DATETIME,
+                    UNIQUE(trade_date, market)
+                )
+                """)
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX ix_margin_trading_trade_date ON margin_trading_daily (trade_date)"
                 )
             )
             conn.commit()
@@ -946,3 +1104,84 @@ def init_db():
                     )
                 )
         conn.commit()
+
+        existing_tables2 = {
+            row[0]
+            for row in conn.execute(
+                text("SELECT name FROM sqlite_master WHERE type='table'")
+            )
+        }
+        if "margin_trading_stock_snapshot" not in existing_tables2:
+            conn.execute(
+                text("""
+                CREATE TABLE margin_trading_stock_snapshot (
+                    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                    trade_date     VARCHAR(10) NOT NULL,
+                    code           VARCHAR(10) NOT NULL,
+                    name           VARCHAR(50),
+                    rz_balance     FLOAT,
+                    rz_buy         FLOAT,
+                    rz_repay       FLOAT,
+                    rz_net         FLOAT,
+                    rq_qty         FLOAT,
+                    rq_sell        FLOAT,
+                    rq_balance     FLOAT,
+                    margin_balance FLOAT,
+                    updated_at     DATETIME,
+                    UNIQUE(trade_date, code)
+                )
+                """)
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX ix_margin_stock_snapshot_date ON margin_trading_stock_snapshot (trade_date)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX ix_margin_stock_snapshot_code ON margin_trading_stock_snapshot (code)"
+                )
+            )
+            conn.commit()
+
+        if "margin_trading_stock_history" not in existing_tables2:
+            conn.execute(
+                text("""
+                CREATE TABLE margin_trading_stock_history (
+                    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                    code              VARCHAR(10) NOT NULL,
+                    trade_date        VARCHAR(10) NOT NULL,
+                    rz_balance        FLOAT,
+                    rz_buy            FLOAT,
+                    rz_repay          FLOAT,
+                    rz_net            FLOAT,
+                    rz_balance_ratio  FLOAT,
+                    rq_qty            FLOAT,
+                    rq_sell           FLOAT,
+                    rq_net            FLOAT,
+                    margin_balance    FLOAT,
+                    updated_at        DATETIME,
+                    UNIQUE(code, trade_date)
+                )
+                """)
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX ix_margin_stock_history_code ON margin_trading_stock_history (code)"
+                )
+            )
+            conn.commit()
+
+        if "margin_trading_stock_sync_status" not in existing_tables2:
+            conn.execute(
+                text("""
+                CREATE TABLE margin_trading_stock_sync_status (
+                    code           VARCHAR(10) PRIMARY KEY,
+                    status         VARCHAR(20) DEFAULT 'pending',
+                    row_count      INTEGER DEFAULT 0,
+                    last_synced_at DATETIME,
+                    updated_at     DATETIME
+                )
+                """)
+            )
+            conn.commit()

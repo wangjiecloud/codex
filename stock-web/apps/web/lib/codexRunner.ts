@@ -6,7 +6,12 @@ import { spawn } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
-import { pushEvent, completeTask } from "@/lib/taskStore";
+import {
+  pushEvent,
+  completeTask,
+  taskStore,
+  registerTaskCanceller,
+} from "@/lib/taskStore";
 
 export const CODEX_BIN =
   process.env.CODEX_BIN ||
@@ -29,8 +34,22 @@ export const WORKDIR =
 export const DB_SCHEMA = `数据库路径: ${DB_PATH}
 
 主要数据表及字段:
-- stock_quote: code, name, price, change(涨跌幅%), change_amt, open, prev_close, high, low, volume, turnover, market_cap(市值亿), pe(PE TTM), pb, turnover_rate, updated_at
-- stock_kline: code, period('daily'), trade_date, open, high, low, close, volume, turnover, change_pct, turn_rate  (按 trade_date DESC 取最新)
+- stock_quote: code, name, price, change(涨跌幅%), change_amt, open, prev_close, high, low, volume, turnover, market_cap(市值字段，单位历史上可能不一致，使用前必须结合价格/股本或其他表校验，严禁直接默认按亿元解释), pe(PE TTM), pb, turnover_rate, amplitude, updated_at
+- stock_kline: code, period('daily'/'weekly'/'monthly'), trade_date, open, high, low, close, volume, turnover, change_pct, turn_rate  (按 trade_date DESC 取最新)
+- stock_indicator: code, trade_date, period('daily'), kdj_k, kdj_d, kdj_j, ma5, ma10, ma20, ma60, macd_diff, macd_dea, macd_hist, rsi14, boll_upper, boll_middle, boll_lower  (已预计算的日线技术指标)
+- sw_industry: code, name, level, price, prev_close, open, high, low, change_pct, volume, turnover, pe_static, pe_ttm, pb, dividend_yield, comp_count, updated_at  (申万行业板块快照)
+- sw_industry_constituent: board_code, stock_code, stock_name, updated_at  (个股所属申万板块映射)
+- stock_minute_kline: code, trade_date, minute_time, open, high, low, close, volume, amount, avg_price, prev_close  (分时/分钟级K线)
+- market_breadth: trade_date, up_count, down_count, flat_count, limit_up, limit_down, st_limit_up, st_limit_down, total  (市场宽度/情绪)
+- market_daily_fund_flow: trade_date, sh_close, sh_change_pct, sz_close, sz_change_pct, main_net, main_net_pct, super_net, super_net_pct, big_net, big_net_pct, mid_net, mid_net_pct, small_net, small_net_pct  (大盘资金流向历史)
+- market_fund_flow_snapshot: trade_date, investor_type(north_bound/main/institution/hot_money/retail), inflow, outflow, netflow, updated_at  (市场资金快照)
+- fund_flow_snapshot: trade_date, board_type(concept/industry), period(today/3d/5d/10d), name, index_val, change_pct, inflow, outflow, netflow, comp_count, top_stock, top_stock_change_pct, updated_at  (板块资金流向)
+- futures_position_snapshot: trade_date, variety(IF/IH/IC/IM), contract, broker, long_position, short_position, net_position, total_oi, updated_at  (股指期货席位持仓)
+- margin_trading_daily: trade_date, market(total/sh/sz/bj), margin_balance, rz_balance, rq_balance, rz_buy, rz_repay, updated_at  (融资融券市场汇总)
+- margin_trading_stock_snapshot: trade_date, code, name, rz_balance, rz_buy, rz_repay, rz_net, rq_qty, rq_sell, rq_balance, margin_balance, updated_at  (个股融资融券快照)
+- global_market_index: code, name, region, price, change_amt, change_pct, open, high, low, prev_close, market_time, updated_at  (全球市场指数快照)
+- global_index_kline: code, period, trade_date, open, high, low, close, volume, change_pct  (全球指数/宽基指数K线)
+- concept_board: code, name, change_pct, change_amt, price, volume, turnover, rise_count, fall_count, lead_stock, lead_stock_pct, updated_at  (概念板块)
 - stock_meta: code, name, market, industry_ids
 - stock_fundamental: code, report_date, eps, roe, revenue(营收), revenue_yoy(营收同比%), net_profit(净利润), net_profit_yoy(净利润同比%), gross_margin(毛利率%), debt_ratio(负债率%), raw_json
 - news_flash: id, title, digest, url, ctime, category(important/a/hk/us/abnormal/notice), updated_at  (东方财富快讯，约19341条)
@@ -53,6 +72,20 @@ F10 基本面详细数据表（由 f10-scraper skill 爬取写入）:
 查询示例:
   sqlite3 '${DB_PATH}' "SELECT code,name,price,change,pe,pb,market_cap FROM stock_quote WHERE code='000001';"
   sqlite3 '${DB_PATH}' "SELECT trade_date,close,change_pct,volume FROM stock_kline WHERE code='000001' AND period='daily' ORDER BY trade_date DESC LIMIT 60;"
+  sqlite3 '${DB_PATH}' "SELECT trade_date,kdj_k,kdj_d,kdj_j,ma5,ma10,ma20,ma60,macd_diff,macd_dea,macd_hist,rsi14,boll_upper,boll_middle,boll_lower FROM stock_indicator WHERE code='000001' AND period='daily' ORDER BY trade_date DESC LIMIT 5;"
+  sqlite3 '${DB_PATH}' "SELECT s.code,s.name,s.price,s.change_pct FROM sw_industry_constituent c JOIN sw_industry s ON s.code=c.board_code WHERE c.stock_code='000001';"
+  sqlite3 '${DB_PATH}' "SELECT trade_date,close,change_pct,volume FROM stock_kline WHERE code='801780' AND period='daily' ORDER BY trade_date DESC LIMIT 60;"
+  sqlite3 '${DB_PATH}' "SELECT minute_time,close,avg_price,volume,amount FROM stock_minute_kline WHERE code='000001' AND trade_date='2026-07-13' ORDER BY minute_time;"
+  sqlite3 '${DB_PATH}' "SELECT trade_date,up_count,down_count,limit_up,limit_down,total FROM market_breadth ORDER BY trade_date DESC LIMIT 5;"
+  curl -s 'http://localhost:3000/api/market-breadth?summary=1&days=20'
+  sqlite3 '${DB_PATH}' "SELECT trade_date,main_net,super_net,big_net,mid_net,small_net FROM market_daily_fund_flow ORDER BY trade_date DESC LIMIT 10;"
+  sqlite3 '${DB_PATH}' "SELECT trade_date,investor_type,netflow FROM market_fund_flow_snapshot ORDER BY trade_date DESC LIMIT 10;"
+  sqlite3 '${DB_PATH}' "SELECT trade_date,board_type,name,netflow,top_stock FROM fund_flow_snapshot WHERE period='today' ORDER BY trade_date DESC LIMIT 20;"
+  sqlite3 '${DB_PATH}' "SELECT trade_date,market,margin_balance,rz_buy,rq_balance FROM margin_trading_daily ORDER BY trade_date DESC LIMIT 20;"
+  sqlite3 '${DB_PATH}' "SELECT code,name,rz_net,rz_balance,margin_balance FROM margin_trading_stock_snapshot ORDER BY trade_date DESC LIMIT 20;"
+  sqlite3 '${DB_PATH}' "SELECT code,name,region,price,change_pct FROM global_market_index ORDER BY updated_at DESC LIMIT 20;"
+  sqlite3 '${DB_PATH}' "SELECT code,name,change_pct,turnover FROM sw_industry ORDER BY change_pct DESC LIMIT 20;"
+  sqlite3 '${DB_PATH}' "SELECT code,name,change_pct,lead_stock FROM concept_board ORDER BY change_pct DESC LIMIT 20;"
   sqlite3 '${DB_PATH}' "SELECT * FROM stock_f10_snapshot WHERE code='000001';"
   sqlite3 '${DB_PATH}' "SELECT institution,year,eps_forecast,rating FROM stock_f10_institution_forecast WHERE code='000001' ORDER BY year;"
   sqlite3 '${DB_PATH}' "SELECT event_date,event_type,event_desc FROM stock_f10_key_events WHERE code='000001' ORDER BY event_date DESC LIMIT 20;"`;
@@ -177,10 +210,18 @@ export function runCodex(
     env,
     stdio: ["ignore", "pipe", "pipe"],
   });
+  const task = taskStore.get(taskId);
+  registerTaskCanceller(taskId, () => {
+    child.kill("SIGTERM");
+  });
 
   let buffer = "";
 
   child.stdout.on("data", (chunk: Buffer) => {
+    if (task?.cancelled) {
+      child.kill("SIGTERM");
+      return;
+    }
     buffer += chunk.toString();
     const lines = buffer.split("\n");
     buffer = lines.pop() ?? "";
@@ -227,6 +268,10 @@ export function runCodex(
   });
 
   child.stderr.on("data", (chunk: Buffer) => {
+    if (task?.cancelled) {
+      child.kill("SIGTERM");
+      return;
+    }
     console.error("[codex]", chunk.toString().trim());
   });
 
@@ -239,6 +284,11 @@ export function runCodex(
   });
 
   child.on("close", (code: number | null) => {
+    if (task?.cancelled) {
+      pushEvent(taskId, { type: "cancelled" });
+      completeTask(taskId);
+      return;
+    }
     if (code !== 0) {
       const store = (
         globalThis as { _sseTaskStore?: Map<string, { done: boolean }> }
@@ -320,7 +370,86 @@ const AGENT_LABELS: Record<string, string> = {
   data: "数据采集",
   technical: "技术分析",
   fundamental: "基本面",
+  market: "盘面分析",
   news: "新闻舆情",
-  risk: "风险评估",
   advisor: "投资建议",
 };
+
+/**
+ * runCodexAsync: 与 runCodex 相同，但返回 Promise<string>（完整输出文本）。
+ * 流式 delta 仍实时推送前端；本函数不调用 completeTask，由调用方统一处理。
+ */
+export function runCodexAsync(
+  taskId: string,
+  prompt: string,
+  sessionId: string,
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const env: NodeJS.ProcessEnv = { ...process.env, ...loadLlmEnv() };
+
+    const args = [
+      "exec",
+      "resume",
+      sessionId,
+      "--json",
+      "--dangerously-bypass-approvals-and-sandbox",
+      prompt,
+    ];
+
+    const child = spawn(CODEX_BIN, args, {
+      env,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    let buffer = "";
+    let fullText = "";
+
+    child.stdout.on("data", (chunk: Buffer) => {
+      buffer += chunk.toString();
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        try {
+          const ev = JSON.parse(trimmed) as {
+            type: string;
+            delta?: string;
+            item?: { type: string; text?: string };
+            error?: { message?: string };
+          };
+
+          if (ev.type === "item.delta" && ev.delta) {
+            pushEvent(taskId, { type: "stream_delta", delta: ev.delta });
+            fullText += ev.delta;
+          } else if (
+            ev.type === "item.completed" &&
+            ev.item?.type === "agent_message" &&
+            ev.item.text
+          ) {
+            fullText = ev.item.text;
+          } else if (ev.type === "turn.failed") {
+            reject(new Error(ev.error?.message ?? "unknown error"));
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+    });
+
+    child.stderr.on("data", (chunk: Buffer) => {
+      console.error("[codex]", chunk.toString().trim());
+    });
+
+    child.on("error", reject);
+
+    child.on("close", (code: number | null) => {
+      if (code !== 0 && !fullText) {
+        reject(new Error(`codex exited with code ${code}`));
+      } else {
+        resolve(fullText);
+      }
+    });
+  });
+}

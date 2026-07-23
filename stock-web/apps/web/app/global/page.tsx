@@ -3,8 +3,13 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { readSessionCache, writeSessionCache } from "@/lib/sessionCache";
 
 const API = "http://localhost:8000";
+const GLOBAL_FLASH_TTL = 60 * 1000;
+const GLOBAL_HEADLINE_TTL = 2 * 60 * 1000;
+const GLOBAL_THEME_DETAIL_TTL = 2 * 60 * 1000;
+const GLOBAL_THEME_TTL = 5 * 60 * 1000;
 
 // ── Types ─────────────────────────────────────────────────────
 
@@ -383,8 +388,36 @@ function HeadlineList() {
     if (!append) setLoading(true);
     else setLoadingMore(true);
     try {
+      const cacheKey = `global:headline:${cursor}`;
+      const cached = readSessionCache<{
+        items: NewsItem[];
+        hasMore: boolean;
+        nextCursor: string;
+      }>(cacheKey);
+      if (cached) {
+        if (append) {
+          setItems((prev) => [...prev, ...cached.items]);
+        } else {
+          setItems(cached.items);
+        }
+        setHasMore(cached.hasMore);
+        setNextCursor(cached.nextCursor);
+        if (!append) setLoading(false);
+        else setLoadingMore(false);
+        return;
+      }
+
       const r = await fetch(`${API}/api/theme/headline?cursor=${cursor}`);
       const d = await r.json();
+      writeSessionCache(
+        cacheKey,
+        {
+          items: d.items ?? [],
+          hasMore: d.hasMore ?? false,
+          nextCursor: d.nextCursor ?? "",
+        },
+        GLOBAL_HEADLINE_TTL,
+      );
       if (append) {
         setItems((prev) => [...prev, ...(d.items ?? [])]);
       } else {
@@ -526,10 +559,37 @@ function ThemeNewsPanel({
       if (!append) setLoadingMap((m) => ({ ...m, [tabIdx]: true }));
       else setLoadingMoreMap((m) => ({ ...m, [tabIdx]: true }));
       try {
+        const cacheKey = `global:theme-news:${themeId}:${tab.id}:${page}`;
+        const cached = readSessionCache<{
+          items: NewsItem[];
+          hasMore: boolean;
+        }>(cacheKey);
+        if (cached) {
+          setNewsMap((m) => ({
+            ...m,
+            [tabIdx]: append
+              ? [...(m[tabIdx] || []), ...cached.items]
+              : cached.items,
+          }));
+          setHasMoreMap((m) => ({ ...m, [tabIdx]: cached.hasMore }));
+          setPageMap((m) => ({ ...m, [tabIdx]: page }));
+          if (!append) setLoadingMap((m) => ({ ...m, [tabIdx]: false }));
+          else setLoadingMoreMap((m) => ({ ...m, [tabIdx]: false }));
+          return;
+        }
+
         const r = await fetch(
           `${API}/api/theme/${themeId}/news?content_id=${tab.id}&page=${page}&size=15`,
         );
         const d = await r.json();
+        writeSessionCache(
+          cacheKey,
+          {
+            items: d.items ?? [],
+            hasMore: d.hasMore ?? false,
+          },
+          GLOBAL_THEME_DETAIL_TTL,
+        );
         setNewsMap((m) => ({
           ...m,
           [tabIdx]: append
@@ -614,10 +674,39 @@ function FlashPanel({
       if (pg === 1) replace ? setLoading(true) : null;
       else setLoadingMore(true);
       try {
+        const cacheKey = `global:flash:${cat}:${pg}`;
+        const cached = readSessionCache<{
+          items: FlashItem[];
+          hasMore: boolean;
+          syncing: boolean;
+        }>(cacheKey);
+        if (cached) {
+          if (activeKeyRef.current !== cat) return;
+          if (replace || pg === 1) {
+            setItems(cached.items);
+          } else {
+            setItems((prev) => [...prev, ...cached.items]);
+          }
+          setHasMore(cached.hasMore);
+          setSyncing(cached.syncing);
+          if (pg === 1) setLoading(false);
+          else setLoadingMore(false);
+          return;
+        }
+
         const r = await fetch(
           `${API}/api/flash?category=${cat}&page=${pg}&page_size=20`,
         );
         const d = await r.json();
+        writeSessionCache(
+          cacheKey,
+          {
+            items: d.items ?? [],
+            hasMore: d.hasMore ?? false,
+            syncing: d.syncing ?? false,
+          },
+          GLOBAL_FLASH_TTL,
+        );
         if (activeKeyRef.current !== cat) return;
         if (replace || pg === 1) {
           setItems(d.items ?? []);
@@ -770,11 +859,20 @@ export default function GlobalPage() {
   const tabsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    const cacheKey = "global:theme-hot";
+    const cached = readSessionCache<Theme[]>(cacheKey);
+    if (cached?.length) {
+      setThemes(cached);
+      setActiveTheme(cached[0]);
+      return;
+    }
+
     fetch(`${API}/api/theme/hot`)
       .then((r) => r.json())
       .then((data: Theme[]) => {
         setThemes(data);
         if (data.length > 0) setActiveTheme(data[0]);
+        writeSessionCache(cacheKey, data, GLOBAL_THEME_TTL);
       })
       .catch(() => {});
   }, []);
@@ -792,33 +890,75 @@ export default function GlobalPage() {
     setStocksLoading(true);
     setTrendLoading(true);
 
+    const metaCacheKey = `global:theme-meta:${activeTheme.themeId}`;
+    const stocksCacheKey = `global:theme-stocks:${activeTheme.themeId}`;
+    const trendCacheKey = `global:theme-trend:${activeTheme.themeId}`;
+
+    const cachedMeta = readSessionCache<ThemeMeta>(metaCacheKey);
+    const cachedStocks = readSessionCache<ThemeStocks>(stocksCacheKey);
+    const cachedTrend = readSessionCache<TrendData>(trendCacheKey);
+
+    if (cachedMeta) {
+      setThemeMeta(cachedMeta);
+      if (cachedMeta.indexCode) {
+        if (cachedStocks) {
+          setThemeStocks(cachedStocks);
+          setStocksLoading(false);
+        }
+        if (cachedTrend) {
+          setTrendData(cachedTrend);
+          setTrendLoading(false);
+        }
+        if (cachedStocks && cachedTrend) {
+          return;
+        }
+      } else {
+        setStocksLoading(false);
+        setTrendLoading(false);
+        return;
+      }
+    }
+
     fetch(`${API}/api/theme/${activeTheme.themeId}`)
       .then((r) => r.json())
       .then((meta: ThemeMeta) => {
         setThemeMeta(meta);
+        writeSessionCache(metaCacheKey, meta, GLOBAL_THEME_DETAIL_TTL);
 
         if (meta.indexCode) {
           // 股票排行
-          fetch(
-            `${API}/api/theme/${activeTheme.themeId}/stocks?index_code=${meta.indexCode}`,
-          )
-            .then((r) => r.json())
-            .then((d: ThemeStocks) => {
-              setThemeStocks(d);
-              setStocksLoading(false);
-            })
-            .catch(() => setStocksLoading(false));
+          if (cachedStocks) {
+            setThemeStocks(cachedStocks);
+            setStocksLoading(false);
+          } else {
+            fetch(
+              `${API}/api/theme/${activeTheme.themeId}/stocks?index_code=${meta.indexCode}`,
+            )
+              .then((r) => r.json())
+              .then((d: ThemeStocks) => {
+                setThemeStocks(d);
+                setStocksLoading(false);
+                writeSessionCache(stocksCacheKey, d, GLOBAL_THEME_DETAIL_TTL);
+              })
+              .catch(() => setStocksLoading(false));
+          }
 
           // 分时图
-          fetch(
-            `${API}/api/theme/${activeTheme.themeId}/trend?index_code=${meta.indexCode}`,
-          )
-            .then((r) => r.json())
-            .then((d: TrendData) => {
-              setTrendData(d);
-              setTrendLoading(false);
-            })
-            .catch(() => setTrendLoading(false));
+          if (cachedTrend) {
+            setTrendData(cachedTrend);
+            setTrendLoading(false);
+          } else {
+            fetch(
+              `${API}/api/theme/${activeTheme.themeId}/trend?index_code=${meta.indexCode}`,
+            )
+              .then((r) => r.json())
+              .then((d: TrendData) => {
+                setTrendData(d);
+                setTrendLoading(false);
+                writeSessionCache(trendCacheKey, d, GLOBAL_THEME_DETAIL_TTL);
+              })
+              .catch(() => setTrendLoading(false));
+          }
         } else {
           setStocksLoading(false);
           setTrendLoading(false);

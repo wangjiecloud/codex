@@ -1,68 +1,340 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "crypto";
-import { createTask } from "@/lib/taskStore";
-import { runCodex, DB_PATH, DB_SCHEMA } from "@/lib/codexRunner";
+import Database from "better-sqlite3";
+import { createTask, pushEvent, completeTask } from "@/lib/taskStore";
+import { DB_PATH, initSession, runCodexAsync } from "@/lib/codexRunner";
+import { SYSTEM_PROMPTS } from "@/app/api/agents/[agentId]/route";
 
-const TEAM_SYSTEM_PROMPT = (
-  code: string,
-  stockName: string,
-) => `你是一个专业的A股股票分析 Orchestrator，负责对 ${stockName}（${code}）进行全面分析。
+const AGENT_LABELS: Record<string, string> = {
+  technical: "技术分析",
+  fundamental: "基本面",
+  market: "盘面分析",
+  news: "新闻舆情",
+  advisor: "投资建议",
+};
 
-你必须严格按照以下6个阶段顺序完成分析，每个阶段开始和结束时输出规定的标记行。
+const PIPELINE: Array<keyof typeof SYSTEM_PROMPTS> = [
+  "technical",
+  "market",
+  "fundamental",
+  "news",
+  "advisor",
+];
 
-${DB_SCHEMA}
+const TEAM_IDENTITY_RE =
+  /(你是谁|你的定义|你的职责|你是干什么的|介绍一下你自己|自我介绍)/;
 
-=== 分析阶段与输出规范 ===
+const A_SHARE_CODE_RE = /^[036]\d{5}$/;
+const A_SHARE_CODE_IN_TEXT_RE = /([036]\d{5})/;
 
-【第1阶段：数据采集】
-输出第一行：[AGENT_START:data]
-用 sqlite3 查询 stock_quote、stock_kline（最近60日）、stock_fundamental 获取真实数据。
-完成后输出：[AGENT_DONE:data] <一句话摘要，如：已获取${stockName}行情、K线和财务数据>
+let db: Database.Database | null = null;
 
-【第2阶段：技术分析】（可与第3、4阶段并行思考，但输出按顺序）
-输出：[AGENT_START:technical]
-基于已获取的K线数据，计算并分析趋势、均线、MACD、RSI、KDJ、布林带等技术指标。
-完成后输出：[AGENT_DONE:technical] <一句话摘要，如：技术面偏多，MACD金叉，RSI=58>
+function getDb(): Database.Database {
+  if (db) return db;
+  db = new Database(DB_PATH, { readonly: true });
+  return db;
+}
 
-【第3阶段：基本面分析】
-输出：[AGENT_START:fundamental]
-基于 stock_fundamental 和 stock_quote 中的 pe/pb 数据，分析估值、盈利能力、成长性。
-完成后输出：[AGENT_DONE:fundamental] <一句话摘要>
+function normalizeCode(value?: string): string | null {
+  const code = value?.trim();
+  if (!code || !A_SHARE_CODE_RE.test(code)) return null;
+  return code;
+}
 
-【第4阶段：新闻舆情】
-输出：[AGENT_START:news]
-查询 news_flash 表（东方财富快讯，category 字段可按 'a'/'important' 过滤 A 股相关）和 theme_news 表（板块主题新闻，按 theme_name 关键词过滤），结合股票基本情况分析市场情绪（stock_news 表无数据，勿查）。
-完成后输出：[AGENT_DONE:news] <一句话摘要>
+function resolveStockTarget(input: {
+  code?: string;
+  stockName?: string;
+  question?: string;
+}): { code: string; stockName: string } | null {
+  const explicitCode = normalizeCode(input.code);
+  if (explicitCode) {
+    const matchedByCode = getDb()
+      .prepare(
+        `SELECT code, name
+         FROM stock_meta
+         WHERE code = ?
+         LIMIT 1`,
+      )
+      .get(explicitCode) as { code: string; name: string } | undefined;
 
-【第5阶段：风险评估】
-输出：[AGENT_START:risk]
-综合以上所有分析，评估波动性风险、估值风险、流动性风险、系统性风险，给出风险等级。
-完成后输出：[AGENT_DONE:risk] <一句话摘要，如：风险中等，Beta≈0.9，最大回撤约12%>
+    return {
+      code: explicitCode,
+      stockName: input.stockName?.trim() || matchedByCode?.name || explicitCode,
+    };
+  }
 
-【第6阶段：投资建议】
-输出：[AGENT_START:advisor]
-综合全部分析，给出专业投资建议（买卖方向、目标价、止损价、仓位建议、持有周期）。
-最后输出：[TEAM_DONE] <综合投资建议全文，200字以内，结尾注明"以上建议仅供参考，不构成投资依据">
+  const question = input.question?.trim();
+  if (!question) {
+    return null;
+  }
 
-=== 重要规则 ===
-- 每个 [AGENT_START:xxx] 和 [AGENT_DONE:xxx] 必须独占一行
-- [TEAM_DONE] 之后紧跟建议全文，也独占起始行
-- 实际执行 sqlite3 命令查询真实数据，不要编造数字
-- 六个阶段必须全部完成，不可跳过`;
+  const codeFromQuestion = question.match(A_SHARE_CODE_IN_TEXT_RE)?.[1];
+  if (codeFromQuestion) {
+    const matchedByCode = getDb()
+      .prepare(
+        `SELECT code, name
+         FROM stock_meta
+         WHERE code = ?
+         LIMIT 1`,
+      )
+      .get(codeFromQuestion) as { code: string; name: string } | undefined;
+
+    return {
+      code: codeFromQuestion,
+      stockName: matchedByCode?.name || codeFromQuestion,
+    };
+  }
+
+  const matches = getDb()
+    .prepare(
+      `SELECT code, name
+       FROM stock_meta
+       WHERE instr(?, name) > 0
+         AND (code LIKE '0%' OR code LIKE '3%' OR code LIKE '6%')
+       ORDER BY length(name) DESC, code ASC
+       LIMIT 5`,
+    )
+    .all(question) as { code: string; name: string }[];
+
+  if (matches.length === 1) {
+    return {
+      code: matches[0].code,
+      stockName: matches[0].name,
+    };
+  }
+
+  if (matches.length > 1) {
+    const candidates = matches
+      .map((item) => `${item.name}（${item.code}）`)
+      .join("、");
+    throw new Error(
+      `识别到多只股票：${candidates}，请明确提供一只股票代码或名称`,
+    );
+  }
+
+  return null;
+}
+
+function buildTeamPrompt(input: {
+  code?: string;
+  stockName?: string;
+  question?: string;
+}): { prompt: string; code?: string; stockName?: string } {
+  const question = input.question?.trim();
+  const target = resolveStockTarget(input);
+
+  if (target && question) {
+    return {
+      code: target.code,
+      stockName: target.stockName,
+      prompt: `${question}\n\n已识别股票：${target.stockName}（${target.code}）。请围绕该股票回答，并在需要时综合技术面、盘面、基本面、舆情和投资建议。`,
+    };
+  }
+
+  if (target) {
+    return {
+      code: target.code,
+      stockName: target.stockName,
+      prompt: `请分析 ${target.stockName}（${target.code}）`,
+    };
+  }
+
+  if (question) {
+    return {
+      prompt: `${question}\n\n如果问题缺少具体股票或必要上下文，请直接回答问题；若需要进一步信息，再明确说明还缺什么。`,
+    };
+  }
+
+  throw new Error("请提供股票代码、股票名称或具体问题");
+}
+
+function getTeamIntro(): string {
+  return [
+    "我是 Team 协同分析 Agent。",
+    "我的角色是 Orchestrator 主控调度，不是单一的技术分析 Agent。",
+    "我会根据问题组织技术分析、盘面分析、基本面分析、新闻舆情、投资建议等子 agent，并汇总成一份综合结论。",
+    "如果你的问题涉及具体股票，我会先识别股票，再串联多阶段分析。",
+    "如果你的问题是一般性问题，我会直接回答，必要时再调用合适的子 agent。",
+  ].join("\n");
+}
+
+function pickLineValue(text: string, labels: string[]): string | null {
+  for (const label of labels) {
+    const match = text.match(new RegExp(`(?:^|\\n)${label}[：: ]+([^\\n]+)`));
+    if (match?.[1]?.trim()) {
+      return match[1].trim();
+    }
+  }
+  return null;
+}
+
+function buildInvestmentConclusion(
+  technicalText: string,
+  advisorText: string,
+): string {
+  const rightSideType =
+    pickLineValue(technicalText, ["右侧交易类型"]) || "数据不足";
+  const rightSideSignal =
+    pickLineValue(technicalText, ["右侧交易建议", "右侧交易"]) || "数据不足";
+  const action =
+    pickLineValue(advisorText, ["买卖方向", "操作建议", "投资建议"]) ||
+    "以投资建议原文为准";
+  const position =
+    pickLineValue(advisorText, ["仓位建议", "建议仓位"]) || "数据不足";
+  const horizon =
+    pickLineValue(advisorText, ["持有周期", "持有周期建议"]) || "数据不足";
+  const target =
+    pickLineValue(advisorText, ["目标价位", "目标价", "目标位", "第一目标"]) ||
+    "数据不足";
+  const stopLoss =
+    pickLineValue(advisorText, ["止损价位", "止损价", "止损位"]) || "数据不足";
+  const entry =
+    pickLineValue(technicalText, [
+      "参考介入区间",
+      "新仓介入点",
+      "买入区间",
+      "介入点",
+      "回踩买点",
+    ]) ||
+    pickLineValue(advisorText, ["新仓介入点", "买入价", "买入区间"]) ||
+    "等待回踩或触发条件进一步确认";
+
+  return [
+    "# 投资结论",
+    "",
+    "| 项目 | 结论 |",
+    "| --- | --- |",
+    `| 买卖方向 | ${action} |`,
+    `| 右侧买入信号 | ${rightSideSignal} |`,
+    `| 仓位建议 | ${position} |`,
+    `| 持有周期 | ${horizon} |`,
+    `| 目标价位 | ${target} |`,
+    `| 止损价位 | ${stopLoss} |`,
+    `| 新仓介入点 | ${entry} |`,
+    `| 右侧交易类型 | ${rightSideType} |`,
+  ].join("\n");
+}
+
+function buildPipelinePrompt(
+  agentId: keyof typeof SYSTEM_PROMPTS,
+  baseQuestion: string,
+  priorResults: Record<string, string>,
+  hasStockTarget: boolean,
+): string {
+  const contextSummary = Object.entries(priorResults)
+    .map(([id, text]) => `【${AGENT_LABELS[id]}】\n${text}`)
+    .join("\n\n");
+
+  const prompt = contextSummary
+    ? `${baseQuestion}\n\n已有分析结论供参考：\n${contextSummary}`
+    : baseQuestion;
+
+  if (agentId !== "advisor" || !hasStockTarget) {
+    return prompt;
+  }
+
+  return `${prompt}\n\n请在回复开头严格先输出一个 Markdown 表格，标题固定为“# 投资结论”，表格包含以下项目，顺序必须保持一致：买卖方向、右侧买入信号、仓位建议、持有周期、目标价位、止损价位、新仓介入点、右侧交易类型。\n若某项暂时无法给出明确价位，请写“数据不足”或“等待确认”，不要省略。表格后再补充简要理由和风险提示。`;
+}
+
+async function runPipeline(
+  taskId: string,
+  baseQuestion: string,
+  hasStockTarget: boolean,
+) {
+  const results: Record<string, string> = {};
+
+  try {
+    for (const agentId of PIPELINE) {
+      const label = AGENT_LABELS[agentId];
+
+      pushEvent(taskId, { type: "agent_start", agentId, agentLabel: label });
+
+      const systemPrompt = SYSTEM_PROMPTS[agentId];
+      const threadId = await initSession(systemPrompt);
+
+      const prompt = buildPipelinePrompt(
+        agentId,
+        baseQuestion,
+        results,
+        hasStockTarget,
+      );
+
+      const output = await runCodexAsync(taskId, prompt, threadId);
+      results[agentId] = output;
+
+      const summaryLine =
+        output.split("\n").find((l) => l.trim()) ?? output.slice(0, 100);
+      pushEvent(taskId, {
+        type: "agent_done",
+        agentId,
+        agentLabel: label,
+        result: summaryLine,
+      });
+    }
+
+    const detailSections = PIPELINE.map((agentId) => {
+      const label = AGENT_LABELS[agentId];
+      const content = results[agentId]?.trim() || "暂无结果";
+      return `## ${label}\n\n<details>\n<summary>展开查看${label}详情</summary>\n\n${content}\n\n</details>`;
+    }).join("\n\n");
+
+    const advice = results["advisor"] ?? "";
+    const conclusion = hasStockTarget
+      ? buildInvestmentConclusion(results["technical"] ?? "", advice)
+      : "";
+    const finalReport = conclusion
+      ? `${conclusion}\n\n${advice.trim()}\n\n---\n\n# 分阶段详情\n\n${detailSections}`
+      : `${advice.trim()}\n\n---\n\n# 分阶段详情\n\n${detailSections}`;
+    pushEvent(taskId, { type: "team_done", advice: finalReport });
+    pushEvent(taskId, { type: "done" });
+  } catch (err) {
+    pushEvent(taskId, {
+      type: "error",
+      message: err instanceof Error ? err.message : String(err),
+    });
+  } finally {
+    completeTask(taskId);
+  }
+}
 
 export async function POST(req: NextRequest) {
-  const body = await req.json();
-  const { code, stockName } = body as { code: string; stockName: string };
+  const { code, stockName, question } = (await req.json()) as {
+    code?: string;
+    stockName?: string;
+    question?: string;
+  };
 
-  if (!code) {
-    return NextResponse.json({ error: "code is required" }, { status: 400 });
+  if (question?.trim() && TEAM_IDENTITY_RE.test(question.trim())) {
+    const taskId = randomUUID();
+    createTask(taskId);
+    setImmediate(() => {
+      pushEvent(taskId, { type: "team_done", advice: getTeamIntro() });
+      pushEvent(taskId, { type: "done" });
+      completeTask(taskId);
+    });
+    return NextResponse.json({ taskId });
+  }
+
+  let teamInput: { prompt: string; code?: string; stockName?: string };
+  try {
+    teamInput = buildTeamPrompt({ code, stockName, question });
+  } catch (error) {
+    return NextResponse.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "请提供股票代码或包含股票名称的分析问题",
+      },
+      { status: 400 },
+    );
   }
 
   const taskId = randomUUID();
   createTask(taskId);
 
   setImmediate(() => {
-    runCodex(taskId, TEAM_SYSTEM_PROMPT(code, stockName ?? code));
+    runPipeline(taskId, teamInput.prompt, Boolean(teamInput.code));
   });
 
   return NextResponse.json({ taskId });

@@ -3,11 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, ExternalLink, Plus, Star, X, Search } from "lucide-react";
-import {
-  StockChart,
-  generateMockData,
-  KLineBar,
-} from "@/components/stock/StockChart";
+import { StockChart, KLineBar } from "@/components/stock/StockChart";
 import MinuteChartModal from "@/components/stock/MinuteChartModal";
 import { AgentPanel } from "@/components/agents/AgentPanel";
 import { cn, getPriceColor, formatPercent } from "@/lib/utils";
@@ -374,9 +370,7 @@ export default function StockDetailPage() {
   })();
 
   const [quote, setQuote] = useState<QuoteData>(DEFAULT_QUOTE);
-  const [klineData, setKlineData] = useState<KLineBar[]>(() =>
-    generateMockData(code),
-  );
+  const [klineData, setKlineData] = useState<KLineBar[]>([]);
   const [news, setNews] = useState<NewsItem[]>([]);
   const [activeIndicators, setActiveIndicators] = useState(["VOL", "MACD"]);
   const [activeMAs, setActiveMAs] = useState<number[]>([5, 10, 20, 30, 60]);
@@ -505,6 +499,7 @@ export default function StockDetailPage() {
   useEffect(() => {
     const period = PERIOD_MAP[activePeriod];
     if (!period) return;
+    setKlineData([]);
     fetch(`http://localhost:8000/api/kline/${code}?period=${period}&count=110`)
       .then((r) => r.json())
       .then((data) => {
@@ -512,9 +507,13 @@ export default function StockDetailPage() {
           setKlineData(data);
         } else if (data.bars && data.bars.length > 0) {
           setKlineData(data.bars);
+        } else {
+          setKlineData([]);
         }
       })
-      .catch(() => {});
+      .catch(() => {
+        setKlineData([]);
+      });
   }, [code, activePeriod]);
 
   useEffect(() => {

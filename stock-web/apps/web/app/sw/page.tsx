@@ -1132,10 +1132,12 @@ function FundFlowModal({ onClose }: { onClose: () => void }) {
   const [datesMap, setDatesMap] = useState<DatesMap>({});
   const [sortField, setSortField] = useState<
     "netflow" | "inflow" | "outflow" | "changePct"
-  >("netflow");
+  >("changePct");
   const [sortOrder, setSortOrderFF] = useState<"desc" | "asc">("desc");
   const [items, setItems] = useState<FundFlowItem[]>([]);
   const [loading, setLoading] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState("");
   const [error, setError] = useState("");
   const [searchText, setSearchText] = useState("");
 
@@ -1152,6 +1154,27 @@ function FundFlowModal({ onClose }: { onClose: () => void }) {
       .then((d: DatesMap) => setDatesMap(d))
       .catch(() => {});
   }, []);
+
+  // 同步快照 + 刷新数据
+  const handleRefresh = async () => {
+    if (syncing || loading) return;
+    if (!selectedDate) {
+      setSyncing(true);
+      setSyncMsg("正在从同花顺拉取最新数据…");
+      try {
+        await fetch(`${API}/api/fund-flow/snapshot/sync`, {
+          method: "POST",
+          cache: "no-store",
+        });
+        setSyncMsg("");
+      } catch {
+        setSyncMsg("");
+      } finally {
+        setSyncing(false);
+      }
+    }
+    await fetchData();
+  };
 
   const fetchData = async () => {
     setLoading(true);
@@ -1253,6 +1276,11 @@ function FundFlowModal({ onClose }: { onClose: () => void }) {
             <span className="text-[11px] text-[var(--text-tertiary)]">
               来源：同花顺数据中心
             </span>
+            {syncMsg && (
+              <span className="text-[10px] text-[var(--accent)] animate-pulse ml-1">
+                {syncMsg}
+              </span>
+            )}
 
             {/* 板块类型 */}
             <div className="flex items-center gap-1 ml-2">
@@ -1281,15 +1309,15 @@ function FundFlowModal({ onClose }: { onClose: () => void }) {
                 className="px-2 py-0.5 rounded border border-[var(--border-color)] bg-[var(--bg-primary)] text-[11px] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] outline-none focus:border-[var(--accent)] transition-colors w-28"
               />
               <button
-                onClick={fetchData}
-                disabled={loading}
-                className="flex items-center gap-1 px-2 py-0.5 rounded border border-[var(--border-color)] text-[11px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
+                onClick={handleRefresh}
+                disabled={loading || syncing}
+                className="flex items-center gap-1 px-2 py-0.5 rounded border border-[var(--border-color)] text-[11px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors disabled:opacity-50"
               >
                 <RefreshCw
                   size={11}
-                  className={cn(loading && "animate-spin")}
+                  className={cn((loading || syncing) && "animate-spin")}
                 />
-                刷新
+                {syncing ? "同步中…" : "刷新"}
               </button>
               <button
                 onClick={onClose}

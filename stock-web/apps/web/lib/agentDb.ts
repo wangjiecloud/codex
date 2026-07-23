@@ -43,27 +43,36 @@ function getDb(): Database.Database {
 }
 
 export interface DbMessage {
+  id?: number;
   role: "user" | "agent";
   content: string;
 }
 
-export interface DbSession {
+export interface DbSessionSummary {
   id: string;
   agentId: string;
   title: string;
   codexSid?: string;
   createdAt: number;
   updatedAt: number;
+  messageCount: number;
+}
+
+export interface DbSession extends DbSessionSummary {
   messages: DbMessage[];
 }
 
-/** 查询某 agent 的所有会话（含消息），按 updated_at DESC */
-export function listSessions(agentId: string): DbSession[] {
+export function listSessions(agentId: string): DbSessionSummary[] {
   const db = getDb();
   const sessions = db
     .prepare(
-      `SELECT id, agent_id, title, codex_sid, created_at, updated_at
-       FROM agent_session WHERE agent_id = ? ORDER BY updated_at DESC`,
+      `SELECT s.id, s.agent_id, s.title, s.codex_sid, s.created_at, s.updated_at,
+              COUNT(m.id) AS message_count
+       FROM agent_session s
+       LEFT JOIN agent_message m ON m.session_id = s.id
+       WHERE s.agent_id = ?
+       GROUP BY s.id, s.agent_id, s.title, s.codex_sid, s.created_at, s.updated_at
+       ORDER BY s.updated_at DESC`,
     )
     .all(agentId) as {
     id: string;
@@ -72,27 +81,56 @@ export function listSessions(agentId: string): DbSession[] {
     codex_sid: string | null;
     created_at: number;
     updated_at: number;
+    message_count: number;
   }[];
 
-  return sessions.map((s) => {
-    const messages = db
-      .prepare(
-        `SELECT role, content FROM agent_message WHERE session_id = ? ORDER BY id ASC`,
-      )
-      .all(s.id) as DbMessage[];
-    return {
-      id: s.id,
-      agentId: s.agent_id,
-      title: s.title,
-      codexSid: s.codex_sid ?? undefined,
-      createdAt: s.created_at,
-      updatedAt: s.updated_at,
-      messages,
-    };
-  });
+  return sessions.map((s) => ({
+    id: s.id,
+    agentId: s.agent_id,
+    title: s.title,
+    codexSid: s.codex_sid ?? undefined,
+    createdAt: s.created_at,
+    updatedAt: s.updated_at,
+    messageCount: s.message_count,
+  }));
 }
 
-/** 创建或完整替换一个会话（含消息）—— upsert session + replace messages */
+export function listSessionMessages(
+  sessionId: string,
+  offset = 0,
+  limit = 30,
+): { messages: DbMessage[]; total: number } {
+  const db = getDb();
+  const row = db
+    .prepare(`SELECT COUNT(*) AS total FROM agent_message WHERE session_id = ?`)
+    .get(sessionId) as { total: number } | undefined;
+  const total = row?.total ?? 0;
+  const safeOffset = Math.max(0, offset);
+  const safeLimit = Math.max(1, limit);
+  const messages = db
+    .prepare(
+      `SELECT id, role, content
+       FROM agent_message
+       WHERE session_id = ?
+       ORDER BY id DESC
+       LIMIT ? OFFSET ?`,
+    )
+    .all(sessionId, safeLimit, safeOffset) as {
+    id: number;
+    role: "user" | "agent";
+    content: string;
+  }[];
+
+  return {
+    total,
+    messages: messages.reverse().map((msg) => ({
+      id: msg.id,
+      role: msg.role,
+      content: msg.content,
+    })),
+  };
+}
+
 export function upsertSession(session: DbSession): void {
   const db = getDb();
   const now = Date.now();
@@ -112,8 +150,9 @@ export function upsertSession(session: DbSession): void {
       session.createdAt,
       now,
     );
-    // 删旧消息，重写（简单可靠）
-    db.prepare(`DELETE FROM agent_message WHERE session_id = ?`).run(session.id);
+    db.prepare(`DELETE FROM agent_message WHERE session_id = ?`).run(
+      session.id,
+    );
     const insertMsg = db.prepare(
       `INSERT INTO agent_message(session_id, role, content, created_at) VALUES(?,?,?,?)`,
     );
@@ -123,7 +162,6 @@ export function upsertSession(session: DbSession): void {
   })();
 }
 
-/** 删除一个会话（消息级联删除） */
 export function deleteSession(sessionId: string): void {
   getDb().prepare(`DELETE FROM agent_session WHERE id = ?`).run(sessionId);
 }

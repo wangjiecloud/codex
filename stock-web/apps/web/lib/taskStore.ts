@@ -4,7 +4,9 @@
 interface TaskEntry {
   events: string[];
   done: boolean;
+  cancelled: boolean;
   clients: ReadableStreamDefaultController[];
+  onCancel?: () => void;
 }
 
 // Use global to survive hot-reload in dev
@@ -18,7 +20,12 @@ if (!g._sseTaskStore) {
 export const taskStore: Map<string, TaskEntry> = g._sseTaskStore;
 
 export function createTask(taskId: string) {
-  taskStore.set(taskId, { events: [], done: false, clients: [] });
+  taskStore.set(taskId, {
+    events: [],
+    done: false,
+    cancelled: false,
+    clients: [],
+  });
 }
 
 export function pushEvent(taskId: string, event: object) {
@@ -37,6 +44,7 @@ export function completeTask(taskId: string) {
   const task = taskStore.get(taskId);
   if (!task) return;
   task.done = true;
+  task.onCancel = undefined;
   task.clients.forEach((ctrl) => {
     try {
       ctrl.close();
@@ -44,4 +52,22 @@ export function completeTask(taskId: string) {
   });
   // Cleanup after 5 minutes
   setTimeout(() => taskStore.delete(taskId), 5 * 60 * 1000);
+}
+
+export function cancelTask(taskId: string) {
+  const task = taskStore.get(taskId);
+  if (!task) return false;
+  task.cancelled = true;
+  task.onCancel?.();
+  return true;
+}
+
+export function registerTaskCanceller(taskId: string, onCancel: () => void) {
+  const task = taskStore.get(taskId);
+  if (!task) return false;
+  task.onCancel = onCancel;
+  if (task.cancelled) {
+    onCancel();
+  }
+  return true;
 }

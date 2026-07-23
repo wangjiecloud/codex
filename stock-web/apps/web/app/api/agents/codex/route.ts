@@ -29,7 +29,7 @@ const SYSTEM_PROMPT = `你是一个专业的A股股票分析助手。你可以�
 数据库路径: ${DB_PATH}
 
 主要数据表及字段:
-- stock_quote: code, name, price, change(涨跌幅%), change_amt(涨跌额), open, prev_close, high, low, volume, turnover, market_cap(市值), pe, pb, turnover_rate, updated_at
+- stock_quote: code, name, price, change(涨跌幅%), change_amt(涨跌额), open, prev_close, high, low, volume, turnover, market_cap(市值字段，单位历史上可能不一致，使用前必须校验，不能直接假设为亿元), pe, pb, turnover_rate, updated_at
 - stock_kline: code, period('daily'), trade_date, open, high, low, close, volume, turnover, change_pct, turn_rate
 - stock_meta: code, name, market, industry_ids
 - stock_fundamental: code, report_date, eps, roe, revenue, revenue_yoy, net_profit, net_profit_yoy, gross_margin, debt_ratio

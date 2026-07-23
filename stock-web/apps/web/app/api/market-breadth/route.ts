@@ -6,10 +6,12 @@ const DATA_SERVICE_URL =
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const days = searchParams.get("days") || "60";
-  const res = await fetch(
-    `${DATA_SERVICE_URL}/api/market-breadth?days=${days}`,
-    { cache: "no-store" },
-  );
+  const summary = searchParams.get("summary") || "0";
+  const path =
+    summary === "1"
+      ? `/api/market-breadth/summary?days=${days}`
+      : `/api/market-breadth?days=${days}`;
+  const res = await fetch(`${DATA_SERVICE_URL}${path}`, { cache: "no-store" });
   const data = await res.json();
   return NextResponse.json(data);
 }

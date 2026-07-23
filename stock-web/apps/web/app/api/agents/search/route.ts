@@ -60,6 +60,36 @@ async function callLLM(
   return data.choices[0]?.message?.content ?? "";
 }
 
+function sanitizeSql(rawSql: string): string {
+  return rawSql
+    .trim()
+    .replace(/^```sql\s*/i, "")
+    .replace(/^```\s*/i, "")
+    .replace(/```$/, "")
+    .replace(/;+\s*$/, "")
+    .trim();
+}
+
+function ensureIndustryBoardColumn(sql: string): string {
+  if (/\b(industry_board|sw_board|board_name)\b/i.test(sql)) {
+    return sql;
+  }
+
+  return `
+SELECT
+  ai_result.*, 
+  COALESCE(sw_board_map.industry_board, '未分类') AS industry_board
+FROM (
+${sql}
+) AS ai_result
+LEFT JOIN (
+  SELECT c.stock_code, GROUP_CONCAT(si.name, '/') AS industry_board
+  FROM sw_industry_constituent c
+  JOIN sw_industry si ON si.code = c.board_code AND si.level = '二级'
+  GROUP BY c.stock_code
+) AS sw_board_map ON sw_board_map.stock_code = ai_result.code`;
+}
+
 function executeSql(sql: string): { columns: string[]; rows: string[][] } {
   const tmpFile = path.join(os.tmpdir(), `stock_query_${Date.now()}.sql`);
   try {
@@ -189,9 +219,9 @@ const SYSTEM_PROMPT = `你是A股智能选股助手，直接将用户的自然�
 - sw_industry_constituent c: board_code(申万板块代码), stock_code(股票代码), stock_name(股票名称)
   一只股票可能属于多个申万板块，JOIN 时需用 GROUP_CONCAT 或子查询聚合；获取板块名称需再 JOIN sw_industry
 - sw_industry si: code(板块代码), name(板块名称), level(级别，'二级'/'三级'), change_pct(今日板块涨跌幅，百分比数值)
-  用法示例（获取股票所属申万二级板块名称）：
+  用法示例（获取股票所属申万二级板块名称，列名统一用 industry_board）：
   LEFT JOIN (
-    SELECT c.stock_code, GROUP_CONCAT(si.name, '/') AS sw_board
+    SELECT c.stock_code, GROUP_CONCAT(si.name, '/') AS industry_board
     FROM sw_industry_constituent c JOIN sw_industry si ON si.code=c.board_code AND si.level='二级'
     GROUP BY c.stock_code
   ) sw ON sw.stock_code=q.code
@@ -242,6 +272,7 @@ aigpu / pcb / mlcc / memory / optics / fiber / liquidcool / aipower / coppercabl
 
 规则：
 - SELECT 必含：q.code, q.name, ROUND(q.price,2) AS price, ROUND(q.change,2) AS change
+- 所有查询结果都必须包含行业板块列，列名统一为 industry_board；无板块时返回 '未分类'
 - market_cap 单位元：500亿=50000000000；市值转亿：ROUND(market_cap/100000000,2) AS cap_yi
 - 展示 roe/gross_margin/revenue_yoy/net_profit_yoy 时乘以100转为百分比：ROUND(f.roe*100,2) AS roe
 - 不加 LIMIT，除非用户明说"前N名/top N"
@@ -319,12 +350,7 @@ export async function POST(req: NextRequest) {
           { role: "user", content: query },
         ]);
 
-        let sql = rawSql
-          .trim()
-          .replace(/^```sql\s*/i, "")
-          .replace(/^```\s*/i, "")
-          .replace(/```$/, "")
-          .trim();
+        let sql = ensureIndustryBoardColumn(sanitizeSql(rawSql));
 
         if (sql.toUpperCase().startsWith("UNSUPPORTED")) {
           sendEvent({
@@ -354,12 +380,7 @@ export async function POST(req: NextRequest) {
               content: `SQL 执行报错，请修复：\n错误：${String(firstErr)}\n\n原始SQL：\n${sql}`,
             },
           ]);
-          sql = fixedRaw
-            .trim()
-            .replace(/^```sql\s*/i, "")
-            .replace(/^```\s*/i, "")
-            .replace(/```$/, "")
-            .trim();
+          sql = ensureIndustryBoardColumn(sanitizeSql(fixedRaw));
           sendEvent({ type: "sql", sql });
           try {
             queryResult = executeSql(sql);
@@ -370,7 +391,7 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        const { columns, rows } = queryResult;
+        const { rows } = queryResult;
 
         // ── 阶段3：空结果时自动诊断，让 LLM 重新生成 ────────────────────────
         if (rows.length === 0) {
@@ -392,12 +413,7 @@ export async function POST(req: NextRequest) {
             },
           ]);
 
-          const retriedSql = retrySql
-            .trim()
-            .replace(/^```sql\s*/i, "")
-            .replace(/^```\s*/i, "")
-            .replace(/```$/, "")
-            .trim();
+          const retriedSql = ensureIndustryBoardColumn(sanitizeSql(retrySql));
 
           sendEvent({ type: "sql", sql: retriedSql });
           sendEvent({ type: "status", message: "重新查询中..." });

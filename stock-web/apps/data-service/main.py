@@ -24,6 +24,7 @@ from routers import (
     market_breadth,
     market_flow,
     watchlist,
+    margin_trading,
 )
 import akshare as ak
 from fastapi import HTTPException
@@ -65,6 +66,9 @@ app.include_router(memo.router, prefix="/api/memo", tags=["备忘录"])
 app.include_router(watchlist.router)
 app.include_router(
     market_breadth.router, prefix="/api/market-breadth", tags=["市场情绪"]
+)
+app.include_router(
+    margin_trading.router, prefix="/api/margin-trading", tags=["融资融券"]
 )
 
 _scheduler = BackgroundScheduler(timezone="Asia/Shanghai")
@@ -431,7 +435,14 @@ def startup():
 
         sched_log("success", f"[K线增量] 完成，共同步 {len(pending)} 只")
 
-    # daily_klines_incremental 已取消定时，保留函数供页面手动触发
+    _scheduler.add_job(
+        _daily_klines_incremental,
+        trigger="cron",
+        hour=18,
+        minute=0,
+        id="daily_klines_incremental",
+        replace_existing=True,
+    )
 
     # 每周日凌晨02:00同步F10财务数据（低频，财报季同步30天内未更新，非财报季只补缺失）
     # force_sync=True 时忽略已有数据，强制全量重新同步（用于二季报等手动补数据）
@@ -478,13 +489,70 @@ def startup():
 
         return _date.today().month in (1, 2, 3, 4, 8, 10, 11)
 
+    def _finance_tab_ready_codes(db, updated_after=None):
+        from db import (
+            StockF10BusinessAnalysis,
+            StockF10FinancialHistory,
+            StockF10Snapshot,
+        )
+
+        snapshot_rows = db.query(
+            StockF10Snapshot.code, StockF10Snapshot.updated_at
+        ).all()
+        business_rows = db.query(
+            StockF10BusinessAnalysis.code,
+            StockF10BusinessAnalysis.updated_at,
+            StockF10BusinessAnalysis.main_business_breakdown,
+        ).all()
+        history_rows = db.query(
+            StockF10FinancialHistory.code,
+            StockF10FinancialHistory.updated_at,
+        ).all()
+
+        snapshot_codes = {
+            row.code
+            for row in snapshot_rows
+            if row.code
+            and (
+                updated_after is None
+                or (row.updated_at and row.updated_at >= updated_after)
+            )
+        }
+        business_codes = {
+            row.code
+            for row in business_rows
+            if row.code
+            and row.main_business_breakdown
+            and row.main_business_breakdown.strip()
+            and (
+                updated_after is None
+                or (row.updated_at and row.updated_at >= updated_after)
+            )
+        }
+        history_codes = {
+            row.code
+            for row in history_rows
+            if row.code
+            and (
+                updated_after is None
+                or (row.updated_at and row.updated_at >= updated_after)
+            )
+        }
+
+        return {
+            "snapshot": snapshot_codes,
+            "business": business_codes,
+            "history": history_codes,
+            "complete": snapshot_codes & business_codes & history_codes,
+        }
+
     def _weekly_fundamental_sync(force: bool = False):
         """每周日低频同步F10财务数据，支持断点续传。
         force=True 时强制全量重新同步所有股票（忽略已有数据，用于手动补二季报等）"""
         from db import SessionLocal
         from routers.system import sched_log
-        from routers.fundamental import _scrape_f10, _upsert_f10
-        from datetime import date as _date, timedelta as _td
+        from routers.fundamental import _scrape_f10_full, _upsert_f10_full
+        from datetime import date as _date, datetime as _dt, timedelta as _td
 
         # 检查是否被 trigger-task?force=true 设置了强制标志
         _force = force or _f10_force_flag.get("force", False)
@@ -516,7 +584,7 @@ def startup():
 
             db = SessionLocal()
             try:
-                from db import StockF10Snapshot, StockMeta as _SM
+                from db import StockMeta as _SM
 
                 all_codes = [r.code for r in db.query(_SM.code).all()]
 
@@ -527,24 +595,27 @@ def startup():
                         f"[weekly_f10] 强制全量：共 {len(all_codes)} 只股票待同步",
                     )
                 elif reporting:
-                    threshold = (_date.today() - _td(days=30)).strftime("%Y-%m-%d")
-                    already = {
-                        r.code
-                        for r in db.query(
-                            StockF10Snapshot.code, StockF10Snapshot.updated_at
-                        ).all()
-                        if r.updated_at
-                        and r.updated_at.strftime("%Y-%m-%d") >= threshold
-                    }
+                    threshold = _dt.utcnow() - _td(days=30)
+                    coverage = _finance_tab_ready_codes(db, threshold)
+                    already = coverage["complete"]
                     sched_log(
                         "info",
-                        f"[weekly_f10] 财报季：已有{len(already)}只在30天内，待同步{len(all_codes) - len(already)}只",
+                        "[weekly_f10] 财报季："
+                        f"快照近30天{len(coverage['snapshot'])}只，"
+                        f"主营构成近30天{len(coverage['business'])}只，"
+                        f"财报历史近30天{len(coverage['history'])}只，"
+                        f"财务Tab完整近30天{len(already)}只，待同步{len(all_codes) - len(already)}只",
                     )
                 else:
-                    already = {r.code for r in db.query(StockF10Snapshot.code).all()}
+                    coverage = _finance_tab_ready_codes(db)
+                    already = coverage["complete"]
                     sched_log(
                         "info",
-                        f"[weekly_f10] 非财报季：已有{len(already)}只，仅补缺失{len(all_codes) - len(already)}只",
+                        "[weekly_f10] 非财报季："
+                        f"快照完整{len(coverage['snapshot'])}只，"
+                        f"主营构成完整{len(coverage['business'])}只，"
+                        f"财报历史完整{len(coverage['history'])}只，"
+                        f"财务Tab完整{len(already)}只，仅补缺失{len(all_codes) - len(already)}只",
                     )
             finally:
                 db.close()
@@ -565,8 +636,8 @@ def startup():
                 code = codes[i]
                 pct = round((i + 1) / total * 100) if total else 0
                 try:
-                    data = _scrape_f10(code)
-                    _upsert_f10(code, data)
+                    data = _scrape_f10_full(code)
+                    _upsert_f10_full(code, data)
                     succeeded += 1
                     sched_log(
                         "info",
@@ -629,6 +700,16 @@ def startup():
         hour=15,
         minute=35,
         id="market_breadth_daily_sync",
+        replace_existing=True,
+    )
+
+    # 每天18:00同步融资融券数据（收盘后数据更新完毕）
+    _scheduler.add_job(
+        margin_trading.sync_margin_trading,
+        trigger="cron",
+        hour=18,
+        minute=0,
+        id="margin_trading_daily_sync",
         replace_existing=True,
     )
 
@@ -749,6 +830,13 @@ def startup():
             trading_day_only=False,
             fn=lambda: concept_board.sync_concept_boards(),
             desc="概念板块行情",
+        ),
+        dict(
+            task_id="margin_trading_daily_sync",
+            max_gap_days=3,
+            trading_day_only=True,
+            fn=lambda: margin_trading.sync_margin_trading(),
+            desc="融资融券数据",
         ),
         # ---- 周频任务 ----
         dict(

@@ -17,5 +17,4 @@ export {
 export { runTechnicalAgent, technicalChat } from "./agents/technical";
 export { runFundamentalAgent, fundamentalChat } from "./agents/fundamental";
 export { runNewsSentimentAgent, newsChat } from "./agents/news-sentiment";
-export { runRiskAgent, riskChat } from "./agents/risk";
 export { runAdvisorAgent, advisorChat } from "./agents/advisor";

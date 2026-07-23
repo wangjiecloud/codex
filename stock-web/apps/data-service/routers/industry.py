@@ -22,6 +22,7 @@ from db import (
     IndustryList,
 )
 from bs_session import get_bs, reset_bs
+from compute_indicators import compute_for_code
 
 router = APIRouter()
 
@@ -30,23 +31,72 @@ def is_trading_day(d: Optional[date] = None) -> bool:
     """判断指定日期（默认今天）是否为 A 股交易日（周一至周五，排除节假日）。
     使用 baostock 查询准确结果；若 baostock 不可用则降级为仅判断周末。
     """
+    from routers.system import sched_log
+
     if d is None:
         d = date.today()
     # 周末直接排除
     if d.weekday() >= 5:
         return False
-    try:
-        bs = get_bs()
-        rs = bs.query_trade_dates(
-            start_date=d.strftime("%Y-%m-%d"),
-            end_date=d.strftime("%Y-%m-%d"),
-        )
-        if rs.error_code == "0" and rs.next():
-            row = rs.get_row_data()
-            # row[1] == "1" 表示交易日
-            return row[1] == "1"
-    except Exception:
-        pass
+
+    target_date = d.strftime("%Y-%m-%d")
+    last_error = None
+    for attempt in range(2):
+        try:
+            if attempt == 1:
+                reset_bs()
+
+            bs = get_bs()
+            rs = bs.query_trade_dates(
+                start_date=target_date,
+                end_date=target_date,
+            )
+            error_code = getattr(rs, "error_code", "")
+            error_msg = getattr(rs, "error_msg", "")
+            row = None
+            has_row = error_code == "0" and rs.next()
+            if has_row:
+                row = rs.get_row_data()
+
+            if has_row and len(row) >= 2 and row[1] in ("0", "1"):
+                is_trade = row[1] == "1"
+                if is_trade:
+                    return True
+
+                if attempt == 0:
+                    sched_log(
+                        "warning",
+                        f"[trading-day] baostock 返回非交易日，准备重试: date={target_date}, row={row}",
+                        source="scheduler",
+                    )
+                    continue
+
+                sched_log(
+                    "warning",
+                    f"[trading-day] baostock 确认为非交易日: date={target_date}, row={row}",
+                    source="scheduler",
+                )
+                return False
+
+            last_error = f"attempt={attempt + 1}, error_code={error_code}, error_msg={error_msg}, row={row}"
+            sched_log(
+                "warning",
+                f"[trading-day] baostock 返回异常，按工作日兜底: date={target_date}, {last_error}",
+                source="scheduler",
+            )
+            break
+        except Exception as e:
+            last_error = f"attempt={attempt + 1}, error={e}"
+            sched_log(
+                "warning",
+                f"[trading-day] baostock 查询失败，按工作日兜底: date={target_date}, {last_error}",
+                source="scheduler",
+            )
+            if attempt == 0:
+                reset_bs()
+                continue
+            break
+
     # 降级：仅排除周末
     return True
 
@@ -65,6 +115,7 @@ def _latest_kline_date(code: str) -> Optional[str]:
         return row[0] if row and row[0] else None
     finally:
         db.close()
+
 
 _industry_list_cache: dict = {}
 _industry_stocks_cache: dict = {}
@@ -217,7 +268,11 @@ def sync_all_data():
 
     with _lock:
         if _status["running"]:
-            sched_log("warning", "17:30 定时同步：检测到同步任务已在运行，跳过本次触发", source="scheduler")
+            sched_log(
+                "warning",
+                "17:30 定时同步：检测到同步任务已在运行，跳过本次触发",
+                source="scheduler",
+            )
             return
 
     sched_log("info", "17:30 定时同步启动，复用全量同步流程", source="scheduler")
@@ -294,12 +349,15 @@ def _sync_all_quotes():
         db_kline = SessionLocal()
         try:
             from sqlalchemy import text as _text
-            rows_kline = db_kline.execute(_text(
-                "SELECT k.code, k.trade_date, k.close FROM stock_kline k "
-                "INNER JOIN (SELECT code, MAX(trade_date) AS max_date FROM stock_kline "
-                "WHERE period='daily' GROUP BY code) m ON k.code=m.code AND k.trade_date=m.max_date "
-                "WHERE k.period='daily'"
-            )).fetchall()
+
+            rows_kline = db_kline.execute(
+                _text(
+                    "SELECT k.code, k.trade_date, k.close FROM stock_kline k "
+                    "INNER JOIN (SELECT code, MAX(trade_date) AS max_date FROM stock_kline "
+                    "WHERE period='daily' GROUP BY code) m ON k.code=m.code AND k.trade_date=m.max_date "
+                    "WHERE k.period='daily'"
+                )
+            ).fetchall()
             for row_k in rows_kline:
                 _kline_latest[row_k[0]] = (row_k[1], float(row_k[2]))
         finally:
@@ -356,13 +414,17 @@ def _sync_all_quotes():
                     # 等待重连，最多重试 3 次，每次间隔 5 秒
                     reconnected = False
                     for _retry in range(3):
-                        import time as _t; _t.sleep(5)
+                        import time as _t
+
+                        _t.sleep(5)
                         try:
                             bs = get_bs()
                             reconnected = True
                             break
                         except Exception as _re:
-                            print(f"[sync_quotes] baostock 重连第{_retry+1}次失败: {_re}")
+                            print(
+                                f"[sync_quotes] baostock 重连第{_retry + 1}次失败: {_re}"
+                            )
                     if not reconnected:
                         print("[sync_quotes] baostock 重连失败，终止本次同步")
                         return
@@ -378,17 +440,25 @@ def _sync_all_quotes():
                 print(f"[sync_quotes] {raw_code} fetch error: {e}")
                 # 若是网络断连错误，重置 session 并等待重连
                 err_str = str(e)
-                if "Broken pipe" in err_str or "login failed" in err_str or "接收数据异常" in err_str:
+                if (
+                    "Broken pipe" in err_str
+                    or "login failed" in err_str
+                    or "接收数据异常" in err_str
+                ):
                     reset_bs()
                     reconnected = False
                     for _retry in range(3):
-                        import time as _t; _t.sleep(5)
+                        import time as _t
+
+                        _t.sleep(5)
                         try:
                             bs = get_bs()
                             reconnected = True
                             break
                         except Exception as _re:
-                            print(f"[sync_quotes] baostock 重连第{_retry+1}次失败: {_re}")
+                            print(
+                                f"[sync_quotes] baostock 重连第{_retry + 1}次失败: {_re}"
+                            )
                     if not reconnected:
                         print("[sync_quotes] baostock 重连失败，终止本次同步")
                         return
@@ -409,7 +479,9 @@ def _sync_all_quotes():
             # 校验 baostock 返回的 code 字段（index=1）是否与请求的 code 一致，防止串码
             returned_bs_code = str(r[1]).strip().lower()  # e.g. "sh.688012"
             if returned_bs_code != bs_code.lower():
-                print(f"[sync_quotes] {raw_code} 串码：请求 {bs_code}，返回 {returned_bs_code}，重置session跳过")
+                print(
+                    f"[sync_quotes] {raw_code} 串码：请求 {bs_code}，返回 {returned_bs_code}，重置session跳过"
+                )
                 reset_bs()
                 try:
                     bs = get_bs()
@@ -449,20 +521,32 @@ def _sync_all_quotes():
             if kline_ref and kline_ref[1] > 0 and close > 0:
                 diff_pct = abs(close - kline_ref[1]) / kline_ref[1] * 100
                 if diff_pct > 60:
-                    print(f"[sync_quotes] {raw_code} 价格异常：baostock={close}, kline={kline_ref[1]}, 偏差={diff_pct:.1f}%，跳过写入")
-                    sched_log("warning", f"[行情同步] {raw_code} 价格异常（baostock={close}, kline={kline_ref[1]}, 偏差={diff_pct:.1f}%），已跳过", source="scheduler")
+                    print(
+                        f"[sync_quotes] {raw_code} 价格异常：baostock={close}, kline={kline_ref[1]}, 偏差={diff_pct:.1f}%，跳过写入"
+                    )
+                    sched_log(
+                        "warning",
+                        f"[行情同步] {raw_code} 价格异常（baostock={close}, kline={kline_ref[1]}, 偏差={diff_pct:.1f}%），已跳过",
+                        source="scheduler",
+                    )
                     # kline 数据陈旧或错误导致偏差过大，后台异步重新拉取全量 kline 修复
                     if raw_code not in _kline_repair_triggered:
                         _kline_repair_triggered.add(raw_code)
                         import threading as _threading
+
                         def _repair_kline(_code=raw_code):
                             try:
                                 print(f"[sync_quotes] 触发 kline 修复：{_code}")
-                                sched_log("info", f"[行情同步] 触发 kline 修复：{_code}（价格偏差过大，重新拉取全量K线）", source="scheduler")
+                                sched_log(
+                                    "info",
+                                    f"[行情同步] 触发 kline 修复：{_code}（价格偏差过大，重新拉取全量K线）",
+                                    source="scheduler",
+                                )
                                 _sync_klines(_code, "daily", force=True)
                                 print(f"[sync_quotes] kline 修复完成：{_code}")
                             except Exception as _e:
                                 print(f"[sync_quotes] kline 修复失败：{_code}: {_e}")
+
                         _threading.Thread(target=_repair_kline, daemon=True).start()
                     continue
             high = round(_safe_float(r[3]), 4)
@@ -592,6 +676,8 @@ def _sync_klines(code: str, period: str = "daily", force: bool = False):
         "reset by peer",
         "timed out",
         "接收数据异常",
+        "list index out of range",
+        "malformed row",
     )
 
     def _is_transient(e: Exception) -> bool:
@@ -619,8 +705,17 @@ def _sync_klines(code: str, period: str = "daily", force: bool = False):
             return None
 
         rows = []
-        while rs.next() and len(rows) < 1000:
-            r = rs.get_row_data()
+        while len(rows) < 1000:
+            try:
+                has_next = rs.next()
+            except IndexError as e:
+                raise RuntimeError(f"baostock malformed row: {e}") from e
+            if not has_next:
+                break
+            try:
+                r = rs.get_row_data()
+            except IndexError as e:
+                raise RuntimeError(f"baostock malformed row: {e}") from e
             if r and len(r) >= 10:
                 rows.append(r)
         return rows
@@ -634,23 +729,29 @@ def _sync_klines(code: str, period: str = "daily", force: bool = False):
                 rows = fut.result(timeout=30)
                 break  # 成功则退出重试
             except FuturesTimeout:
-                print(f"[sync_klines] {code} timed out (attempt {fetch_attempt + 1}/{fetch_attempts})")
+                print(
+                    f"[sync_klines] {code} timed out (attempt {fetch_attempt + 1}/{fetch_attempts})"
+                )
                 reset_bs()
                 if fetch_attempt < fetch_attempts - 1:
                     time.sleep(2 * (fetch_attempt + 1))
                     continue
                 from routers.system import record_failed_stock
+
                 record_failed_stock(code, get_stock_name(code), "超时", "kline")
                 return
             except Exception as e:
                 if _is_transient(e) and fetch_attempt < fetch_attempts - 1:
-                    print(f"[sync_klines] {code} transient error (attempt {fetch_attempt + 1}/{fetch_attempts}): {e}, retrying...")
+                    print(
+                        f"[sync_klines] {code} transient error (attempt {fetch_attempt + 1}/{fetch_attempts}): {e}, retrying..."
+                    )
                     reset_bs()
                     time.sleep(2 * (fetch_attempt + 1))
                     continue
                 print(f"[sync_klines] {code} fetch error: {e}")
                 reset_bs()
                 from routers.system import record_failed_stock
+
                 record_failed_stock(code, get_stock_name(code), str(e), "kline")
                 return
 
@@ -659,6 +760,7 @@ def _sync_klines(code: str, period: str = "daily", force: bool = False):
 
     db = SessionLocal()
     retry_count = 3
+    saved = False
     try:
         for db_attempt in range(retry_count):
             try:
@@ -691,16 +793,27 @@ def _sync_klines(code: str, period: str = "daily", force: bool = False):
                     )
                     db.execute(stmt)
                 db.commit()
+                saved = True
                 print(f"[sync_klines] {code} done, {len(rows)} bars saved")
                 break
             except Exception as e:
                 db.rollback()
-                if db_attempt < retry_count - 1 and "database is locked" in str(e).lower():
+                if (
+                    db_attempt < retry_count - 1
+                    and "database is locked" in str(e).lower()
+                ):
                     time.sleep(1 + db_attempt * 0.5)
                     continue
                 print(f"[sync_klines] {code} db error: {e}")
     finally:
         db.close()
+
+    if saved and period == "daily":
+        try:
+            count = compute_for_code(code, period)
+            print(f"[sync_klines] {code} indicators refreshed, {count} rows")
+        except Exception as e:
+            print(f"[sync_klines] {code} indicator refresh error: {e}")
 
 
 def _sync_fundamental(code: str):
@@ -745,23 +858,29 @@ def _sync_fundamental(code: str):
             # balance_data fields: [0]code [1]pubDate [2]statDate [3]currentRatio
             #   [4]quickRatio [5]cashRatio [6]YOYLiability [7]liabilityToAsset
             #   [8]assetToEquity
-            eps = _safe_float(profit_row[7]) if len(profit_row) > 7 else None          # epsTTM
-            roe = _safe_float(profit_row[3]) if len(profit_row) > 3 else None          # roeAvg
-            gross_margin = _safe_float(profit_row[4]) if len(profit_row) > 4 else None # npMargin（净利润率）
-            net_profit = _safe_float(profit_row[6]) if len(profit_row) > 6 else None   # netProfit
-            revenue = _safe_float(profit_row[8]) if len(profit_row) > 8 else None      # MBRevenue（营业收入）
+            eps = _safe_float(profit_row[7]) if len(profit_row) > 7 else None  # epsTTM
+            roe = _safe_float(profit_row[3]) if len(profit_row) > 3 else None  # roeAvg
+            gross_margin = (
+                _safe_float(profit_row[4]) if len(profit_row) > 4 else None
+            )  # npMargin（净利润率）
+            net_profit = (
+                _safe_float(profit_row[6]) if len(profit_row) > 6 else None
+            )  # netProfit
+            revenue = (
+                _safe_float(profit_row[8]) if len(profit_row) > 8 else None
+            )  # MBRevenue（营业收入）
             revenue_yoy = (
-                _safe_float(growth_row[5])    # YOYNI（净利润同比，近似营收同比）
+                _safe_float(growth_row[5])  # YOYNI（净利润同比，近似营收同比）
                 if growth_row and len(growth_row) > 5
                 else None
             )
             net_profit_yoy = (
-                _safe_float(growth_row[7])    # YOYPNI（扣非净利润同比）
+                _safe_float(growth_row[7])  # YOYPNI（扣非净利润同比）
                 if growth_row and len(growth_row) > 7
                 else None
             )
             debt_ratio = (
-                _safe_float(balance_row[7])   # liabilityToAsset（资产负债率）
+                _safe_float(balance_row[7])  # liabilityToAsset（资产负债率）
                 if balance_row and len(balance_row) > 7
                 else None
             )
@@ -1035,9 +1154,7 @@ def _sync_industry_stocks(industry_id: str) -> None:
     db = SessionLocal()
     try:
         nodes = (
-            db.query(IndustryNode)
-            .filter(IndustryNode.industry_id == industry_id)
-            .all()
+            db.query(IndustryNode).filter(IndustryNode.industry_id == industry_id).all()
         )
         codes: list[str] = []
         for node in nodes:
@@ -1050,13 +1167,17 @@ def _sync_industry_stocks(industry_id: str) -> None:
 
     if not codes:
         _industry_sync_status["running"] = False
-        _industry_sync_status["message"] = f"[产业同步] {industry_id} 无 A 股节点，已跳过"
+        _industry_sync_status["message"] = (
+            f"[产业同步] {industry_id} 无 A 股节点，已跳过"
+        )
         sched_log("warning", f"[产业同步] {industry_id} 无 A 股节点", source="manual")
         return
 
     total = len(codes)
     _industry_sync_status["total"] = total
-    sched_log("info", f"[产业同步] 开始同步 {industry_id}，共 {total} 只股票", source="manual")
+    sched_log(
+        "info", f"[产业同步] 开始同步 {industry_id}，共 {total} 只股票", source="manual"
+    )
 
     errors: list[str] = []
     for idx, code in enumerate(codes):

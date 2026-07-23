@@ -33,6 +33,7 @@ import {
   RadioTower,
   Microchip,
   PlaneTakeoff,
+  Landmark,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -100,6 +101,7 @@ function IndustryPageContent() {
     | "biopharma"
     | "robot"
     | "telecom"
+    | "finance"
   >(() => {
     const t = searchParams.get("tab");
     if (
@@ -113,7 +115,8 @@ function IndustryPageContent() {
       t === "energy" ||
       t === "biopharma" ||
       t === "robot" ||
-      t === "telecom"
+      t === "telecom" ||
+      t === "finance"
     )
       return t;
     return "ai_infra";
@@ -137,6 +140,81 @@ function IndustryPageContent() {
   const biopharmaList = industries.filter((i) => i.tab === "biopharma");
   const robotList = industries.filter((i) => i.tab === "robot");
   const telecomList = industries.filter((i) => i.tab === "telecom");
+  const financeList = industries.filter((i) => i.tab === "finance");
+
+  const industryTabs = [
+    { key: "ai_infra", icon: <Cpu size={12} />, label: "AI基础设施" },
+    { key: "company", icon: <Building2 size={12} />, label: "企业" },
+    { key: "humanoid", icon: <Bot size={12} />, label: "人形机器人" },
+    { key: "aerospace", icon: <Rocket size={12} />, label: "商业航天" },
+    {
+      key: "aviation",
+      icon: <PlaneTakeoff size={12} />,
+      label: "国产大飞机",
+    },
+    {
+      key: "dc_compute",
+      icon: <Server size={12} />,
+      label: "国产算力基建",
+    },
+    { key: "llm", icon: <Brain size={12} />, label: "大模型" },
+    { key: "lowalt", icon: <Plane size={12} />, label: "低空经济" },
+    { key: "energy", icon: <Battery size={12} />, label: "新型储能" },
+    {
+      key: "biopharma",
+      icon: <Activity size={12} />,
+      label: "生物医药",
+    },
+    { key: "robot", icon: <Bot size={12} />, label: "工业机器人" },
+    { key: "telecom", icon: <Wifi size={12} />, label: "新型通信" },
+    { key: "finance", icon: <Landmark size={12} />, label: "大金融" },
+  ] as const;
+
+  const groupedIndustryList =
+    activeTab === "humanoid"
+      ? humanoidList
+      : activeTab === "aerospace"
+        ? aerospaceList
+        : activeTab === "aviation"
+          ? aviationList
+          : activeTab === "dc_compute"
+            ? dcComputeList
+            : activeTab === "llm"
+              ? llmList
+              : activeTab === "lowalt"
+                ? lowaltList
+                : activeTab === "energy"
+                  ? energyList
+                  : activeTab === "biopharma"
+                    ? biopharmaList
+                    : activeTab === "robot"
+                      ? robotList
+                      : activeTab === "telecom"
+                        ? telecomList
+                        : financeList;
+
+  const groupedFallbackIcon =
+    activeTab === "humanoid"
+      ? Bot
+      : activeTab === "aerospace"
+        ? Rocket
+        : activeTab === "aviation"
+          ? PlaneTakeoff
+          : activeTab === "dc_compute"
+            ? Server
+            : activeTab === "llm"
+              ? Brain
+              : activeTab === "lowalt"
+                ? Plane
+                : activeTab === "energy"
+                  ? Battery
+                  : activeTab === "biopharma"
+                    ? Activity
+                    : activeTab === "robot"
+                      ? Bot
+                      : activeTab === "telecom"
+                        ? Wifi
+                        : Landmark;
 
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<
@@ -402,34 +480,7 @@ function IndustryPageContent() {
 
       {/* 产业 Tab 胶囊网格 */}
       <div className="flex flex-wrap gap-2 mb-6">
-        {(
-          [
-            { key: "ai_infra", icon: <Cpu size={12} />, label: "AI基础设施" },
-            { key: "company", icon: <Building2 size={12} />, label: "企业" },
-            { key: "humanoid", icon: <Bot size={12} />, label: "人形机器人" },
-            { key: "aerospace", icon: <Rocket size={12} />, label: "商业航天" },
-            {
-              key: "aviation",
-              icon: <PlaneTakeoff size={12} />,
-              label: "国产大飞机",
-            },
-            {
-              key: "dc_compute",
-              icon: <Server size={12} />,
-              label: "国产算力基建",
-            },
-            { key: "llm", icon: <Brain size={12} />, label: "大模型" },
-            { key: "lowalt", icon: <Plane size={12} />, label: "低空经济" },
-            { key: "energy", icon: <Battery size={12} />, label: "新型储能" },
-            {
-              key: "biopharma",
-              icon: <Activity size={12} />,
-              label: "生物医药",
-            },
-            { key: "robot", icon: <Bot size={12} />, label: "工业机器人" },
-            { key: "telecom", icon: <Wifi size={12} />, label: "新型通信" },
-          ] as { key: string; icon: React.ReactNode; label: string }[]
-        ).map(({ key, icon, label }) => {
+        {industryTabs.map(({ key, icon, label }) => {
           const active = activeTab === key;
           return (
             <button
@@ -622,49 +673,11 @@ function IndustryPageContent() {
         activeTab === "energy" ||
         activeTab === "biopharma" ||
         activeTab === "robot" ||
-        activeTab === "telecom") && (
+        activeTab === "telecom" ||
+        activeTab === "finance") && (
         <div className="space-y-3">
-          {(activeTab === "humanoid"
-            ? humanoidList
-            : activeTab === "aerospace"
-              ? aerospaceList
-              : activeTab === "aviation"
-                ? aviationList
-                : activeTab === "dc_compute"
-                  ? dcComputeList
-                  : activeTab === "llm"
-                    ? llmList
-                    : activeTab === "lowalt"
-                      ? lowaltList
-                      : activeTab === "energy"
-                        ? energyList
-                        : activeTab === "biopharma"
-                          ? biopharmaList
-                          : activeTab === "robot"
-                            ? robotList
-                            : telecomList
-          ).map((industry) => {
-            const Icon =
-              ICONS[industry.icon] ||
-              (activeTab === "humanoid"
-                ? Bot
-                : activeTab === "aerospace"
-                  ? Rocket
-                  : activeTab === "aviation"
-                    ? PlaneTakeoff
-                    : activeTab === "dc_compute"
-                      ? Server
-                      : activeTab === "llm"
-                        ? Brain
-                        : activeTab === "lowalt"
-                          ? Plane
-                          : activeTab === "energy"
-                            ? Battery
-                            : activeTab === "biopharma"
-                              ? Activity
-                              : activeTab === "robot"
-                                ? Bot
-                                : Wifi);
+          {groupedIndustryList.map((industry) => {
+            const Icon = ICONS[industry.icon] || groupedFallbackIcon;
             return (
               <div
                 key={industry.id}
@@ -681,12 +694,7 @@ function IndustryPageContent() {
                   <div className="flex items-start justify-between">
                     <div className="flex items-start gap-4 flex-1">
                       <div className="w-10 h-10 rounded-lg bg-[#f5a623]/10 flex items-center justify-center shrink-0 mt-0.5 text-xl">
-                        {ICONS[industry.icon]
-                          ? React.createElement(ICONS[industry.icon], {
-                              size: 20,
-                              className: "text-[#f5a623]",
-                            })
-                          : industry.icon}
+                        <Icon size={20} className="text-[#f5a623]" />
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-3 mb-1">

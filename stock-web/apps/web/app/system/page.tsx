@@ -343,6 +343,74 @@ function GlobalIndexMonitorInline({
   );
 }
 
+function MarginTradingMonitorInline({
+  onTaskClick,
+}: {
+  onTaskClick?: (taskId: string) => void;
+}) {
+  const [dayCount, setDayCount] = useState(0);
+  const [latestDate, setLatestDate] = useState<string | null>(null);
+  const [todayDone, setTodayDone] = useState(false);
+  useEffect(() => {
+    const fetch_ = async () => {
+      try {
+        const r = await fetch("http://localhost:8000/api/margin-trading/stats");
+        if (r.ok) {
+          const d = await r.json();
+          setDayCount(d.dayCount || 0);
+          setLatestDate(d.latestDate || null);
+          const today = new Date().toISOString().slice(0, 10);
+          setTodayDone(d.latestDate === today);
+        }
+      } catch {}
+    };
+    fetch_();
+  }, []);
+  return (
+    <div className="bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg px-3 py-2.5">
+      <div className="flex items-center gap-1.5 mb-2">
+        <TrendingUp size={12} className="text-[#e84c4c]" />
+        <span className="text-xs font-semibold text-[var(--text-primary)]">
+          融资融券
+        </span>
+        <span className="ml-auto text-[10px] text-[var(--text-tertiary)]">
+          每日 18:00
+        </span>
+      </div>
+      <div className="flex gap-4">
+        <div>
+          <div className="text-[10px] text-[var(--text-tertiary)]">
+            累计天数
+          </div>
+          <button
+            onClick={() => onTaskClick?.("margin_trading_daily_sync")}
+            className="text-sm font-semibold text-[var(--text-primary)] cursor-pointer hover:text-[var(--accent)] hover:underline underline-offset-2 transition-colors text-left"
+          >
+            {dayCount || "--"}
+          </button>
+        </div>
+        <div>
+          <div className="text-[10px] text-[var(--text-tertiary)]">今日</div>
+          <div
+            className={cn(
+              "text-xs font-medium",
+              todayDone ? "text-green-400" : "text-yellow-400",
+            )}
+          >
+            {todayDone ? "✅ 已同步" : "⚠️ 待同步"}
+          </div>
+        </div>
+        <div>
+          <div className="text-[10px] text-[var(--text-tertiary)]">最新</div>
+          <div className="text-xs text-[var(--text-secondary)]">
+            {latestDate || "--"}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ThemeNewsMonitorInline({
   onTaskClick,
 }: {
@@ -723,6 +791,7 @@ const TASK_LABELS_MAP: Record<string, string> = {
   guba_daily_sync: "股吧资讯同步",
   minute_daily_sync: "产业链分时",
   fund_flow_snapshot: "资金流向快照",
+  margin_trading_daily_sync: "融资融券数据",
   global_index_snapshot_sync: "全球指数快照",
   global_index_kline_sync: "全球指数K线",
   indices_minute_daily_sync: "宽基指数分时",
@@ -1302,10 +1371,31 @@ export default function SystemMonitorPage() {
   const [lastUpdated, setLastUpdated] = useState<string>("");
   const [flashStats, setFlashStats] = useState<FlashCatStat[]>([]);
   const [highlightTaskId, setHighlightTaskId] = useState<string | null>(null);
+  const [retryingAll, setRetryingAll] = useState(false);
+  const [retryingCodes, setRetryingCodes] = useState<Record<string, boolean>>(
+    {},
+  );
+  const [clearingFailed, setClearingFailed] = useState(false);
+  const [toast, setToast] = useState<{
+    type: "success" | "error" | "info";
+    message: string;
+  } | null>(null);
+  const [retryBatchProgress, setRetryBatchProgress] = useState<{
+    total: number;
+    done: number;
+  } | null>(null);
+  const [dismissedFailedKeys, setDismissedFailedKeys] = useState<
+    Record<string, boolean>
+  >({});
   const logsEndRef = useRef<HTMLDivElement>(null);
   const logsContainerRef = useRef<HTMLDivElement>(null);
   const schedLogSeq = useRef<number>(0);
   const unmountedRef = useRef(false);
+  const retryBatchRef = useRef<{
+    total: number;
+    pending: Set<string>;
+    mode: "single" | "all";
+  } | null>(null);
 
   useEffect(() => {
     unmountedRef.current = false;
@@ -1345,6 +1435,13 @@ export default function SystemMonitorPage() {
       } catch {}
       return next;
     });
+  };
+
+  const showToast = (type: "success" | "error" | "info", message: string) => {
+    setToast({ type, message });
+    setTimeout(() => {
+      setToast((current) => (current?.message === message ? null : current));
+    }, 2600);
   };
 
   const scrollToTask = (taskId: string) => {
@@ -1397,12 +1494,17 @@ export default function SystemMonitorPage() {
       } = await r.json();
       if (data.logs.length > 0 && !unmountedRef.current) {
         setLogs((prev) => {
-          const newEntries: LogEntry[] = data.logs.map((l) => ({
-            time: l.time,
-            level: l.level as LogEntry["level"],
-            message:
-              l.source === "scheduler" ? `[定时] ${l.message}` : l.message,
-          }));
+          const newEntries: LogEntry[] = data.logs.map((l) => {
+            const shouldMarkScheduled =
+              l.source === "scheduler" &&
+              !l.message.startsWith("[trading-day]") &&
+              !l.message.startsWith("[task-trigger]");
+            return {
+              time: l.time,
+              level: l.level as LogEntry["level"],
+              message: shouldMarkScheduled ? `[定时] ${l.message}` : l.message,
+            };
+          });
           const next = [...prev, ...newEntries].slice(-300);
           try {
             localStorage.setItem("system_monitor_logs", JSON.stringify(next));
@@ -1422,36 +1524,153 @@ export default function SystemMonitorPage() {
       const r = await fetch("http://localhost:8000/api/system/failed-stocks");
       if (r.ok) {
         const data = await r.json();
-        setFailedStocks(data.failed || []);
+        const incoming = data.failed || [];
+        setFailedStocks(incoming);
+
+        if (retryBatchRef.current) {
+          const activeKeys = new Set(
+            incoming.map(
+              (item: { code: string; syncType: string }) =>
+                `${item.syncType}:${item.code}`,
+            ),
+          );
+          const finishedKeys: string[] = [];
+          retryBatchRef.current.pending.forEach((key) => {
+            if (!activeKeys.has(key)) finishedKeys.push(key);
+          });
+
+          if (finishedKeys.length > 0) {
+            setDismissedFailedKeys((prev) => {
+              const next = { ...prev };
+              finishedKeys.forEach((key) => {
+                next[key] = true;
+              });
+              return next;
+            });
+            setTimeout(() => {
+              setDismissedFailedKeys((prev) => {
+                const next = { ...prev };
+                finishedKeys.forEach((key) => {
+                  delete next[key];
+                });
+                return next;
+              });
+            }, 700);
+
+            finishedKeys.forEach((key) =>
+              retryBatchRef.current?.pending.delete(key),
+            );
+
+            const done =
+              retryBatchRef.current.total - retryBatchRef.current.pending.size;
+            setRetryBatchProgress({ total: retryBatchRef.current.total, done });
+
+            if (retryBatchRef.current.pending.size === 0) {
+              const total = retryBatchRef.current.total;
+              const mode = retryBatchRef.current.mode;
+              retryBatchRef.current = null;
+              setRetryBatchProgress(null);
+              setRetryingAll(false);
+              setRetryingCodes({});
+              showToast(
+                "success",
+                mode === "all"
+                  ? `批量重试完成，已处理 ${total} 条失败记录`
+                  : "重试成功，失败记录已移除",
+              );
+            }
+          }
+        }
       }
     } catch {}
   };
 
   const retryFailedStocks = async (codes?: string[]) => {
+    const singleCode = codes?.length === 1 ? codes[0] : null;
+    const targetKeys = failedStocks
+      .filter((item) => !codes || codes.includes(item.code))
+      .map((item) => `${item.syncType}:${item.code}`);
+
+    if (targetKeys.length > 0) {
+      retryBatchRef.current = {
+        total: targetKeys.length,
+        pending: new Set(targetKeys),
+        mode: singleCode ? "single" : "all",
+      };
+      setRetryBatchProgress({ total: targetKeys.length, done: 0 });
+    }
+
+    if (singleCode) {
+      setRetryingCodes((prev) => ({ ...prev, [singleCode]: true }));
+    } else {
+      setRetryingAll(true);
+    }
     try {
-      await fetch("http://localhost:8000/api/system/retry-failed", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(codes ? codes : null),
-      });
+      const response = await fetch(
+        "http://localhost:8000/api/system/retry-failed",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(codes ? codes : null),
+        },
+      );
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
       addLog(
         "info",
         codes ? `开始重试 ${codes.length} 只股票` : "开始重试所有失败股票",
       );
+      showToast(
+        "info",
+        singleCode
+          ? `已开始重试 ${singleCode}`
+          : `已开始批量重试 ${targetKeys.length} 条失败记录`,
+      );
+      fetchFailedStocks();
       setTimeout(fetchFailedStocks, 2000);
+      setTimeout(fetchFailedStocks, 5000);
+      setTimeout(fetchSchedulerLogs, 800);
+      setTimeout(fetchSchedulerLogs, 2500);
     } catch (e) {
       addLog("error", `重试失败: ${e}`);
+      showToast("error", `重试失败：${e}`);
+      retryBatchRef.current = null;
+      setRetryBatchProgress(null);
+    } finally {
+      if (singleCode && !retryBatchRef.current) {
+        setRetryingCodes((prev) => ({ ...prev, [singleCode]: false }));
+      } else if (!singleCode && !retryBatchRef.current) {
+        setRetryingAll(false);
+      }
     }
   };
 
   const clearFailedStocks = async () => {
+    setClearingFailed(true);
     try {
-      await fetch("http://localhost:8000/api/system/failed-stocks", {
-        method: "DELETE",
-      });
+      const response = await fetch(
+        "http://localhost:8000/api/system/failed-stocks",
+        {
+          method: "DELETE",
+        },
+      );
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
       setFailedStocks([]);
       addLog("success", "失败记录已清空");
-    } catch {}
+      setRetryBatchProgress(null);
+      retryBatchRef.current = null;
+      setRetryingAll(false);
+      setRetryingCodes({});
+      showToast("success", "失败记录已清空");
+    } catch (e) {
+      addLog("error", `清空失败记录失败: ${e}`);
+      showToast("error", `清空失败记录失败：${e}`);
+    } finally {
+      setClearingFailed(false);
+    }
   };
 
   const syncFlashCategory = async (key: string, label: string) => {
@@ -2045,6 +2264,7 @@ export default function SystemMonitorPage() {
             <ConceptBoardMonitorInline onTaskClick={scrollToTask} />
             <FundFlowMonitorInline onTaskClick={scrollToTask} />
             <GlobalIndexMonitorInline onTaskClick={scrollToTask} />
+            <MarginTradingMonitorInline onTaskClick={scrollToTask} />
           </div>
         </div>
 
@@ -2125,20 +2345,33 @@ export default function SystemMonitorPage() {
                 </>
               ) : (
                 <>
+                  {retryBatchProgress && (
+                    <div className="mr-2 flex items-center gap-2 rounded border border-blue-500/25 bg-blue-500/8 px-2.5 py-1 text-[11px] text-blue-300">
+                      <RefreshCw size={12} className="animate-spin" />
+                      <span>
+                        批量重试进度 {retryBatchProgress.done}/
+                        {retryBatchProgress.total}
+                      </span>
+                    </div>
+                  )}
                   <button
                     onClick={() => retryFailedStocks()}
-                    disabled={failedStocks.length === 0}
+                    disabled={failedStocks.length === 0 || retryingAll}
                     className="px-3 py-1.5 text-xs bg-blue-500/10 border border-blue-500/30 text-blue-400 rounded hover:bg-blue-500/20 transition-colors flex items-center gap-1 disabled:opacity-40"
                   >
-                    <RefreshCw size={14} />
-                    重试全部
+                    <RefreshCw
+                      size={14}
+                      className={retryingAll ? "animate-spin" : undefined}
+                    />
+                    {retryingAll ? "重试中..." : "重试全部"}
                   </button>
                   <button
                     onClick={clearFailedStocks}
+                    disabled={clearingFailed}
                     className="px-3 py-1.5 text-xs text-[var(--text-secondary)] hover:text-red-400 transition-colors flex items-center gap-1"
                   >
                     <Trash2 size={14} />
-                    清空
+                    {clearingFailed ? "清空中..." : "清空"}
                   </button>
                 </>
               )}
@@ -2186,45 +2419,61 @@ export default function SystemMonitorPage() {
                 </div>
               ) : (
                 <div className="space-y-2">
-                  {failedStocks.map((item) => (
-                    <div
-                      key={`${item.syncType}:${item.code}`}
-                      className="flex items-center justify-between p-3 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg hover:border-red-500/30 transition-colors"
-                    >
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-medium text-[var(--text-primary)]">
-                            {item.code}
-                          </span>
-                          <span className="text-sm text-[var(--text-secondary)]">
-                            {item.name}
-                          </span>
-                          <span className="text-xs px-1.5 py-0.5 bg-red-500/10 text-red-400 rounded">
-                            {item.syncType === "kline"
-                              ? "K线"
-                              : item.syncType === "sw_kline"
-                                ? "申万板块K线"
-                                : item.syncType}
-                          </span>
-                        </div>
-                        <div className="text-xs text-red-400 mt-1">
-                          {item.reason}
-                        </div>
-                        <div className="text-xs text-[var(--text-tertiary)] mt-1">
-                          {new Date(item.time).toLocaleString("zh-CN", {
-                            hour12: false,
-                          })}
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => retryFailedStocks([item.code])}
-                        className="ml-3 px-3 py-1.5 text-xs bg-blue-500/10 border border-blue-500/30 text-blue-400 rounded hover:bg-blue-500/20 transition-colors flex items-center gap-1"
+                  {failedStocks.map((item) => {
+                    const failedKey = `${item.syncType}:${item.code}`;
+                    const dismissing = !!dismissedFailedKeys[failedKey];
+                    return (
+                      <div
+                        key={failedKey}
+                        className={cn(
+                          "flex items-center justify-between p-3 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg hover:border-red-500/30 transition-all duration-500",
+                          dismissing &&
+                            "opacity-0 scale-[0.98] translate-x-2 pointer-events-none",
+                        )}
                       >
-                        <RefreshCw size={12} />
-                        重试
-                      </button>
-                    </div>
-                  ))}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium text-[var(--text-primary)]">
+                              {item.code}
+                            </span>
+                            <span className="text-sm text-[var(--text-secondary)]">
+                              {item.name}
+                            </span>
+                            <span className="text-xs px-1.5 py-0.5 bg-red-500/10 text-red-400 rounded">
+                              {item.syncType === "kline"
+                                ? "K线"
+                                : item.syncType === "sw_kline"
+                                  ? "申万板块K线"
+                                  : item.syncType}
+                            </span>
+                          </div>
+                          <div className="text-xs text-red-400 mt-1">
+                            {item.reason}
+                          </div>
+                          <div className="text-xs text-[var(--text-tertiary)] mt-1">
+                            {new Date(item.time).toLocaleString("zh-CN", {
+                              hour12: false,
+                            })}
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => retryFailedStocks([item.code])}
+                          disabled={!!retryingCodes[item.code] || dismissing}
+                          className="ml-3 px-3 py-1.5 text-xs bg-blue-500/10 border border-blue-500/30 text-blue-400 rounded hover:bg-blue-500/20 transition-colors flex items-center gap-1 disabled:opacity-40"
+                        >
+                          <RefreshCw
+                            size={12}
+                            className={
+                              retryingCodes[item.code]
+                                ? "animate-spin"
+                                : undefined
+                            }
+                          />
+                          {retryingCodes[item.code] ? "重试中..." : "重试"}
+                        </button>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>

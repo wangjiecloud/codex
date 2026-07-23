@@ -1,4 +1,5 @@
 from typing import Optional
+
 """
 板块主力资金流向
 数据来源：akshare -> 同花顺数据中心
@@ -40,6 +41,7 @@ def _fetch_fund_flow(board_type: str, symbol: str) -> list[dict]:
 
     rows = []
     for _, r in df.iterrows():
+
         def safe(v):
             try:
                 if isinstance(v, str):
@@ -51,18 +53,20 @@ def _fetch_fund_flow(board_type: str, symbol: str) -> list[dict]:
 
         # 概念板块列名是 "阶段涨跌幅"，行业板块是 "行业-涨跌幅"
         change_pct = safe(r.get("阶段涨跌幅") or r.get("行业-涨跌幅"))
-        rows.append({
-            "name": str(r.get("行业", "") or ""),
-            "index": safe(r.get("行业指数")),
-            "changePct": change_pct,
-            "inflow": safe(r.get("流入资金")),
-            "outflow": safe(r.get("流出资金")),
-            "netflow": safe(r.get("净额")),
-            "compCount": safe(r.get("公司家数")),
-            "topStock": str(r.get("领涨股", "") or ""),
-            "topStockChangePct": safe(r.get("领涨股-涨跌幅")),
-            "topStockPrice": safe(r.get("当前价")),
-        })
+        rows.append(
+            {
+                "name": str(r.get("行业", "") or ""),
+                "index": safe(r.get("行业指数")),
+                "changePct": change_pct,
+                "inflow": safe(r.get("流入资金")),
+                "outflow": safe(r.get("流出资金")),
+                "netflow": safe(r.get("净额")),
+                "compCount": safe(r.get("公司家数")),
+                "topStock": str(r.get("领涨股", "") or ""),
+                "topStockChangePct": safe(r.get("领涨股-涨跌幅")),
+                "topStockPrice": safe(r.get("当前价")),
+            }
+        )
     return rows
 
 
@@ -93,6 +97,7 @@ def _sort_and_limit(rows: list[dict], sort: str, order: str, limit: int) -> dict
 # ──────────────────────────────────────────────────────────────
 # 快照：写入 / 读取
 # ──────────────────────────────────────────────────────────────
+
 
 def _save_snapshot(board_type: str, trade_date: str, period: str, rows: list[dict]):
     """将资金流数据写入 fund_flow_snapshot 表（含 period）"""
@@ -133,7 +138,9 @@ def _save_snapshot(board_type: str, trade_date: str, period: str, rows: list[dic
             )
             db.execute(stmt)
         db.commit()
-        print(f"[fund_flow] snapshot saved: {board_type} {trade_date} period={period} {len(rows)} rows")
+        print(
+            f"[fund_flow] snapshot saved: {board_type} {trade_date} period={period} {len(rows)} rows"
+        )
     except Exception as e:
         db.rollback()
         print(f"[fund_flow] snapshot save error: {e}")
@@ -226,7 +233,11 @@ def take_daily_snapshot():
 
     today = date.today().strftime("%Y-%m-%d")
     print(f"[fund_flow] taking daily snapshot for {today}...")
-    sched_log("info", f"[资金流向] 开始快照 {today}（concept + industry，全 period）", source="fund_flow")
+    sched_log(
+        "info",
+        f"[资金流向] 开始快照 {today}（concept + industry，全 period）",
+        source="fund_flow",
+    )
     ok_count = 0
     err_count = 0
     for board_type in ["concept", "industry"]:
@@ -240,14 +251,23 @@ def take_daily_snapshot():
                 print(f"[fund_flow] snapshot {board_type} {period} error: {e}")
                 err_count += 1
     if err_count == 0:
-        sched_log("success", f"[资金流向] 快照完成：{ok_count} 组数据写入成功", source="fund_flow")
+        sched_log(
+            "success",
+            f"[资金流向] 快照完成：{ok_count} 组数据写入成功",
+            source="fund_flow",
+        )
     else:
-        sched_log("warning", f"[资金流向] 快照完成（有异常）：成功 {ok_count} 组，失败 {err_count} 组", source="fund_flow")
+        sched_log(
+            "warning",
+            f"[资金流向] 快照完成（有异常）：成功 {ok_count} 组，失败 {err_count} 组",
+            source="fund_flow",
+        )
 
 
 # ──────────────────────────────────────────────────────────────
 # 统一取数逻辑
 # ──────────────────────────────────────────────────────────────
+
 
 def _get_fund_flow(
     board_type: str,
@@ -280,11 +300,14 @@ def _get_fund_flow(
     if latest_date:
         rows = _load_snapshot(board_type, latest_date, period)
         if rows:
-            print(f"[fund_flow] fallback to latest snapshot: {board_type} {latest_date} period={period}")
+            print(
+                f"[fund_flow] fallback to latest snapshot: {board_type} {latest_date} period={period}"
+            )
             return _sort_and_limit(rows, sort, order, limit)
 
     # 非交易日不调 akshare，直接返回空
     from routers.industry import is_trading_day
+
     if not is_trading_day():
         return {"items": [], "total": 0}
 
@@ -310,13 +333,16 @@ def _get_fund_flow(
 # API 路由
 # ──────────────────────────────────────────────────────────────
 
+
 @router.get("/concept")
 def get_concept_fund_flow(
     period: str = Query(default="today"),
     sort: str = Query(default="netflow"),
     order: str = Query(default="desc"),
     limit: int = Query(default=50, ge=1, le=500),
-    trade_date: Optional[str] = Query(default=None, description="指定历史日期 YYYY-MM-DD"),
+    trade_date: Optional[str] = Query(
+        default=None, description="指定历史日期 YYYY-MM-DD"
+    ),
 ):
     """同花顺概念板块主力资金流向排行"""
     return _get_fund_flow("concept", period, sort, order, limit, trade_date)
@@ -328,7 +354,9 @@ def get_industry_fund_flow(
     sort: str = Query(default="netflow"),
     order: str = Query(default="desc"),
     limit: int = Query(default=50, ge=1, le=2000),
-    trade_date: Optional[str] = Query(default=None, description="指定历史日期 YYYY-MM-DD"),
+    trade_date: Optional[str] = Query(
+        default=None, description="指定历史日期 YYYY-MM-DD"
+    ),
 ):
     """同花顺行业板块主力资金流向排行"""
     return _get_fund_flow("industry", period, sort, order, limit, trade_date)
@@ -347,3 +375,27 @@ def trigger_snapshot(background_tasks: BackgroundTasks):
     """手动触发全量快照（所有 period + 所有 board_type），后台执行"""
     background_tasks.add_task(take_daily_snapshot)
     return {"message": "快照任务已启动，后台执行中..."}
+
+
+@router.post("/snapshot/sync")
+def trigger_snapshot_sync():
+    """同步快照：仅更新 today period 的 industry + concept，等待完成后返回。
+    供前端刷新按钮调用，确保数据写入后前端再重新拉取。"""
+    today = date.today().strftime("%Y-%m-%d")
+    ok = []
+    errors = []
+    for board_type in ["concept", "industry"]:
+        try:
+            rows = _fetch_fund_flow(board_type, "即时")
+            if rows:
+                _save_snapshot(board_type, today, "today", rows)
+                ok.append(board_type)
+        except Exception as e:
+            errors.append({"board_type": board_type, "error": str(e)})
+    return {
+        "trade_date": today,
+        "updated": ok,
+        "errors": errors,
+        "message": f"已更新 {len(ok)} 组数据"
+        + (f"，{len(errors)} 组失败" if errors else ""),
+    }

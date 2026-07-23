@@ -3,7 +3,6 @@ import { runDataCollectorAgent } from "./agents/data-collector";
 import { runTechnicalAgent } from "./agents/technical";
 import { runFundamentalAgent } from "./agents/fundamental";
 import { runNewsSentimentAgent } from "./agents/news-sentiment";
-import { runRiskAgent } from "./agents/risk";
 import { runAdvisorAgent } from "./agents/advisor";
 
 export type TeamProgressEvent =
@@ -20,7 +19,6 @@ const AGENT_LABELS: Record<string, string> = {
   technical: "技术分析",
   fundamental: "基本面",
   news: "新闻舆情",
-  risk: "风险评估",
   advisor: "投资建议",
 };
 
@@ -29,8 +27,7 @@ const AGENT_LABELS: Record<string, string> = {
  *
  * Architecture (mirrors Codex multi-agent pattern):
  * 1. Phase 1 (parallel): data, technical, fundamental, news
- * 2. Phase 2 (sequential, depends on phase 1): risk
- * 3. Phase 3 (sequential, depends on risk): advisor
+ * 2. Phase 2 (sequential, depends on phase 1): advisor
  */
 export async function runTeamAnalysis(
   code: string,
@@ -103,27 +100,6 @@ export async function runTeamAnalysis(
     news: newsResult,
   };
 
-  // ── Phase 2: risk (depends on phase 1) ─────────────────────
-  emit({ type: "agent_start", agentId: "risk", agentLabel: AGENT_LABELS.risk });
-  const riskResult = await runRiskAgent({
-    ...input,
-    context: partialResult,
-  }).then((r) => {
-    emit({
-      type: "agent_done",
-      agentId: "risk",
-      agentLabel: AGENT_LABELS.risk,
-      result: r.summary,
-    });
-    return r;
-  });
-
-  const withRisk: Partial<TeamAnalysisResult> = {
-    ...partialResult,
-    risk: riskResult,
-  };
-
-  // ── Phase 3: advisor (depends on all above) ─────────────────
   emit({
     type: "agent_start",
     agentId: "advisor",
@@ -131,7 +107,7 @@ export async function runTeamAnalysis(
   });
   const advisorResult = await runAdvisorAgent({
     ...input,
-    context: withRisk,
+    context: partialResult,
   }).then((r) => {
     emit({
       type: "agent_done",
@@ -150,7 +126,6 @@ export async function runTeamAnalysis(
     technical: technicalResult,
     fundamental: fundamentalResult,
     news: newsResult,
-    risk: riskResult,
     advice: advisorResult,
   };
 

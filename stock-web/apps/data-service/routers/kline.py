@@ -10,12 +10,32 @@ router = APIRouter()
 
 # 全球非A股指数（走 GlobalIndexKline / EM 接口）
 _GLOBAL_INDEX_CODES = {
-    "HSI", "HSCEI", "HSTECH", "HSCCI",
-    "DJIA", "SPX", "NDX",
+    "HSI",
+    "HSCEI",
+    "HSTECH",
+    "HSCCI",
+    "DJIA",
+    "SPX",
+    "NDX",
     "N225",
-    "KS11", "KOSPI200",
-    "FTSE", "GDAXI", "FCHI", "SX5E", "MIB", "IBEX", "AEX", "SSMI",
-    "TWII", "AS51", "SENSEX", "JKSE", "KLSE", "STI", "VNINDEX", "SET",
+    "KS11",
+    "KOSPI200",
+    "FTSE",
+    "GDAXI",
+    "FCHI",
+    "SX5E",
+    "MIB",
+    "IBEX",
+    "AEX",
+    "SSMI",
+    "TWII",
+    "AS51",
+    "SENSEX",
+    "JKSE",
+    "KLSE",
+    "STI",
+    "VNINDEX",
+    "SET",
     "UDI",
 }
 
@@ -23,19 +43,19 @@ _GLOBAL_INDEX_CODES = {
 # 上交所指数：000xxx / 000001/000016/000300/000905/000688 等
 # 深交所指数：399xxx
 _CN_INDEX_BS_MAP: dict[str, str] = {
-    "000001": "sh.000001",   # 上证指数
-    "000002": "sh.000002",   # 上证A股指数
-    "000016": "sh.000016",   # 上证50
-    "000300": "sh.000300",   # 沪深300
-    "000905": "sh.000905",   # 中证500
-    "000852": "sh.000852",   # 中证1000
-    "000985": "sh.000985",   # 中证全指
-    "000047": "sh.000047",   # 上证全指
-    "399001": "sz.399001",   # 深证成指
-    "399006": "sz.399006",   # 创业板指
-    "399005": "sz.399005",   # 中小板指
-    "399300": "sz.399300",   # 深版沪深300
-    "399673": "sz.399673",   # 创业板50
+    "000001": "sh.000001",  # 上证指数
+    "000002": "sh.000002",  # 上证A股指数
+    "000016": "sh.000016",  # 上证50
+    "000300": "sh.000300",  # 沪深300
+    "000905": "sh.000905",  # 中证500
+    "000852": "sh.000852",  # 中证1000
+    "000985": "sh.000985",  # 中证全指
+    "000047": "sh.000047",  # 上证全指
+    "399001": "sz.399001",  # 深证成指
+    "399006": "sz.399006",  # 创业板指
+    "399005": "sz.399005",  # 中小板指
+    "399300": "sz.399300",  # 深版沪深300
+    "399673": "sz.399673",  # 创业板50
 }
 
 # 不支持 baostock 的指数，走 GlobalIndexKline / 新浪日K 接口
@@ -66,6 +86,15 @@ def _safe_float(val, default=0.0) -> float:
         return default
 
 
+def _latest_trade_date() -> str:
+    d = date.today() - timedelta(days=1)
+    for _ in range(7):
+        if d.weekday() < 5:
+            return d.strftime("%Y-%m-%d")
+        d -= timedelta(days=1)
+    return (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
+
+
 def _fetch_and_cache_klines(code: str, period: str, count: int) -> list:
     db = SessionLocal()
     bs_period = "d" if period == "daily" else ("w" if period == "weekly" else "m")
@@ -79,9 +108,7 @@ def _fetch_and_cache_klines(code: str, period: str, count: int) -> list:
             lookback_days = max(count * 31 + 60, 10 * 365)
         else:
             lookback_days = max(count * 2, 400)
-        start = (date.today() - timedelta(days=lookback_days)).strftime(
-            "%Y-%m-%d"
-        )
+        start = (date.today() - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
         end = date.today().strftime("%Y-%m-%d")
         fields = "date,code,open,high,low,close,volume,amount,turn,pctChg"
         rs = bsapi.query_history_k_data_plus(
@@ -93,8 +120,27 @@ def _fetch_and_cache_klines(code: str, period: str, count: int) -> list:
             adjustflag="2",
         )
         bars = []
-        while rs.error_code == "0" and rs.next():
-            r = rs.get_row_data()
+        while rs.error_code == "0":
+            try:
+                has_next = rs.next()
+            except IndexError as e:
+                reset_bs()
+                raise HTTPException(
+                    status_code=503,
+                    detail=f"baostock returned malformed kline rows for {code}: {e}",
+                ) from e
+            if not has_next:
+                break
+            try:
+                r = rs.get_row_data()
+            except IndexError as e:
+                reset_bs()
+                raise HTTPException(
+                    status_code=503,
+                    detail=f"baostock returned malformed kline rows for {code}: {e}",
+                ) from e
+            if not r or len(r) < 10:
+                continue
             stmt = sqlite_insert(StockKline).values(
                 code=code,
                 period=period,
@@ -179,7 +225,31 @@ def _read_global_index_kline(code: str, period: str, count: int) -> list:
 def _fetch_and_cache_global_index_kline(code: str, period: str, count: int) -> list:
     """通过 global_market 模块抓取并缓存全球指数 K 线"""
     from routers.global_market import fetch_index_kline
+
     return fetch_index_kline(code, period, count)
+
+
+def _bars_from_rows(rows) -> list:
+    return [
+        {
+            "time": r.trade_date,
+            "open": r.open,
+            "high": r.high,
+            "low": r.low,
+            "close": r.close,
+            "volume": r.volume,
+            "turnRate": r.turn_rate or 0.0,
+            "changePct": r.change_pct,
+        }
+        for r in reversed(rows)
+    ]
+
+
+def _refresh_kline_cache(code: str, period: str, count: int) -> None:
+    try:
+        _fetch_and_cache_klines(code, period, count)
+    except Exception:
+        pass
 
 
 @router.get("/{code}")
@@ -194,7 +264,7 @@ async def get_kline(
         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"
-    
+
     # 按周期决定默认返回条数：日K 110（约5个月），周K 156（3年），月K 120（10年）
     if count == 110:
         if period == "weekly":
@@ -204,6 +274,7 @@ async def get_kline(
 
     # 全球非A股指数走独立路由
     if _is_global_index(code):
+
         def _read_global():
             return _read_global_index_kline(code, period, count)
 
@@ -249,22 +320,30 @@ async def get_kline(
 
     total, rows = await run_in_threadpool(_read_cached)
 
-    # 缓存不足时重新从 baostock 拉取：用数据库总条数判断，避免 limit(count) < min 误判
+    latest_trade_date = _latest_trade_date()
+    latest_cached_date = rows[0].trade_date if rows else None
+    if period == "daily" and latest_cached_date != latest_trade_date:
+        if rows:
+            import threading
+
+            threading.Thread(
+                target=_refresh_kline_cache,
+                args=(code, period, count),
+                daemon=True,
+            ).start()
+            return _bars_from_rows(rows)
+
     min_expected = {"daily": 100, "weekly": 50, "monthly": 24}.get(period, 50)
     if total < min_expected:
-        return await run_in_threadpool(_fetch_and_cache_klines, code, period, count)
+        if rows:
+            import threading
 
-    bars = [
-        {
-            "time": r.trade_date,
-            "open": r.open,
-            "high": r.high,
-            "low": r.low,
-            "close": r.close,
-            "volume": r.volume,
-            "turnRate": r.turn_rate or 0.0,
-            "changePct": r.change_pct,
-        }
-        for r in reversed(rows)
-    ]
-    return bars
+            threading.Thread(
+                target=_refresh_kline_cache,
+                args=(code, period, count),
+                daemon=True,
+            ).start()
+            return _bars_from_rows(rows)
+        raise HTTPException(status_code=404, detail=f"No cached kline data for {code}")
+
+    return _bars_from_rows(rows)

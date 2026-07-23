@@ -5,8 +5,6 @@ import {
   Send,
   Loader2,
   MessageSquare,
-  RefreshCw,
-  Zap,
   Cpu,
   ChevronDown,
   Plus,
@@ -16,10 +14,26 @@ import {
   Clock,
   ImageIcon,
   Check,
+  Square,
+  ExternalLink,
+  FileText,
+  Search,
+  X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { MarkdownMessage } from "@/components/agents/MarkdownMessage";
+import {
+  buildMarkdownPreviewDocument,
+  MarkdownMessage,
+} from "@/components/agents/MarkdownMessage";
 import { toPng } from "html-to-image";
+import {
+  buildStoredReportMarkdown,
+  getTeamReportPath,
+  loadTeamReports,
+  removeTeamReportByCode,
+  TeamReport,
+  upsertTeamReport,
+} from "@/lib/teamReports";
 
 const AGENTS = [
   {
@@ -46,6 +60,14 @@ const AGENTS = [
     color: "#4ade80",
   },
   {
+    id: "market",
+    label: "盘面分析",
+    emoji: "💹",
+    description:
+      "分析大盘资金流向、板块轮动、融资融券、市场情绪与全球市场联动，判断当前市场偏进攻还是偏防守",
+    color: "#38bdf8",
+  },
+  {
     id: "news",
     label: "新闻舆情",
     emoji: "📰",
@@ -54,34 +76,38 @@ const AGENTS = [
     color: "#c084fc",
   },
   {
-    id: "risk",
-    label: "风险评估",
-    emoji: "⚠️",
-    description:
-      "综合评估持仓风险、波动率、回撤、市场系统性风险，给出风险等级评分",
-    color: "#f87171",
-  },
-  {
     id: "advisor",
     label: "投资建议",
     emoji: "💡",
     description: "汇总所有分析结果，给出综合买卖点建议、仓位建议和风险提示",
     color: "#fb923c",
   },
+  {
+    id: "team",
+    label: "Team 协同分析",
+    emoji: "⚡",
+    description:
+      "Orchestrator 主控调度，串联数据采集→技术→盘面→基本面→舆情→投资建议，流式展示每阶段进度，最终输出综合分析报告",
+    color: "#f5a623",
+  },
 ];
 
 interface ChatMessage {
+  id?: number;
   role: "user" | "agent";
   content: string;
-  image?: string; // base64 dataURL（用户粘贴的图片）
+  image?: string;
 }
 
 interface Session {
   id: string;
   title: string;
   createdAt: number;
+  updatedAt?: number;
   messages: ChatMessage[];
-  sessionId?: string; // codex session ID
+  messageCount?: number;
+  loadedCount?: number;
+  sessionId?: string;
 }
 
 interface AgentState {
@@ -89,11 +115,19 @@ interface AgentState {
   activeSessionId: string;
   input: string;
   loading: boolean;
-  pastedImage?: string; // 待发送的粘贴图片 base64 dataURL
+  pastedImage?: string;
+  currentTaskId?: string;
+}
+
+interface StockSearchResult {
+  code: string;
+  name: string;
+  price?: number;
+  change?: number;
 }
 
 function newSession(agentId: string, agent: (typeof AGENTS)[0]): Session {
-  return {
+  return normalizeSession({
     id: `${agentId}-${Date.now()}`,
     title: "新会话",
     createdAt: Date.now(),
@@ -103,18 +137,42 @@ function newSession(agentId: string, agent: (typeof AGENTS)[0]): Session {
         content: `你好！我是 ${agent.label} Agent。${agent.description}。\n\n请输入股票代码或具体问题，我来为你分析。`,
       },
     ],
-  };
+  });
 }
 
 const MIN_CHAT_WIDTH = 280;
 const MAX_CHAT_WIDTH = 1200;
 const DEFAULT_CHAT_WIDTH = 380;
+const SESSION_PAGE_SIZE = 30;
 
-/** 计算占可用宽度的一半作为初始聊天面板宽度 */
 function calcHalfWidth() {
-  // 左侧导航栏约 60px，分隔条 10px
   const available = window.innerWidth - 60 - 10;
   return Math.round(available / 2);
+}
+
+function normalizeSession(
+  session: {
+    id: string;
+    title: string;
+    codexSid?: string;
+    createdAt: number;
+    updatedAt?: number;
+    messageCount?: number;
+    messages?: ChatMessage[];
+  },
+  fallbackMessages: ChatMessage[] = [],
+): Session {
+  const messages = session.messages ?? fallbackMessages;
+  return {
+    id: session.id,
+    title: session.title,
+    createdAt: session.createdAt,
+    updatedAt: session.updatedAt,
+    sessionId: session.codexSid,
+    messages,
+    messageCount: session.messageCount ?? messages.length,
+    loadedCount: messages.length,
+  };
 }
 
 export default function AgentsPage() {
@@ -130,6 +188,7 @@ export default function AgentsPage() {
             activeSessionId: "",
             input: "",
             loading: false,
+            currentTaskId: undefined,
           },
         ]),
       ),
@@ -144,15 +203,59 @@ export default function AgentsPage() {
   const [chatWidth, setChatWidth] = useState(DEFAULT_CHAT_WIDTH);
   const [chatVisible, setChatVisible] = useState(true);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [teamReports, setTeamReports] = useState<TeamReport[]>([]);
+  const [teamReportQuery, setTeamReportQuery] = useState("");
+  const [teamSearchResults, setTeamSearchResults] = useState<
+    StockSearchResult[]
+  >([]);
+  const [teamSearchOpen, setTeamSearchOpen] = useState(false);
+  const [teamSearchLoading, setTeamSearchLoading] = useState(false);
+
+  const persistSession = useCallback((agentId: string, session: Session) => {
+    fetch("/api/agents/sessions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: session.id,
+        agentId,
+        title: session.title,
+        codexSid: session.sessionId,
+        createdAt: session.createdAt,
+        updatedAt: Date.now(),
+        messages: session.messages.map(({ role, content }) => ({
+          role,
+          content,
+        })),
+      }),
+    }).catch(() => {});
+  }, []);
+
+  const removeSessionFromDb = useCallback(
+    (sessionId: string) => {
+      fetch(`/api/agents/sessions?sessionId=${sessionId}`, {
+        method: "DELETE",
+      }).catch(() => {});
+    },
+    [persistSession],
+  );
 
   const dropdownRef = useRef<HTMLDivElement>(null);
   const historyRef = useRef<HTMLDivElement>(null);
+  const teamReportRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const isDragging = useRef(false);
   const dragStartX = useRef(0);
   const dragStartWidth = useRef(DEFAULT_CHAT_WIDTH);
+  const loadingHistoryRef = useRef(false);
+  const stickToBottomRef = useRef(false);
+  const autoScrollBehaviorRef = useRef<ScrollBehavior>("auto");
+  const streamRefs = useRef<Record<string, EventSource | null>>({});
 
-  // 点击外部关闭下拉
+  useEffect(() => {
+    setTeamReports(loadTeamReports());
+  }, []);
+
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (
@@ -167,14 +270,43 @@ export default function AgentsPage() {
       ) {
         setHistoryOpen(false);
       }
+      if (
+        teamReportRef.current &&
+        !teamReportRef.current.contains(e.target as Node)
+      ) {
+        setTeamSearchOpen(false);
+      }
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [agentStates]);
+    const keyword = teamReportQuery.trim();
+    if (!keyword) {
+      setTeamSearchResults([]);
+      setTeamSearchOpen(false);
+      return;
+    }
+    const timer = window.setTimeout(async () => {
+      setTeamSearchLoading(true);
+      try {
+        const res = await fetch(
+          `/api/stock/search?q=${encodeURIComponent(keyword)}`,
+        );
+        if (!res.ok) throw new Error("search failed");
+        const data = (await res.json()) as { results?: StockSearchResult[] };
+        setTeamSearchResults(data.results ?? []);
+        setTeamSearchOpen((data.results?.length ?? 0) > 0);
+      } catch {
+        setTeamSearchResults([]);
+        setTeamSearchOpen(false);
+      } finally {
+        setTeamSearchLoading(false);
+      }
+    }, 200);
+    return () => window.clearTimeout(timer);
+  }, [teamReportQuery]);
 
   useEffect(() => {
     fetch("/api/agents/config")
@@ -193,7 +325,6 @@ export default function AgentsPage() {
       .catch(() => {});
   }, []);
 
-  // 初始化时从数据库加载所有 agent 的会话记录
   useEffect(() => {
     Promise.all(
       AGENTS.map((agent) =>
@@ -208,67 +339,90 @@ export default function AgentsPage() {
                 codexSid?: string;
                 createdAt: number;
                 updatedAt: number;
-                messages: { role: "user" | "agent"; content: string }[];
+                messageCount: number;
               }[];
             }) => ({ agentId: agent.id, sessions: d.sessions ?? [] }),
           )
           .catch(() => ({ agentId: agent.id, sessions: [] })),
       ),
     ).then((results) => {
-      setAgentStates((prev) => {
-        const next = { ...prev };
-        for (const { agentId, sessions } of results) {
-          if (sessions.length > 0) {
-            next[agentId] = {
-              ...next[agentId],
-              sessions,
-              activeSessionId: sessions[0].id,
-            };
-          }
+      const lastAgentId = (() => {
+        try {
+          return localStorage.getItem("agent_last_active");
+        } catch {
+          return null;
         }
-        return next;
-      });
-      setDbLoaded(true);
-      // 恢复上次激活的 agent（localStorage 记录），在 setAgentStates 之外调用确保同步生效
-      try {
-        const lastAgentId = localStorage.getItem("agent_last_active");
-        if (lastAgentId && AGENTS.find((a) => a.id === lastAgentId)) {
-          setActiveAgentId(lastAgentId);
+      })();
+      const initialAgentId =
+        lastAgentId && AGENTS.find((a) => a.id === lastAgentId)
+          ? lastAgentId
+          : null;
+      const initialSessionId = initialAgentId
+        ? results.find((item) => item.agentId === initialAgentId)?.sessions[0]
+            ?.id
+        : null;
+
+      const initialLoad = initialSessionId
+        ? fetch(
+            `/api/agents/sessions?sessionId=${initialSessionId}&offset=0&limit=${SESSION_PAGE_SIZE}`,
+          )
+            .then((r) => r.json())
+            .catch(() => ({ messages: [], total: 0 }))
+        : Promise.resolve<{ messages: ChatMessage[]; total: number }>({
+            messages: [],
+            total: 0,
+          });
+
+      initialLoad.then((initialData) => {
+        setAgentStates((prev) => {
+          const next = { ...prev };
+          for (const { agentId, sessions } of results) {
+            if (sessions.length > 0) {
+              next[agentId] = {
+                ...next[agentId],
+                sessions: sessions.map((session, index) =>
+                  normalizeSession(
+                    {
+                      ...session,
+                      messages:
+                        agentId === initialAgentId && index === 0
+                          ? initialData.messages
+                          : [],
+                      messageCount:
+                        agentId === initialAgentId && index === 0
+                          ? initialData.total
+                          : session.messageCount,
+                    },
+                    [],
+                  ),
+                ),
+                activeSessionId: sessions[0].id,
+              };
+            } else if (agentId === initialAgentId) {
+              const agent = AGENTS.find((a) => a.id === agentId)!;
+              const session = newSession(agentId, agent);
+              persistSession(agentId, session);
+              next[agentId] = {
+                ...next[agentId],
+                sessions: [session],
+                activeSessionId: session.id,
+              };
+            }
+          }
+          return next;
+        });
+        setDbLoaded(true);
+        if (initialAgentId) {
+          setActiveAgentId(initialAgentId);
           setChatVisible(true);
           setChatWidth(calcHalfWidth());
+          stickToBottomRef.current = true;
+          autoScrollBehaviorRef.current = "auto";
         }
-      } catch {
-        // ignore
-      }
+      });
     });
   }, []);
 
-  // DB 加载完成后，若恢复的 activeAgentId 没有会话则自动新建
-  useEffect(() => {
-    if (!dbLoaded || !activeAgentId) return;
-    // 用 functional updater 读取最新 agentStates，避免 stale closure 导致
-    // 误判 sessions 为空（与 setAgentStates 在同一批 render 时的问题）
-    setAgentStates((prev) => {
-      const state = prev[activeAgentId];
-      if (state && state.sessions.length === 0) {
-        const agent = AGENTS.find((a) => a.id === activeAgentId)!;
-        const session = newSession(activeAgentId, agent);
-        persistSession(activeAgentId, session);
-        return {
-          ...prev,
-          [activeAgentId]: {
-            ...prev[activeAgentId],
-            sessions: [session],
-            activeSessionId: session.id,
-          },
-        };
-      }
-      return prev;
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dbLoaded, activeAgentId]);
-
-  // 拖拽分隔条逻辑
   const onDragStart = useCallback(
     (e: React.MouseEvent) => {
       e.preventDefault();
@@ -303,48 +457,142 @@ export default function AgentsPage() {
       (s) => s.id === activeAgentState.activeSessionId,
     ) ?? null;
 
-  /** 持久化单个 session 到数据库（fire and forget） */
-  const persistSession = useCallback((agentId: string, session: Session) => {
-    fetch("/api/agents/sessions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        id: session.id,
-        agentId,
-        title: session.title,
-        codexSid: session.sessionId,
-        createdAt: session.createdAt,
-        updatedAt: Date.now(),
-        messages: session.messages,
-      }),
-    }).catch(() => {});
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
+    messagesEndRef.current?.scrollIntoView({ behavior });
   }, []);
 
-  /** 从数据库删除 session */
-  const removeSessionFromDb = useCallback((sessionId: string) => {
-    fetch(`/api/agents/sessions?sessionId=${sessionId}`, {
-      method: "DELETE",
-    }).catch(() => {});
-  }, []);
+  const loadSessionMessages = useCallback(
+    async (
+      agentId: string,
+      sessionId: string,
+      options?: { reset?: boolean; preserveScroll?: boolean },
+    ) => {
+      if (loadingHistoryRef.current) return;
+      const state = agentStates[agentId];
+      const session = state?.sessions.find((s) => s.id === sessionId);
+      if (!session) return;
+
+      const total = session.messageCount ?? session.messages.length;
+      const loaded = options?.reset
+        ? 0
+        : (session.loadedCount ?? session.messages.length);
+      if (!options?.reset && loaded >= total) return;
+
+      const container = messagesContainerRef.current;
+      const prevHeight = container?.scrollHeight ?? 0;
+      const prevTop = container?.scrollTop ?? 0;
+      loadingHistoryRef.current = true;
+
+      try {
+        const res = await fetch(
+          `/api/agents/sessions?sessionId=${sessionId}&offset=${loaded}&limit=${SESSION_PAGE_SIZE}`,
+        );
+        if (!res.ok) return;
+        const data = (await res.json()) as {
+          messages?: ChatMessage[];
+          total?: number;
+        };
+        const chunk = data.messages ?? [];
+        const nextTotal = data.total ?? total;
+
+        setAgentStates((prev) => ({
+          ...prev,
+          [agentId]: {
+            ...prev[agentId],
+            sessions: prev[agentId].sessions.map((item) => {
+              if (item.id !== sessionId) return item;
+              const baseMessages = options?.reset ? [] : item.messages;
+              const seen = new Set(
+                baseMessages.map(
+                  (msg) => `${msg.id ?? "x"}:${msg.role}:${msg.content}`,
+                ),
+              );
+              const merged = [
+                ...chunk.filter(
+                  (msg) =>
+                    !seen.has(`${msg.id ?? "x"}:${msg.role}:${msg.content}`),
+                ),
+                ...baseMessages,
+              ];
+              return {
+                ...item,
+                messages: merged,
+                messageCount: nextTotal,
+                loadedCount: merged.length,
+              };
+            }),
+          },
+        }));
+
+        if (options?.preserveScroll) {
+          requestAnimationFrame(() => {
+            const node = messagesContainerRef.current;
+            if (!node) return;
+            node.scrollTop = node.scrollHeight - prevHeight + prevTop;
+          });
+        }
+      } finally {
+        loadingHistoryRef.current = false;
+      }
+    },
+    [agentStates],
+  );
+
+  useEffect(() => {
+    if (!activeAgentId || !activeSession) return;
+    const total = activeSession.messageCount ?? activeSession.messages.length;
+    const loaded = activeSession.loadedCount ?? activeSession.messages.length;
+    if (loaded === 0 && total > 0) {
+      stickToBottomRef.current = true;
+      autoScrollBehaviorRef.current = "auto";
+      void loadSessionMessages(activeAgentId, activeSession.id, {
+        reset: true,
+      });
+    }
+  }, [activeAgentId, activeSession, loadSessionMessages]);
+
+  useEffect(() => {
+    if (!activeAgentId || !activeSession) return;
+    if (!stickToBottomRef.current) return;
+    const behavior = autoScrollBehaviorRef.current;
+    requestAnimationFrame(() => {
+      scrollToBottom(behavior);
+      stickToBottomRef.current = false;
+      autoScrollBehaviorRef.current = "smooth";
+    });
+  }, [
+    activeAgentId,
+    activeSession,
+    activeSession?.id,
+    activeSession?.messages.length,
+    scrollToBottom,
+  ]);
+
+  useEffect(() => {
+    if (!activeAgentId) return;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        scrollToBottom("auto");
+      });
+    });
+  }, [activeAgentId, scrollToBottom]);
 
   const openAgent = (agentId: string) => {
     setActiveAgentId(agentId);
     setChatVisible(true);
-    // 首次打开聊天面板时，默认各占一半
     if (!activeAgentId) {
       setChatWidth(calcHalfWidth());
     }
-    // 持久化最后激活的 agent，刷新后恢复
     try {
       localStorage.setItem("agent_last_active", agentId);
     } catch {
       /* ignore */
     }
-    // DB 未加载完时不新建，等 useEffect([dbLoaded, activeAgentId]) 统一处理
+    stickToBottomRef.current = true;
+    autoScrollBehaviorRef.current = "auto";
     if (!dbLoaded) return;
     setAgentStates((prev) => {
       const state = prev[agentId];
-      // 已有会话，不新建
       if (state.sessions.length > 0) return prev;
       const agent = AGENTS.find((a) => a.id === agentId)!;
       const session = newSession(agentId, agent);
@@ -385,7 +633,6 @@ export default function AgentsPage() {
         if (remaining.length > 0) {
           activeId = remaining[0].id;
         } else {
-          // 创建新会话
           const agent = AGENTS.find((a) => a.id === agentId)!;
           const session = newSession(agentId, agent);
           persistSession(agentId, session);
@@ -412,6 +659,8 @@ export default function AgentsPage() {
       [agentId]: { ...prev[agentId], activeSessionId: sessionId },
     }));
     setHistoryOpen(false);
+    stickToBottomRef.current = true;
+    autoScrollBehaviorRef.current = "auto";
   };
 
   const switchModel = async (model: string) => {
@@ -426,7 +675,6 @@ export default function AgentsPage() {
       });
       if (res.ok) {
         setModelInfo((prev) => (prev ? { ...prev, model } : prev));
-        // 清空所有 session 的 codex sessionId（新模型生效）
         setAgentStates((prev) =>
           Object.fromEntries(
             Object.entries(prev).map(([k, v]) => [
@@ -469,7 +717,6 @@ export default function AgentsPage() {
       _id: placeholderId,
     };
 
-    // 更新标题（取用户第一条消息）
     const isFirstUserMsg =
       session.messages.filter((m) => m.role === "user").length === 0;
     const newTitle = isFirstUserMsg
@@ -489,11 +736,15 @@ export default function AgentsPage() {
                 ...s,
                 title: newTitle,
                 messages: [...s.messages, userMsg, placeholderMsg],
+                messageCount: (s.messageCount ?? s.messages.length) + 2,
+                loadedCount: (s.loadedCount ?? s.messages.length) + 2,
               }
             : s,
         ),
       },
     }));
+    stickToBottomRef.current = true;
+    autoScrollBehaviorRef.current = "smooth";
 
     try {
       const questionText =
@@ -503,17 +754,36 @@ export default function AgentsPage() {
             ? `${userText}（附带图片）`
             : userText;
 
-      const res = await fetch(`/api/agents/${agentId}`, {
+      const endpoint =
+        agentId === "team" ? "/api/agents/team" : `/api/agents/${agentId}`;
+      const payload =
+        agentId === "team"
+          ? { question: questionText }
+          : {
+              question: questionText,
+              sessionId: session.sessionId,
+            };
+
+      const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          question: questionText,
-          sessionId: session.sessionId, // codex thread_id，用于 resume 上下文
-        }),
+        body: JSON.stringify(payload),
       });
-      const { taskId } = (await res.json()) as { taskId: string };
+      const body = (await res.json()) as { taskId?: string; error?: string };
+      if (!res.ok || !body.taskId) {
+        throw new Error(body.error || "请求出错，请检查服务是否正常");
+      }
+      const { taskId } = body;
+      setAgentStates((prev) => ({
+        ...prev,
+        [agentId]: {
+          ...prev[agentId],
+          currentTaskId: taskId,
+        },
+      }));
 
       const sse = new EventSource(`/api/agents/stream/${taskId}`);
+      streamRefs.current[agentId] = sse;
 
       sse.onmessage = (event) => {
         const data = JSON.parse(event.data) as {
@@ -521,6 +791,9 @@ export default function AgentsPage() {
           delta?: string;
           text?: string;
           message?: string;
+          advice?: string;
+          agentId?: string;
+          agentLabel?: string;
           sessionId?: string;
         };
 
@@ -535,8 +808,89 @@ export default function AgentsPage() {
             });
             return { ...prev, [agentId]: { ...prev[agentId], sessions } };
           });
+        } else if (agentId === "team" && data.type === "agent_start") {
+          setAgentStates((prev) => ({
+            ...prev,
+            [agentId]: {
+              ...prev[agentId],
+              sessions: prev[agentId].sessions.map((s) =>
+                s.id === state.activeSessionId
+                  ? {
+                      ...s,
+                      messages: s.messages.map((m) =>
+                        (m as ChatMessage & { _id?: string })._id ===
+                        placeholderId
+                          ? {
+                              ...m,
+                              content:
+                                m.content ||
+                                `正在协调 ${data.agentLabel || data.agentId}...`,
+                            }
+                          : m,
+                      ),
+                    }
+                  : s,
+              ),
+            },
+          }));
+        } else if (agentId === "team" && data.type === "agent_done") {
+          setAgentStates((prev) => ({
+            ...prev,
+            [agentId]: {
+              ...prev[agentId],
+              sessions: prev[agentId].sessions.map((s) =>
+                s.id === state.activeSessionId
+                  ? {
+                      ...s,
+                      messages: s.messages.map((m) =>
+                        (m as ChatMessage & { _id?: string })._id ===
+                        placeholderId
+                          ? {
+                              ...m,
+                              content:
+                                m.content ||
+                                `${data.agentLabel || data.agentId} 已完成，继续汇总中...`,
+                            }
+                          : m,
+                      ),
+                    }
+                  : s,
+              ),
+            },
+          }));
+        } else if (agentId === "team" && data.type === "team_done") {
+          setAgentStates((prev) => {
+            const sessions = prev[agentId].sessions.map((s) => {
+              if (s.id !== state.activeSessionId) return s;
+              const msgs = s.messages.map((m) => {
+                if (
+                  (m as ChatMessage & { _id?: string })._id !== placeholderId
+                ) {
+                  return m;
+                }
+                return {
+                  ...m,
+                  content:
+                    data.advice || data.message || data.text || "分析完成",
+                };
+              });
+              const updatedSession = { ...s, messages: msgs };
+              persistSession(agentId, updatedSession);
+              return updatedSession;
+            });
+            return {
+              ...prev,
+              [agentId]: {
+                ...prev[agentId],
+                loading: false,
+                currentTaskId: undefined,
+                sessions,
+              },
+            };
+          });
+          streamRefs.current[agentId] = null;
+          sse.close();
         } else if (data.type === "stream_delta" && data.delta) {
-          // 流式追加 delta
           setAgentStates((prev) => ({
             ...prev,
             [agentId]: {
@@ -556,7 +910,11 @@ export default function AgentsPage() {
               ),
             },
           }));
-        } else if (data.type === "done" || data.type === "error") {
+        } else if (
+          data.type === "done" ||
+          data.type === "error" ||
+          data.type === "cancelled"
+        ) {
           setAgentStates((prev) => {
             const sessions = prev[agentId].sessions.map((s) => {
               if (s.id !== state.activeSessionId) return s;
@@ -567,19 +925,26 @@ export default function AgentsPage() {
                 const finalContent =
                   data.type === "error"
                     ? data.message || "请求出错，请检查服务是否正常"
-                    : currentContent || "分析完成";
+                    : data.type === "cancelled"
+                      ? currentContent || "已停止生成"
+                      : currentContent || "分析完成";
                 return { ...m, content: finalContent };
               });
-              // 持久化更新后的 session
               const updatedSession = { ...s, messages: msgs };
               persistSession(agentId, updatedSession);
               return updatedSession;
             });
             return {
               ...prev,
-              [agentId]: { ...prev[agentId], loading: false, sessions },
+              [agentId]: {
+                ...prev[agentId],
+                loading: false,
+                currentTaskId: undefined,
+                sessions,
+              },
             };
           });
+          streamRefs.current[agentId] = null;
           sse.close();
         }
       };
@@ -589,6 +954,7 @@ export default function AgentsPage() {
           [agentId]: {
             ...prev[agentId],
             loading: false,
+            currentTaskId: undefined,
             sessions: prev[agentId].sessions.map((s) =>
               s.id === state.activeSessionId
                 ? {
@@ -604,21 +970,25 @@ export default function AgentsPage() {
             ),
           },
         }));
+        streamRefs.current[agentId] = null;
         sse.close();
       };
-    } catch {
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "请求出错，请检查服务是否正常";
       setAgentStates((prev) => ({
         ...prev,
         [agentId]: {
           ...prev[agentId],
           loading: false,
+          currentTaskId: undefined,
           sessions: prev[agentId].sessions.map((s) =>
             s.id === state.activeSessionId
               ? {
                   ...s,
                   messages: s.messages.map((m) =>
                     (m as ChatMessage & { _id?: string })._id === placeholderId
-                      ? { ...m, content: "请求出错，请检查服务是否正常" }
+                      ? { ...m, content: message }
                       : m,
                   ),
                 }
@@ -629,7 +999,178 @@ export default function AgentsPage() {
     }
   };
 
-  const chatPanelVisible = !!(activeAgent && activeSession && chatVisible);
+  const stopMessage = useCallback(
+    async (agentId: string) => {
+      const taskId = agentStates[agentId]?.currentTaskId;
+      const sse = streamRefs.current[agentId];
+      if (!taskId) return;
+      if (sse) {
+        sse.close();
+        streamRefs.current[agentId] = null;
+      }
+      try {
+        await fetch(`/api/agents/stream/${taskId}/cancel`, { method: "POST" });
+      } catch {}
+      setAgentStates((prev) => ({
+        ...prev,
+        [agentId]: {
+          ...prev[agentId],
+          loading: false,
+          currentTaskId: undefined,
+          sessions: prev[agentId].sessions.map((s) => {
+            if (s.id !== prev[agentId].activeSessionId) return s;
+            return {
+              ...s,
+              messages: s.messages.map((m) => {
+                if ((m as ChatMessage & { _id?: string })._id) {
+                  return {
+                    ...m,
+                    content: m.content || "已停止生成",
+                  };
+                }
+                return m;
+              }),
+            };
+          }),
+        },
+      }));
+    },
+    [agentStates],
+  );
+
+  const runTeamReport = useCallback(
+    async (stock: { code: string; name: string }) => {
+      const baseReport: TeamReport = {
+        code: stock.code,
+        name: stock.name,
+        status: "running",
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+      setTeamReports((prev) => upsertTeamReport(prev, baseReport));
+
+      const res = await fetch("/api/agents/team", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: stock.code, stockName: stock.name }),
+      });
+      const body = (await res.json()) as { taskId?: string; error?: string };
+      if (!res.ok || !body.taskId) {
+        const failedReport = {
+          ...baseReport,
+          status: "error" as const,
+          error: body.error || "报告分析启动失败",
+        };
+        setTeamReports((prev) => upsertTeamReport(prev, failedReport));
+        throw new Error(failedReport.error);
+      }
+
+      await new Promise<void>((resolve, reject) => {
+        const sse = new EventSource(`/api/agents/stream/${body.taskId}`);
+        sse.onmessage = (event) => {
+          const data = JSON.parse(event.data) as {
+            type: string;
+            advice?: string;
+            message?: string;
+            text?: string;
+          };
+
+          if (data.type === "team_done") {
+            const now = Date.now();
+            const readyReport: TeamReport = {
+              ...baseReport,
+              status: "ready",
+              updatedAt: now,
+              report: buildStoredReportMarkdown(
+                stock.name,
+                stock.code,
+                data.advice || data.message || data.text || "分析完成",
+                now,
+              ),
+              error: undefined,
+            };
+            setTeamReports((prev) => upsertTeamReport(prev, readyReport));
+          }
+
+          if (data.type === "done") {
+            sse.close();
+            resolve();
+          }
+
+          if (data.type === "error") {
+            sse.close();
+            const failedReport: TeamReport = {
+              ...baseReport,
+              status: "error",
+              updatedAt: Date.now(),
+              error: data.message || "报告分析失败",
+            };
+            setTeamReports((prev) => upsertTeamReport(prev, failedReport));
+            reject(new Error(failedReport.error));
+          }
+        };
+
+        sse.onerror = () => {
+          sse.close();
+          const failedReport: TeamReport = {
+            ...baseReport,
+            status: "error",
+            updatedAt: Date.now(),
+            error: "报告连接中断，请重试",
+          };
+          setTeamReports((prev) => upsertTeamReport(prev, failedReport));
+          reject(new Error(failedReport.error));
+        };
+      });
+    },
+    [],
+  );
+
+  useEffect(() => {
+    const shandongGold = teamReports.find((item) => item.code === "600547");
+    if (
+      !shandongGold ||
+      shandongGold.report ||
+      shandongGold.status !== "idle"
+    ) {
+      return;
+    }
+    void runTeamReport({ code: shandongGold.code, name: shandongGold.name });
+  }, [runTeamReport, teamReports]);
+
+  const openTeamReport = useCallback((report: TeamReport) => {
+    window.open(
+      getTeamReportPath(report.code),
+      "_blank",
+      "noopener,noreferrer",
+    );
+  }, []);
+
+  const removeTeamReport = useCallback((code: string) => {
+    setTeamReports((prev) => removeTeamReportByCode(prev, code));
+  }, []);
+
+  const addTeamReport = useCallback(
+    async (stock: StockSearchResult) => {
+      setTeamReportQuery("");
+      setTeamSearchResults([]);
+      setTeamSearchOpen(false);
+      await runTeamReport(stock);
+    },
+    [runTeamReport],
+  );
+
+  const handleMessagesScroll = useCallback(() => {
+    if (!activeAgentId || !activeSession || loadingHistoryRef.current) return;
+    const node = messagesContainerRef.current;
+    if (!node || node.scrollTop > 80) return;
+    const total = activeSession.messageCount ?? activeSession.messages.length;
+    const loaded = activeSession.loadedCount ?? activeSession.messages.length;
+    if (loaded >= total) return;
+    void loadSessionMessages(activeAgentId, activeSession.id, {
+      preserveScroll: true,
+    });
+  }, [activeAgentId, activeSession, loadSessionMessages]);
 
   return (
     <div className="flex overflow-hidden" style={{ height: "100vh" }}>
@@ -650,9 +1191,8 @@ export default function AgentsPage() {
               const isActive = activeAgentId === agent.id;
               const hasSessions = agentStates[agent.id].sessions.length > 0;
               return (
-                <button
+                <div
                   key={agent.id}
-                  onClick={() => openAgent(agent.id)}
                   className={cn(
                     "p-5 rounded-xl text-left border transition-all group",
                     isActive
@@ -660,51 +1200,131 @@ export default function AgentsPage() {
                       : "border-[var(--border-color)] bg-[var(--bg-secondary)] hover:border-[#f5a623]/30 hover:bg-[var(--bg-hover)]",
                   )}
                 >
-                  <div className="flex items-start justify-between mb-3">
-                    <div
-                      className="w-10 h-10 rounded-lg flex items-center justify-center text-xl"
-                      style={{ background: `${agent.color}15` }}
-                    >
-                      {agent.emoji}
-                    </div>
-                    {hasSessions && (
-                      <span className="w-2 h-2 bg-[#f5a623] rounded-full mt-1" />
-                    )}
-                  </div>
-                  <div className="font-medium text-[var(--text-primary)] mb-1">
-                    {agent.label}
-                  </div>
-                  <p className="text-xs text-[var(--text-tertiary)] leading-relaxed">
-                    {agent.description}
-                  </p>
-                  <div
-                    className="mt-3 flex items-center gap-1.5 text-xs font-medium transition-colors"
-                    style={{ color: isActive ? "#f5a623" : agent.color + "aa" }}
+                  <button
+                    onClick={() => openAgent(agent.id)}
+                    className="w-full text-left"
                   >
-                    <MessageSquare size={12} />
-                    {isActive ? "对话中" : "启动对话"}
-                  </div>
-                </button>
+                    <div className="flex items-start justify-between mb-3">
+                      <div
+                        className="w-10 h-10 rounded-lg flex items-center justify-center text-xl"
+                        style={{ background: `${agent.color}15` }}
+                      >
+                        {agent.emoji}
+                      </div>
+                      {hasSessions && (
+                        <span className="w-2 h-2 bg-[#f5a623] rounded-full mt-1" />
+                      )}
+                    </div>
+                    <div className="font-medium text-[var(--text-primary)] mb-1">
+                      {agent.label}
+                    </div>
+                    <p className="text-xs text-[var(--text-tertiary)] leading-relaxed">
+                      {agent.description}
+                    </p>
+                    <div
+                      className="mt-3 flex items-center gap-1.5 text-xs font-medium transition-colors"
+                      style={{
+                        color: isActive ? "#f5a623" : agent.color + "aa",
+                      }}
+                    >
+                      <MessageSquare size={12} />
+                      {isActive ? "对话中" : "启动对话"}
+                    </div>
+                  </button>
+                </div>
               );
             })}
-          </div>
 
-          {/* Team shortcut */}
-          <div className="mt-6 p-5 bg-[var(--bg-secondary)] border border-[#f5a623]/20 rounded-xl">
-            <div className="flex items-start gap-4">
-              <div className="w-10 h-10 rounded-lg bg-[#f5a623]/10 flex items-center justify-center shrink-0">
-                <Zap size={20} className="text-[#f5a623]" />
-              </div>
-              <div>
-                <div className="text-[var(--text-primary)] font-medium mb-1">
-                  Team 协同分析
+            <div
+              ref={teamReportRef}
+              className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)] p-5"
+            >
+              <div className="mb-3 flex items-center gap-2">
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#f5a623]/10 text-[#f5a623]">
+                  <FileText size={18} />
                 </div>
-                <p className="text-xs text-[var(--text-tertiary)] leading-relaxed">
-                  以上所有 Agent 将并行运行，由 Orchestrator
-                  主控调度，聚合所有子 Agent
-                  的输出，给出综合分析报告。请前往个股详情页的「AI分析」Tab
-                  使用全量分析功能。
-                </p>
+                <div>
+                  <div className="font-medium text-[var(--text-primary)]">
+                    报告
+                  </div>
+                  <p className="text-xs text-[var(--text-tertiary)] leading-relaxed">
+                    独立查看和维护 Team 生成的个股分析报告
+                  </p>
+                </div>
+              </div>
+
+              <div className="mb-3 flex flex-wrap gap-2">
+                {teamReports.map((report) => (
+                  <div
+                    key={report.code}
+                    className="flex items-center gap-1 rounded-full border border-[var(--border-color)] bg-[var(--bg-primary)] px-2 py-1 text-[11px]"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => openTeamReport(report)}
+                      className="text-[var(--text-secondary)] hover:text-[#f5a623]"
+                    >
+                      {report.name}
+                    </button>
+                    <span
+                      className={cn(
+                        "inline-block h-2 w-2 rounded-full",
+                        report.status === "ready"
+                          ? "bg-emerald-400"
+                          : report.status === "running"
+                            ? "bg-amber-400"
+                            : report.status === "error"
+                              ? "bg-red-400"
+                              : "bg-[var(--text-tertiary)]",
+                      )}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeTeamReport(report.code)}
+                      className="text-[var(--text-tertiary)] hover:text-red-400"
+                      title="删除报告"
+                    >
+                      <X size={10} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              <div className="relative">
+                <div className="flex items-center gap-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] px-2 py-1.5">
+                  <Search size={12} className="text-[var(--text-tertiary)]" />
+                  <input
+                    value={teamReportQuery}
+                    onChange={(e) => setTeamReportQuery(e.target.value)}
+                    placeholder="添加个股报告"
+                    className="w-full bg-transparent text-xs text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
+                  />
+                  {teamSearchLoading && (
+                    <Loader2
+                      size={12}
+                      className="animate-spin text-[#f5a623]"
+                    />
+                  )}
+                </div>
+                {teamSearchOpen && teamSearchResults.length > 0 && (
+                  <div className="absolute z-20 mt-2 w-full rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)] p-1 shadow-lg">
+                    {teamSearchResults.slice(0, 8).map((item) => (
+                      <button
+                        key={item.code}
+                        type="button"
+                        onClick={() => void addTeamReport(item)}
+                        className="flex w-full items-center justify-between rounded-lg px-2 py-2 text-left hover:bg-[var(--bg-hover)]"
+                      >
+                        <span className="text-xs text-[var(--text-secondary)]">
+                          {item.name}
+                        </span>
+                        <span className="text-[10px] text-[var(--text-tertiary)]">
+                          {item.code}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -903,7 +1523,11 @@ export default function AgentsPage() {
           </div>
 
           {/* Messages */}
-          <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 space-y-4">
+          <div
+            ref={messagesContainerRef}
+            onScroll={handleMessagesScroll}
+            className="flex-1 overflow-y-auto overflow-x-hidden p-4 space-y-4"
+          >
             {activeSession.messages.map((msg, i) => (
               <AgentMessage key={i} msg={msg} activeAgent={activeAgent} />
             ))}
@@ -1007,15 +1631,29 @@ export default function AgentsPage() {
                 style={{ minHeight: "62px", maxHeight: "160px" }}
               />
               <button
-                onClick={() => sendMessage(activeAgent.id)}
-                disabled={
-                  (!activeAgentState?.input.trim() &&
-                    !activeAgentState?.pastedImage) ||
+                onClick={() =>
                   activeAgentState?.loading
+                    ? stopMessage(activeAgent.id)
+                    : sendMessage(activeAgent.id)
                 }
-                className="p-2.5 bg-[#f5a623] hover:bg-[#e8961a] disabled:bg-[var(--bg-tertiary)] disabled:text-[var(--text-tertiary)] text-black rounded-lg transition-colors shrink-0 mb-0"
+                disabled={
+                  !activeAgentState?.loading &&
+                  !activeAgentState?.input.trim() &&
+                  !activeAgentState?.pastedImage
+                }
+                className={cn(
+                  "p-2.5 disabled:bg-[var(--bg-tertiary)] disabled:text-[var(--text-tertiary)] rounded-lg transition-colors shrink-0 mb-0",
+                  activeAgentState?.loading
+                    ? "bg-red-500 hover:bg-red-600 text-white"
+                    : "bg-[#f5a623] hover:bg-[#e8961a] text-black",
+                )}
+                title={activeAgentState?.loading ? "停止生成" : "发送消息"}
               >
-                <Send size={15} />
+                {activeAgentState?.loading ? (
+                  <Square size={15} fill="currentColor" />
+                ) : (
+                  <Send size={15} />
+                )}
               </button>
             </div>
           </div>
@@ -1070,6 +1708,15 @@ function AgentMessage({
     }
   };
 
+  const handlePreview = () => {
+    const blob = new Blob([buildMarkdownPreviewDocument(msg.content)], {
+      type: "text/html;charset=utf-8",
+    });
+    const url = URL.createObjectURL(blob);
+    window.open(url, "_blank", "noopener,noreferrer");
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  };
+
   return (
     <div
       className={cn(
@@ -1122,6 +1769,19 @@ function AgentMessage({
         </div>
 
         {/* 复制图片按钮：hover 时显示，与气泡并排 */}
+        <button
+          onClick={handlePreview}
+          title="Markdown 预览"
+          className={cn(
+            "shrink-0 mt-1 w-6 h-6 rounded-md flex items-center justify-center transition-all duration-150",
+            "bg-[var(--bg-secondary)] border border-[var(--border-color)] shadow-sm",
+            "text-[var(--text-tertiary)] hover:text-[#f5a623] hover:border-[#f5a623]",
+            "opacity-0 group-hover:opacity-100",
+          )}
+        >
+          <ExternalLink size={12} />
+        </button>
+
         <button
           onClick={handleCopyImage}
           title="复制为图片"

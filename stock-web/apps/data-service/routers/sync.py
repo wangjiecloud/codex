@@ -114,10 +114,23 @@ def _sort_klines_missing_first(codes: list) -> list:
 
 
 def _sort_fundamental_missing_first(codes: list) -> list:
-    """优先同步 stock_f10_snapshot 中无数据的股票"""
     db = SessionLocal()
     try:
-        have_data = {r.code for r in db.query(StockF10Snapshot.code).all()}
+        from db import StockF10BusinessAnalysis, StockF10FinancialHistory
+
+        snapshot_codes = {r.code for r in db.query(StockF10Snapshot.code).all()}
+        business_codes = {
+            r.code
+            for r in db.query(
+                StockF10BusinessAnalysis.code,
+                StockF10BusinessAnalysis.main_business_breakdown,
+            ).all()
+            if r.main_business_breakdown and r.main_business_breakdown.strip()
+        }
+        history_codes = {
+            r.code for r in db.query(StockF10FinancialHistory.code).distinct().all()
+        }
+        have_data = snapshot_codes & business_codes & history_codes
     finally:
         db.close()
     missing = [c for c in codes if c not in have_data]
@@ -369,8 +382,7 @@ def _run_full_sync():
     except Exception as e:
         sched_log("error", f"[6/7] 板块新闻同步失败: {e}")
 
-    # [7/7] 技术指标计算（KDJ + MA 写入 stock_indicator）
-    sched_log("info", "[7/7] 开始计算技术指标（KDJ/MA）...")
+    sched_log("info", "[7/7] 开始计算技术指标（KDJ/MA/MACD/RSI/BOLL）...")
     try:
         import subprocess, sys, os
 

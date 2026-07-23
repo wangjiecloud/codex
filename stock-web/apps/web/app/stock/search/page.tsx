@@ -13,6 +13,12 @@ import {
   saveStockSearchPageState,
   loadStockSearchPageState,
 } from "@/lib/navStore";
+import {
+  clearSessionCache,
+  clearSessionCacheByPrefix,
+  readSessionCache,
+  writeSessionCache,
+} from "@/lib/sessionCache";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
@@ -1317,10 +1323,15 @@ interface AIQueryState {
   errorMsg: string;
 }
 
+interface AIBoardGroup {
+  boardName: string;
+  avgChange: number | null;
+  rows: string[][];
+}
+
 const PAGE_SIZE_AI = 50;
 
 function AISearchPanel() {
-  const router = useRouter();
   const [aiQuery, setAiQuery] = useState("");
   const [state, setState] = useState<AIQueryState>({
     status: "idle",
@@ -1332,22 +1343,9 @@ function AISearchPanel() {
     errorMsg: "",
   });
   const [page, setPage] = useState(1);
-
-  // 列排序
-  const [sortKey, setSortKey] = useState<string | null>(null);
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
-
-  const handleSort = (key: string) => {
-    setSortKey((prev) => {
-      if (prev === key) {
-        setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-        return key;
-      }
-      setSortDir("desc"); // 新列默认降序
-      return key;
-    });
-    setPage(1);
-  };
+  const [expandedBoards, setExpandedBoards] = useState<Record<string, boolean>>(
+    {},
+  );
 
   // 市值同步
   const [marketCapSyncing, setMarketCapSyncing] = useState(false);
@@ -1447,8 +1445,7 @@ function AISearchPanel() {
       errorMsg: "",
     });
     setPage(1);
-    setSortKey(null);
-    setSortDir("asc");
+    setExpandedBoards({});
 
     try {
       const res = await fetch("/api/agents/search", {
@@ -1534,34 +1531,77 @@ function AISearchPanel() {
   const isEmpty = state.status === "done" && state.rows.length === 0;
   const hasError = state.status === "error";
 
-  // 分页计算
-  const totalPages = Math.ceil(state.rows.length / PAGE_SIZE_AI);
-
-  // 排序计算（全量排序后再分页）
-  const sortedRows = useMemo(() => {
-    if (!sortKey) return state.rows;
-    const colIdx = state.columns.findIndex((c) => c.key === sortKey);
-    if (colIdx === -1) return state.rows;
-    return [...state.rows].sort((a, b) => {
-      const av = a[colIdx] ?? "";
-      const bv = b[colIdx] ?? "";
-      const an = parseFloat(av);
-      const bn = parseFloat(bv);
-      const numCompare =
-        !isNaN(an) && !isNaN(bn) ? an - bn : av.localeCompare(bv, "zh-CN");
-      return sortDir === "asc" ? numCompare : -numCompare;
-    });
-  }, [state.rows, state.columns, sortKey, sortDir]);
-
-  const pageRows = sortedRows.slice(
-    (page - 1) * PAGE_SIZE_AI,
-    page * PAGE_SIZE_AI,
-  );
-
   // 涨跌幅列索引（用于着色）
   const changeColIdx = state.columns.findIndex(
     (c) => c.key === "change" || c.key === "change_pct",
   );
+  const boardColIdx = state.columns.findIndex(
+    (c) =>
+      c.key === "industry_board" ||
+      c.key === "sw_board" ||
+      c.key === "board_name",
+  );
+  const detailColumns =
+    boardColIdx >= 0
+      ? state.columns.filter((_, idx) => idx !== boardColIdx)
+      : state.columns;
+
+  const groupedBoards = useMemo<AIBoardGroup[]>(() => {
+    if (!hasResult) return [];
+
+    const groups = new Map<string, string[][]>();
+    state.rows.forEach((row) => {
+      const rawBoards = boardColIdx >= 0 ? (row[boardColIdx] ?? "") : "";
+      const boardNames = rawBoards
+        .split("/")
+        .map((item) => item.trim())
+        .filter(Boolean);
+      const uniqueBoards =
+        boardNames.length > 0 ? [...new Set(boardNames)] : ["未分类"];
+      uniqueBoards.forEach((boardName) => {
+        const existed = groups.get(boardName);
+        if (existed) existed.push(row);
+        else groups.set(boardName, [row]);
+      });
+    });
+
+    const items = Array.from(groups.entries()).map(([boardName, rows]) => {
+      const values = rows
+        .map((row) => {
+          if (changeColIdx < 0) return NaN;
+          return Number.parseFloat(row[changeColIdx] ?? "");
+        })
+        .filter((value) => !Number.isNaN(value));
+      const avgChange =
+        values.length > 0
+          ? values.reduce((sum, value) => sum + value, 0) / values.length
+          : null;
+      return { boardName, avgChange, rows };
+    });
+
+    return items.sort((a, b) => {
+      const diff =
+        (b.avgChange ?? Number.NEGATIVE_INFINITY) -
+        (a.avgChange ?? Number.NEGATIVE_INFINITY);
+      if (diff !== 0) return diff;
+      return b.rows.length - a.rows.length;
+    });
+  }, [boardColIdx, changeColIdx, hasResult, state.rows]);
+
+  const boardTotalPages = Math.ceil(groupedBoards.length / PAGE_SIZE_AI);
+  const pagedBoardGroups = groupedBoards.slice(
+    (page - 1) * PAGE_SIZE_AI,
+    page * PAGE_SIZE_AI,
+  );
+
+  const toggleBoard = (boardName: string) => {
+    setExpandedBoards((prev) => ({ ...prev, [boardName]: !prev[boardName] }));
+  };
+
+  const formatPct = (value: number | null) => {
+    if (value === null || Number.isNaN(value)) return "--";
+    return `${value > 0 ? "+" : ""}${value.toFixed(2)}%`;
+  };
 
   return (
     <div className="mb-8 bg-gradient-to-br from-[#f5a623]/5 to-[#f5a623]/10 border border-[#f5a623]/20 rounded-xl p-5">
@@ -1758,9 +1798,9 @@ function AISearchPanel() {
               )}
             </div>
             {/* 分页信息 */}
-            {totalPages > 1 && (
+            {boardTotalPages > 1 && (
               <span className="text-[11px] text-[var(--text-tertiary)]">
-                第 {page} / {totalPages} 页（每页 {PAGE_SIZE_AI} 条）
+                第 {page} / {boardTotalPages} 页（每页 {PAGE_SIZE_AI} 个板块）
               </span>
             )}
           </div>
@@ -1773,98 +1813,160 @@ function AISearchPanel() {
                   <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-[var(--text-tertiary)] whitespace-nowrap w-8">
                     #
                   </th>
-                  {state.columns.map((col) => {
-                    const isActive = sortKey === col.key;
-                    return (
-                      <th
-                        key={col.key}
-                        onClick={() => handleSort(col.key)}
-                        className="px-3 py-2.5 text-left text-[11px] font-semibold text-[var(--text-tertiary)] whitespace-nowrap cursor-pointer select-none hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors group"
-                      >
-                        <span className="inline-flex items-center gap-1">
-                          {col.label}
-                          <span
-                            className={cn(
-                              "inline-flex flex-col leading-[6px] transition-opacity",
-                              isActive
-                                ? "opacity-100"
-                                : "opacity-0 group-hover:opacity-40",
-                            )}
-                          >
-                            <span
-                              className={cn(
-                                "text-[8px]",
-                                isActive && sortDir === "asc"
-                                  ? "text-[#f5a623]"
-                                  : "text-[var(--text-tertiary)]",
-                              )}
-                            >
-                              ▲
-                            </span>
-                            <span
-                              className={cn(
-                                "text-[8px]",
-                                isActive && sortDir === "desc"
-                                  ? "text-[#f5a623]"
-                                  : "text-[var(--text-tertiary)]",
-                              )}
-                            >
-                              ▼
-                            </span>
-                          </span>
-                        </span>
-                      </th>
-                    );
-                  })}
+                  <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-[var(--text-tertiary)] whitespace-nowrap">
+                    板块
+                  </th>
+                  <th className="px-3 py-2.5 text-right text-[11px] font-semibold text-[var(--text-tertiary)] whitespace-nowrap">
+                    个股数
+                  </th>
+                  <th className="px-3 py-2.5 text-right text-[11px] font-semibold text-[var(--text-tertiary)] whitespace-nowrap">
+                    平均涨跌幅
+                  </th>
                 </tr>
               </thead>
               <tbody>
-                {pageRows.map((row, ri) => {
+                {pagedBoardGroups.map((group, ri) => {
                   const globalIdx = (page - 1) * PAGE_SIZE_AI + ri + 1;
-                  const code =
-                    row[state.columns.findIndex((c) => c.key === "code")] ?? "";
+                  const expanded = !!expandedBoards[group.boardName];
+                  const avgNum = group.avgChange ?? NaN;
+                  const avgUp = !Number.isNaN(avgNum) && avgNum > 0;
+                  const avgDown = !Number.isNaN(avgNum) && avgNum < 0;
                   return (
-                    <tr
-                      key={ri}
-                      onClick={() =>
-                        code && window.open(`/stock/${code}`, "_blank")
-                      }
-                      className={cn(
-                        "border-b border-[var(--border-color)] last:border-0 transition-colors",
-                        code ? "cursor-pointer hover:bg-[var(--bg-hover)]" : "",
-                        ri % 2 === 0
-                          ? "bg-transparent"
-                          : "bg-[var(--bg-secondary)]/30",
-                      )}
-                    >
-                      <td className="px-3 py-2.5 text-[11px] text-[var(--text-tertiary)] tabular-nums">
-                        {globalIdx}
-                      </td>
-                      {row.map((cell, ci) => {
-                        const isChange = ci === changeColIdx;
-                        const num = isChange ? parseFloat(cell) : NaN;
-                        const isUp = isChange && !isNaN(num) && num > 0;
-                        const isDown = isChange && !isNaN(num) && num < 0;
-                        const isCode = state.columns[ci]?.key === "code";
-                        return (
-                          <td
-                            key={ci}
-                            className={cn(
-                              "px-3 py-2.5 whitespace-nowrap tabular-nums",
-                              isCode &&
-                                "font-mono text-[var(--text-secondary)] text-xs",
-                              !isCode && "text-sm text-[var(--text-primary)]",
-                              isUp && "text-[#e84444] font-medium",
-                              isDown && "text-[#09d464] font-medium",
+                    <Fragment key={group.boardName}>
+                      <tr
+                        onClick={() => toggleBoard(group.boardName)}
+                        className={cn(
+                          "border-b border-[var(--border-color)] transition-colors cursor-pointer hover:bg-[var(--bg-hover)]",
+                          ri % 2 === 0
+                            ? "bg-transparent"
+                            : "bg-[var(--bg-secondary)]/30",
+                        )}
+                      >
+                        <td className="px-3 py-2.5 text-[11px] text-[var(--text-tertiary)] tabular-nums">
+                          {globalIdx}
+                        </td>
+                        <td className="px-3 py-2.5 whitespace-nowrap">
+                          <span className="inline-flex items-center gap-2 text-sm font-medium text-[var(--text-primary)]">
+                            {expanded ? (
+                              <ChevronDown
+                                size={14}
+                                className="text-[var(--text-tertiary)]"
+                              />
+                            ) : (
+                              <ChevronRight
+                                size={14}
+                                className="text-[var(--text-tertiary)]"
+                              />
                             )}
-                          >
-                            {isChange && !isNaN(num)
-                              ? `${num > 0 ? "+" : ""}${cell}%`
-                              : cell}
+                            {group.boardName}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2.5 text-right whitespace-nowrap tabular-nums text-sm text-[var(--text-primary)]">
+                          {group.rows.length}
+                        </td>
+                        <td
+                          className={cn(
+                            "px-3 py-2.5 text-right whitespace-nowrap tabular-nums text-sm font-semibold",
+                            avgUp && "text-[#e84444]",
+                            avgDown && "text-[#09d464]",
+                            !avgUp && !avgDown && "text-[var(--text-tertiary)]",
+                          )}
+                        >
+                          {formatPct(group.avgChange)}
+                        </td>
+                      </tr>
+                      {expanded && (
+                        <tr className="border-b border-[var(--border-color)] last:border-0 bg-[var(--bg-secondary)]/35">
+                          <td colSpan={4} className="px-3 py-3">
+                            <div className="overflow-x-auto rounded-lg border border-[var(--border-color)]/70 bg-[var(--bg-primary)]">
+                              <table className="w-full text-sm border-collapse">
+                                <thead>
+                                  <tr className="border-b border-[var(--border-color)] bg-[var(--bg-secondary)]/60">
+                                    {detailColumns.map((col) => (
+                                      <th
+                                        key={col.key}
+                                        className="px-3 py-2 text-left text-[11px] font-semibold text-[var(--text-tertiary)] whitespace-nowrap"
+                                      >
+                                        {col.label}
+                                      </th>
+                                    ))}
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {group.rows.map((row, rowIdx) => {
+                                    const code =
+                                      row[
+                                        state.columns.findIndex(
+                                          (c) => c.key === "code",
+                                        )
+                                      ] ?? "";
+                                    return (
+                                      <tr
+                                        key={`${group.boardName}-${code}-${rowIdx}`}
+                                        onClick={() =>
+                                          code &&
+                                          window.open(
+                                            `/stock/${code}`,
+                                            "_blank",
+                                          )
+                                        }
+                                        className={cn(
+                                          "border-b border-[var(--border-color)] last:border-0 transition-colors",
+                                          code
+                                            ? "cursor-pointer hover:bg-[var(--bg-hover)]"
+                                            : "",
+                                          rowIdx % 2 === 0
+                                            ? "bg-transparent"
+                                            : "bg-[var(--bg-secondary)]/20",
+                                        )}
+                                      >
+                                        {row.map((cell, ci) => {
+                                          if (ci === boardColIdx) return null;
+                                          const isChange = ci === changeColIdx;
+                                          const num = isChange
+                                            ? Number.parseFloat(cell)
+                                            : NaN;
+                                          const isUp =
+                                            isChange &&
+                                            !Number.isNaN(num) &&
+                                            num > 0;
+                                          const isDown =
+                                            isChange &&
+                                            !Number.isNaN(num) &&
+                                            num < 0;
+                                          const isCode =
+                                            state.columns[ci]?.key === "code";
+                                          return (
+                                            <td
+                                              key={`${group.boardName}-${code}-${ci}`}
+                                              className={cn(
+                                                "px-3 py-2.5 whitespace-nowrap tabular-nums",
+                                                isCode &&
+                                                  "font-mono text-[var(--text-secondary)] text-xs",
+                                                !isCode &&
+                                                  "text-sm text-[var(--text-primary)]",
+                                                isUp &&
+                                                  "text-[#e84444] font-medium",
+                                                isDown &&
+                                                  "text-[#09d464] font-medium",
+                                              )}
+                                            >
+                                              {isChange && !Number.isNaN(num)
+                                                ? formatPct(num)
+                                                : cell}
+                                            </td>
+                                          );
+                                        })}
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
                           </td>
-                        );
-                      })}
-                    </tr>
+                        </tr>
+                      )}
+                    </Fragment>
                   );
                 })}
               </tbody>
@@ -1872,7 +1974,7 @@ function AISearchPanel() {
           </div>
 
           {/* 分页控件 */}
-          {totalPages > 1 && (
+          {boardTotalPages > 1 && (
             <div className="flex items-center justify-center gap-1.5 mt-3">
               <button
                 onClick={() => setPage(1)}
@@ -1890,9 +1992,10 @@ function AISearchPanel() {
               </button>
 
               {/* 页码按钮 */}
-              {Array.from({ length: totalPages }, (_, i) => i + 1)
+              {Array.from({ length: boardTotalPages }, (_, i) => i + 1)
                 .filter(
-                  (p) => p === 1 || p === totalPages || Math.abs(p - page) <= 2,
+                  (p) =>
+                    p === 1 || p === boardTotalPages || Math.abs(p - page) <= 2,
                 )
                 .reduce<(number | "...")[]>((acc, p, idx, arr) => {
                   if (idx > 0 && p - (arr[idx - 1] as number) > 1)
@@ -1925,15 +2028,15 @@ function AISearchPanel() {
                 )}
 
               <button
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                disabled={page === totalPages}
+                onClick={() => setPage((p) => Math.min(boardTotalPages, p + 1))}
+                disabled={page === boardTotalPages}
                 className="px-2.5 py-1.5 text-xs rounded border border-[var(--border-color)] text-[var(--text-secondary)] hover:border-[#f5a623]/50 hover:text-[var(--text-primary)] disabled:opacity-30 disabled:cursor-not-allowed transition-all"
               >
                 下一页
               </button>
               <button
-                onClick={() => setPage(totalPages)}
-                disabled={page === totalPages}
+                onClick={() => setPage(boardTotalPages)}
+                disabled={page === boardTotalPages}
                 className="px-2.5 py-1.5 text-xs rounded border border-[var(--border-color)] text-[var(--text-secondary)] hover:border-[#f5a623]/50 hover:text-[var(--text-primary)] disabled:opacity-30 disabled:cursor-not-allowed transition-all"
               >
                 末页
@@ -1973,6 +2076,9 @@ function AISearchPanel() {
 // 资讯 Tab 内容
 // ─────────────────────────────────────────────────────────────────────────────
 function NewsPanel() {
+  const THEME_STATS_CACHE_KEY = "stock-search:theme-news-stats";
+  const THEME_STATS_TTL = 5 * 60 * 1000;
+  const NEWS_LIST_TTL = 2 * 60 * 1000;
   const [searchKeyword, setSearchKeyword] = useState("");
   const [inputValue, setInputValue] = useState("");
   const [selectedTheme, setSelectedTheme] = useState("");
@@ -1992,6 +2098,11 @@ function NewsPanel() {
   const dropdownRef = useRef<HTMLDivElement>(null);
   const syncMenuRef = useRef<HTMLDivElement>(null);
   const PAGE_SIZE = 30;
+  const newsCacheKey = useCallback(
+    (themeId: string, keyword: string, pageNum: number) =>
+      `stock-search:theme-news:${themeId || "all"}:${keyword || "all"}:${pageNum}`,
+    [],
+  );
 
   // 关闭下拉框
   useEffect(() => {
@@ -2015,16 +2126,22 @@ function NewsPanel() {
 
   // 加载板块列表
   useEffect(() => {
+    const cached = readSessionCache<ThemeOption[]>(THEME_STATS_CACHE_KEY);
+    if (cached?.length) {
+      setThemeOptions(cached);
+      return;
+    }
+
     fetch("/api/theme/news-stats", { cache: "no-store" })
       .then((r) => r.json())
       .then((data) => {
-        setThemeOptions(
-          (data.themes || []).map((t: ThemeOption) => ({
-            themeId: t.themeId,
-            themeName: t.themeName,
-            count: t.count,
-          })),
-        );
+        const themes = (data.themes || []).map((t: ThemeOption) => ({
+          themeId: t.themeId,
+          themeName: t.themeName,
+          count: t.count,
+        }));
+        setThemeOptions(themes);
+        writeSessionCache(THEME_STATS_CACHE_KEY, themes, THEME_STATS_TTL);
       })
       .catch(() => {});
   }, []);
@@ -2035,6 +2152,21 @@ function NewsPanel() {
       if (append) setLoadingMore(true);
       else setLoading(true);
       try {
+        const cacheKey = newsCacheKey(selectedTheme, searchKeyword, pageNum);
+        const cached = readSessionCache<{
+          items: ThemeNewsItem[];
+          total: number;
+          hasMore: boolean;
+        }>(cacheKey);
+        if (cached) {
+          setNews((prev) =>
+            append ? [...prev, ...cached.items] : cached.items,
+          );
+          setTotal(cached.total);
+          setHasMore(cached.hasMore);
+          return;
+        }
+
         const params = new URLSearchParams({
           page: String(pageNum),
           page_size: String(PAGE_SIZE),
@@ -2048,6 +2180,15 @@ function NewsPanel() {
         if (!res.ok) throw new Error("fetch error");
         const data = await res.json();
         const items: ThemeNewsItem[] = data.items || [];
+        writeSessionCache(
+          cacheKey,
+          {
+            items,
+            total: data.total || 0,
+            hasMore: data.hasMore || false,
+          },
+          NEWS_LIST_TTL,
+        );
         setNews((prev) => (append ? [...prev, ...items] : items));
         setTotal(data.total || 0);
         setHasMore(data.hasMore || false);
@@ -2091,6 +2232,8 @@ function NewsPanel() {
         method: "POST",
         cache: "no-store",
       });
+      clearSessionCache(THEME_STATS_CACHE_KEY);
+      clearSessionCacheByPrefix("stock-search:theme-news:");
       // 全量同步等待更长时间
       await new Promise((r) => setTimeout(r, mode === "full" ? 8000 : 4000));
       // 重新加载板块统计
@@ -3859,9 +4002,9 @@ function MemoPanel() {
                             <div className="space-y-1">
                               {/* 日期条目预览 */}
                               <div className="flex flex-wrap gap-1.5 mt-1">
-                                {dailyEntries.map((e) => (
+                                {dailyEntries.map((e, ei) => (
                                   <span
-                                    key={e.date}
+                                    key={`${e.date}-${ei}`}
                                     className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--bg-tertiary)] text-[var(--text-tertiary)] font-mono"
                                   >
                                     {e.label}

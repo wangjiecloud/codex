@@ -7946,21 +7946,23 @@ export default function IndustryCanvasPage() {
               ? "humanoid"
               : industryId.startsWith("as_") || industryId.startsWith("avt_")
                 ? "aerospace"
-                : industryId.startsWith("dc_")
-                  ? "dc_compute"
-                  : industryId.startsWith("llm_")
-                    ? "llm"
-                    : industryId.startsWith("la_")
-                      ? "lowalt"
-                      : industryId.startsWith("es_")
-                        ? "energy"
-                        : industryId.startsWith("bp_")
-                          ? "biopharma"
-                          : industryId.startsWith("ir_")
-                            ? "robot"
-                            : industryId.startsWith("tc_")
-                              ? "telecom"
-                              : "ai_infra";
+                : industryId.startsWith("fin_")
+                  ? "finance"
+                  : industryId.startsWith("dc_")
+                    ? "dc_compute"
+                    : industryId.startsWith("llm_")
+                      ? "llm"
+                      : industryId.startsWith("la_")
+                        ? "lowalt"
+                        : industryId.startsWith("es_")
+                          ? "energy"
+                          : industryId.startsWith("bp_")
+                            ? "biopharma"
+                            : industryId.startsWith("ir_")
+                              ? "robot"
+                              : industryId.startsWith("tc_")
+                                ? "telecom"
+                                : "ai_infra";
             router.push(`/industry?tab=${tab}`);
           }}
           className="flex items-center gap-1.5 text-sm transition-colors hover:text-[var(--text-primary)]"

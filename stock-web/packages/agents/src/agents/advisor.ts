@@ -2,7 +2,7 @@ import { chat, ChatMessage } from "../client";
 import { AgentInput, AdvisorResult, TeamAnalysisResult } from "../types";
 
 const SYSTEM_PROMPT = `你是一个专业的A股投资顾问 Agent，具有丰富的投资经验。
-你能够综合技术面、基本面、新闻舆情和风险评估，给出客观、专业的投资建议。
+你能够综合技术面、基本面、新闻舆情中的风险信号，给出客观、专业的投资建议。
 请注意：所有建议仅供参考，不构成实际投资依据。
 输出必须是严格的JSON格式，不要包含任何其他内容。`;
 
@@ -16,7 +16,6 @@ export async function runAdvisorAgent(
 - 技术面：趋势=${context.technical?.trend}，评分=${context.technical?.score}，信号=${context.technical?.signals?.join("；")}
 - 基本面：估值=${context.fundamental?.valuation}，健康度=${context.fundamental?.healthScore}，ROE=${context.fundamental?.roe}%
 - 舆情：${context.news?.sentiment}，评分=${context.news?.score}，${context.news?.summary}
-- 风险：等级=${context.risk?.riskLevel}，评分=${context.risk?.score}，${context.risk?.summary}
 - 当前股价：${context.data?.price}元`
     : "";
 

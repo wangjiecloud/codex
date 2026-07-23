@@ -43,8 +43,14 @@ const INITIAL_AGENTS: AgentStatus[] = [
     emoji: "📈",
     status: "idle",
   },
+  {
+    id: "market",
+    name: "market",
+    label: "盘面分析",
+    emoji: "💹",
+    status: "idle",
+  },
   { id: "news", name: "news", label: "新闻舆情", emoji: "📰", status: "idle" },
-  { id: "risk", name: "risk", label: "风险评估", emoji: "⚠️", status: "idle" },
   {
     id: "advisor",
     name: "advisor",
@@ -163,7 +169,7 @@ export function AgentPanel({ code, stockName }: AgentPanelProps) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ code, stockName, question: chatInput }),
       });
-      const { taskId } = await res.json() as { taskId: string };
+      const { taskId } = (await res.json()) as { taskId: string };
 
       const sse = new EventSource(`/api/agents/stream/${taskId}`);
       let accumulated = "";
@@ -221,7 +227,9 @@ export function AgentPanel({ code, stockName }: AgentPanelProps) {
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
             <Bot size={16} className="text-[#f5a623]" />
-            <span className="text-sm font-medium text-[var(--text-primary)]">AI Team 分析</span>
+            <span className="text-sm font-medium text-[var(--text-primary)]">
+              AI Team 分析
+            </span>
           </div>
           <div className="flex gap-2">
             {(running || finalAdvice) && (

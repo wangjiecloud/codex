@@ -76,7 +76,6 @@ Orchestrator (主控 Advisor Agent)
 - `POST /api/agents/technical` - 技术分析 Agent
 - `POST /api/agents/fundamental` - 基本面 Agent
 - `POST /api/agents/news` - 新闻舆情 Agent
-- `POST /api/agents/risk` - 风险评估 Agent
 - `POST /api/agents/advisor` - 投资建议 Agent
 - `POST /api/agents/data` - 数据采集 Agent
 - `GET /api/agents/stream/[taskId]` - SSE 流式推送

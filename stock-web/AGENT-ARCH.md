@@ -134,7 +134,7 @@ lib/taskStore.ts → SSE 推送
 前端 AgentPanel.tsx（实时展示多 agent 协作状态）
 ```
 
-### 4.2 六个业务 Agent（via system prompt 注入）
+### 4.2 五个业务 Agent（via system prompt 注入）
 
 | Agent ID      | 标签     | 核心能力                                  |
 | ------------- | -------- | ----------------------------------------- |
@@ -142,7 +142,6 @@ lib/taskStore.ts → SSE 推送
 | `technical`   | 技术分析 | MA/MACD/RSI/KDJ/布林带计算                |
 | `fundamental` | 基本面   | F10 爬取 + PE/PB/ROE/成长性分析           |
 | `news`        | 新闻舆情 | stock_news 表查询 + 市场情绪判断          |
-| `risk`        | 风险评估 | 波动率/最大回撤/夏普比率计算              |
 | `advisor`     | 投资建议 | 综合买卖方向/目标价/止损价/仓位/周期      |
 
 > **注意：** 这 6 个 agent 并非独立进程，而是 Orchestrator 在单个 codex session 中串行执行，通过输出 `[AGENT_START:xxx]...[AGENT_DONE:xxx]` 标记模拟「多 agent 协作」的视觉效果。
@@ -269,7 +268,7 @@ detect_implicit_skill_invocation_for_command() // 检测用户输入是否触发
 │  · F10 爬取入库      │                    │  /api/agents/[agentId]    │
 │  · SQLite 查询       │    调用             │  · data / technical       │
 │  · 产业链同步        │◄───────────────────│  · fundamental / news     │
-│  · 基本面分析报告    │                    │  · risk / advisor         │
+│  · 基本面分析报告    │                    │  · advisor                │
 └──────────┬───────────┘                    └──────────────┬────────────┘
            │ 调用 skill                                    │ spawn
 ┌──────────▼───────────┐                    ┌──────────────▼────────────┐

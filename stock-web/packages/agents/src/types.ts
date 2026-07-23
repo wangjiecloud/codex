@@ -30,21 +30,51 @@ export interface TechnicalResult {
   rsi: { value: number; signal: string };
   kdj: { k: number; d: number; j: number; signal: string };
   boll: { upper: number; middle: number; lower: number; position: string };
+  rightSide: {
+    stance: "favorable" | "watch" | "avoid";
+    pattern: "breakout_follow" | "pullback_confirm" | "no_chase" | "wait";
+    patternLabel: string;
+    signal: string;
+    reason: string;
+    triggers: string[];
+    risk: string;
+  };
   summary: string;
   signals: string[];
+  sector: {
+    boardCode: string;
+    boardName: string;
+    matchedBoardCount: number;
+    selectionReason: string;
+    trend: "bullish" | "bearish" | "neutral";
+    score: number;
+    ma: {
+      ma5: number;
+      ma10: number;
+      ma20: number;
+      ma60: number;
+      signal: string;
+    };
+    macd: { value: number; signal: number; hist: number; crossType: string };
+    rsi: { value: number; signal: string };
+    kdj: { k: number; d: number; j: number; signal: string };
+    boll: { upper: number; middle: number; lower: number; position: string };
+    summary: string;
+    signals: string[];
+  } | null;
 }
 
 export interface FundamentalResult {
   healthScore: number; // 0-100 财务健康度
   valuation: "undervalued" | "fair" | "overvalued";
   // 判断性描述（默认输出这些，不直接给数字）
-  valuationJudge: string;       // 估值水平判断总结
-  profitabilityJudge: string;   // 盈利能力判断
-  growthJudge: string;          // 成长性判断
-  cashflowJudge: string;        // 现金流判断
-  debtJudge: string;            // 债务风险判断
-  dividendJudge: string;        // 股东回报/分红判断
-  institutionJudge: string;     // 机构观点判断
+  valuationJudge: string; // 估值水平判断总结
+  profitabilityJudge: string; // 盈利能力判断
+  growthJudge: string; // 成长性判断
+  cashflowJudge: string; // 现金流判断
+  debtJudge: string; // 债务风险判断
+  dividendJudge: string; // 股东回报/分红判断
+  institutionJudge: string; // 机构观点判断
   // 具体数值（仅用户明确要求时填写，否则 null）
   pe: number | null;
   pb: number | null;
@@ -65,17 +95,6 @@ export interface NewsSentimentResult {
   keyTopics: string[];
   positivePoints: string[];
   negativePoints: string[];
-  summary: string;
-}
-
-export interface RiskResult {
-  riskLevel: "low" | "medium" | "high" | "very_high";
-  score: number; // 0-100, higher=riskier
-  volatility: string;
-  maxDrawdown: string;
-  betaCoefficient: number;
-  systemicRisk: string;
-  specificRisks: string[];
   summary: string;
 }
 
@@ -100,7 +119,6 @@ export interface TeamAnalysisResult {
   technical: TechnicalResult;
   fundamental: FundamentalResult;
   news: NewsSentimentResult;
-  risk: RiskResult;
   advice: AdvisorResult;
 }
 

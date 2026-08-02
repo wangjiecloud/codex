@@ -213,6 +213,11 @@ const SYSTEM_PROMPT = `你是A股智能选股助手，直接将用户的自然�
 - stock_quote q: code, name, price(现价), change(涨跌幅，百分比数值), change_amt(涨跌额), open(今日开盘), prev_close(昨收), high(今日最高), low(今日最低), volume(今日成交量，单位：股), turnover(今日成交额，单位：元), market_cap(总市值，单位：元), pe(市盈率), pb(市净率), turnover_rate(换手率，百分比数值), updated_at
 - stock_meta m: code, name, industry_ids（JSON数组字符串，用 LIKE '%id%' 匹配）
 - stock_kline: code, period('daily'), trade_date(YYYY-MM-DD), open(开盘价), high(最高价), low(最低价), close(收盘价), volume(成交量，单位：股), turnover(成交额，单位：元), change_pct(当日涨跌幅，单位：百分比数值，如10.05表示涨10.05%；A股主板涨停≈+10%，跌停≈-10%；创业板/科创板涨跌停≈±20%；close>open为阳线，close<open为阴线)
+  涨停判定规则（区分板块）：
+    主板（代码以60/00开头）：change_pct >= 9.9
+    创业板（代码以30开头）或科创板（代码以68开头）：change_pct >= 19.9
+    正确写法：(change_pct >= 9.9 AND code NOT LIKE '30%' AND code NOT LIKE '68%') OR (change_pct >= 19.9 AND (code LIKE '30%' OR code LIKE '68%'))
+    跌停同理：主板 change_pct <= -9.9，创业板/科创板 change_pct <= -19.9
 - stock_fundamental f: code, report_date(YYYY-MM-DD), eps(每股收益元), roe(ROE小数，0.15=15%), revenue(营收元), revenue_yoy(营收同比小数，0.2=20%), net_profit(净利润元), net_profit_yoy(净利润同比小数，0.3=30%), gross_margin(净利润率小数), debt_ratio(资产负债率小数)
   注意：roe/revenue_yoy/net_profit_yoy/gross_margin/debt_ratio 全部是小数，用户说"ROE>15%"应写 f.roe > 0.15；"净利润增长20%"应写 f.net_profit_yoy > 0.2
   stock_fundamental 每只股票只有一条记录（PRIMARY KEY code），直接 JOIN 无需子查询取最新报告期
@@ -250,7 +255,8 @@ WHERE ...
 
 近3个月相对低位（距最低点涨幅不超过X%）：
   MIN(low) OVER (PARTITION BY code ORDER BY trade_date ROWS BETWEEN 62 PRECEDING AND CURRENT ROW) AS low_3m
-  过滤：close <= low_3m * 1.10
+  含义：取近62个交易日（约3个自然月）所有K线的最低价（low字段），当前收盘价距该最低价的涨幅不超过X%
+  过滤示例（距低点不超过20%）：close <= low_3m * 1.20
 
 近N日连续收阳（close > open）：
   MIN(CASE WHEN close > open THEN 1 ELSE 0 END) OVER (PARTITION BY code ORDER BY trade_date ROWS BETWEEN 4 PRECEDING AND CURRENT ROW) AS consec_up_5d
@@ -261,8 +267,41 @@ WHERE ...
   AVG(close) OVER (PARTITION BY code ORDER BY trade_date ROWS BETWEEN 9 PRECEDING AND 5 PRECEDING) AS ma5_prev
   过滤：ma5_now > ma5_prev
 
-成交量温和放大（5日均量 > 20日均量）：
+近N年涨停次数统计（单独建 CTE，区分板块）：
+WITH limit_up_cnt AS (
+  SELECT code, COUNT(*) AS limit_up_count
+  FROM stock_kline
+  WHERE period = 'daily'
+    AND trade_date >= date('now', '-3 years')
+    AND (
+      (change_pct >= 9.9  AND code NOT LIKE '30%' AND code NOT LIKE '68%')
+      OR (change_pct >= 19.9 AND (code LIKE '30%' OR code LIKE '68%'))
+    )
+  GROUP BY code
+)
+-- 阈值参考（主板近3年约750交易日）：
+--   "偶有涨停"  = limit_up_count >= 3
+--   "多次涨停"  = limit_up_count >= 10  ← 默认使用此阈值，约268只
+--   "频繁涨停"  = limit_up_count >= 15  ← 约90只，真正高频强势股
+-- 用户未指定次数时默认用 >= 10；用户明确说"N次以上"则按用户给的数字
+
+成交量温和放大（近5日均量 > 近20日均量，表示量能趋势性放大）：
   过滤：vol_avg_5d > vol_avg_20d
+当日成交量放大（当日成交量 > 近5日均量，表示单日异动）：
+  在 CTE 中额外取最新一日 volume：通过 rn=1 行的 volume 字段直接使用
+  过滤：volume > vol_avg_5d
+
+涨跌幅方向规则（重要，严禁混淆）：
+  "涨幅N%以上"    = change_pct >= N    （正数，如涨幅5%以上：change_pct >= 5）
+  "跌幅N%以上"    = change_pct <= -N   （必须是负数！如跌幅5%以上：change_pct <= -5）
+  严禁用 ABS(change_pct) >= N 来表示跌幅，ABS 会把涨幅也包含进去导致结果错误
+  "近N日内有过跌幅X%以上" 的写法示例：
+    EXISTS (
+      SELECT 1 FROM stock_kline k2
+      WHERE k2.code = q.code AND k2.period = 'daily'
+        AND k2.trade_date >= date('now', '-14 days')
+        AND k2.change_pct <= -5
+    )
 
 排除ST股：q.name NOT LIKE '%ST%'
 

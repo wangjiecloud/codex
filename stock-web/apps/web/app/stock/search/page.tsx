@@ -58,15 +58,18 @@ import {
   LayoutGrid,
   ChevronUp,
   ArrowUpDown,
+  FlaskConical,
+  Brain,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import ReviewTab from "@/components/stock/ReviewTab";
+import BacktestTab from "@/components/stock/BacktestTab";
 
 const VISIBLE_DEFAULT = 50;
 const VISIBLE_ALL = 100;
 
 type SortMode = "hot" | "rise";
-type MainTab = "stock" | "news" | "relation" | "memo" | "review";
+type MainTab = "stock" | "news" | "relation" | "memo" | "review" | "backtest";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 选股相关类型
@@ -2770,7 +2773,9 @@ export default function StockSearchPage() {
                     ? "关联"
                     : mainTab === "review"
                       ? "复盘"
-                      : "备忘录"}
+                      : mainTab === "backtest"
+                        ? "回测"
+                        : "备忘录"}
             </h1>
             {/* 主 Tab 切换 */}
             <div className="flex items-center gap-0.5 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg p-0.5">
@@ -2834,6 +2839,18 @@ export default function StockSearchPage() {
                 <LineChart size={12} />
                 复盘
               </button>
+              <button
+                onClick={() => setMainTab("backtest")}
+                className={cn(
+                  "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all",
+                  mainTab === "backtest"
+                    ? "bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-sm border border-[var(--border-color)]"
+                    : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]",
+                )}
+              >
+                <FlaskConical size={12} />
+                回测
+              </button>
             </div>
           </div>
           <p className="text-[var(--text-tertiary)] text-sm">
@@ -2845,7 +2862,9 @@ export default function StockSearchPage() {
                   ? "基于股吧帖子正文挖掘的股票共现关联关系"
                   : mainTab === "review"
                     ? "全球主要指数 K 线一览，支持日/周/月周期切换"
-                    : "记录你的投资思考与分析笔记"}
+                    : mainTab === "backtest"
+                      ? "基于历史 K 线数据，模拟策略在选定时间范围内的收益率"
+                      : "记录你的投资思考与分析笔记"}
           </p>
         </div>
       </div>
@@ -2952,12 +2971,12 @@ export default function StockSearchPage() {
                 {/* 前3名大卡 */}
                 {topThree.length > 0 && (
                   <div className="grid grid-cols-3 gap-3">
-                    {topThree.map((stock) => {
+                    {topThree.map((stock, idx) => {
                       const isUp = (stock.pct ?? 0) > 0;
                       const isDown = (stock.pct ?? 0) < 0;
                       return (
                         <button
-                          key={stock.code}
+                          key={`${stock.code}-${idx}`}
                           onClick={() => router.push(`/stock/${stock.code}`)}
                           className={cn(
                             "group relative p-4 bg-[var(--bg-secondary)] border rounded-xl text-left transition-all hover:scale-[1.01]",
@@ -3044,7 +3063,7 @@ export default function StockSearchPage() {
                       const isDown = (stock.pct ?? 0) < 0;
                       return (
                         <button
-                          key={stock.code}
+                          key={`${stock.code}-${idx}`}
                           onClick={() => router.push(`/stock/${stock.code}`)}
                           className={cn(
                             "group w-full flex items-center justify-between px-4 py-3 hover:bg-[var(--bg-hover)] transition-colors text-left",
@@ -3162,6 +3181,8 @@ export default function StockSearchPage() {
         <RelationPanel />
       ) : mainTab === "review" ? (
         <ReviewTab />
+      ) : mainTab === "backtest" ? (
+        <BacktestTab />
       ) : (
         <MemoPanel />
       )}
@@ -3179,6 +3200,32 @@ interface MemoItem {
   pinned: boolean;
   created_at: string;
   updated_at: string;
+}
+
+// ── 思维偏见知识表 ────────────────────────────────────────────────────────────
+interface BiasRow {
+  name: string; // 偏见名称
+  description: string; // 概念描述
+  solutions: string[]; // 解决方案（数组）
+  userNote?: string; // 用户个人总结（可后续编辑）
+}
+
+interface BiasTable {
+  _type: "bias_table";
+  version?: number;
+  rows: BiasRow[];
+}
+
+function parseBiasTable(content: string): BiasTable | null {
+  try {
+    const obj = JSON.parse(content) as { _type?: string; rows?: BiasRow[] };
+    if (obj._type === "bias_table" && Array.isArray(obj.rows)) {
+      return obj as BiasTable;
+    }
+  } catch {
+    /* not json */
+  }
+  return null;
 }
 
 /** 将复盘文本按「数字、日期 内容」拆分成日期块 */
@@ -3265,26 +3312,26 @@ function MemoPanel() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  // 操作预案表格行
+  // 操作预案表格行（复盘记录）
   interface PlanRow {
-    code: string;
-    name: string;
-    dir: string;
-    trigger: string;
-    target: string;
-    stop: string;
-    pos: string;
-    note: string;
+    buyTime: string; // 买入时间
+    stockName: string; // 个股名称
+    externalFactor: string; // 外部因素（买入原因）
+    internalFactor: string; // 内部因素（买入原因）
+    result: string; // 成功/失败（事后回溯）
+    analysis: string; // 原因分析（事后回溯）
+    improvement: string; // 改进措施（事后回溯）
+    other: string; // 其他
   }
   const EMPTY_ROW: PlanRow = {
-    code: "",
-    name: "",
-    dir: "买入",
-    trigger: "",
-    target: "",
-    stop: "",
-    pos: "",
-    note: "",
+    buyTime: "",
+    stockName: "",
+    externalFactor: "",
+    internalFactor: "",
+    result: "",
+    analysis: "",
+    improvement: "",
+    other: "",
   };
   const [planDate, setPlanDate] = useState(() => {
     const d = new Date();
@@ -3376,6 +3423,48 @@ function MemoPanel() {
       else next.add(key);
       return next;
     });
+  };
+
+  // 偏见表行展开状态：key = `bias-${memoId}-${rowIdx}`，默认全部折叠
+  const [expandedBiasRows, setExpandedBiasRows] = useState<Set<string>>(
+    new Set(),
+  );
+
+  const toggleBiasRow = (key: string) => {
+    setExpandedBiasRows((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  // 偏见表个人总结编辑：key = `${memoId}-${rowIdx}`
+  const [editingBiasNote, setEditingBiasNote] = useState<string | null>(null); // key
+  const [biasNoteValue, setBiasNoteValue] = useState("");
+
+  const saveBiasNote = async (memo: MemoItem, rowIdx: number) => {
+    try {
+      const biasTable = parseBiasTable(memo.content);
+      if (!biasTable) return;
+      const updatedRows = biasTable.rows.map((r, i) =>
+        i === rowIdx ? { ...r, userNote: biasNoteValue } : r,
+      );
+      const newContent = JSON.stringify({
+        ...biasTable,
+        rows: updatedRows,
+      });
+      await fetchWithTimeout(`${API}/${memo.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: newContent }),
+      });
+      setEditingBiasNote(null);
+      setBiasNoteValue("");
+      await fetchMemos();
+    } catch {
+      // ignore
+    }
   };
 
   // 卡片展开时，自动把旧日期全部折叠（只保留最后一天展开）
@@ -3664,19 +3753,44 @@ function MemoPanel() {
                 <table className="w-full text-xs border-collapse">
                   <thead>
                     <tr className="bg-[var(--bg-tertiary)] border-b border-[var(--border-color)]">
+                      <th
+                        className="px-2 py-2 text-left font-semibold text-[var(--text-tertiary)] whitespace-nowrap pl-3"
+                        rowSpan={2}
+                      >
+                        买入时间
+                      </th>
+                      <th
+                        className="px-2 py-1 text-center font-semibold text-[var(--text-tertiary)] whitespace-nowrap border-b border-[var(--border-color)]"
+                        colSpan={3}
+                      >
+                        买入原因
+                      </th>
+                      <th
+                        className="px-2 py-1 text-center font-semibold text-[var(--text-tertiary)] whitespace-nowrap border-b border-[var(--border-color)]"
+                        colSpan={3}
+                      >
+                        事后回溯
+                      </th>
+                      <th
+                        className="px-2 py-2 text-left font-semibold text-[var(--text-tertiary)] whitespace-nowrap"
+                        rowSpan={2}
+                      >
+                        其他
+                      </th>
+                      <th className="px-2 py-2" rowSpan={2} />
+                    </tr>
+                    <tr className="bg-[var(--bg-tertiary)] border-b border-[var(--border-color)]">
                       {[
-                        "名称",
-                        "方向",
-                        "触发条件",
-                        "目标价",
-                        "止损价",
-                        "仓位%",
-                        "备注",
-                        "",
+                        "个股名称",
+                        "外部因素",
+                        "内部因素",
+                        "成功/失败",
+                        "原因分析",
+                        "改进措施",
                       ].map((h, hi) => (
                         <th
                           key={hi}
-                          className="px-2 py-2 text-left font-semibold text-[var(--text-tertiary)] whitespace-nowrap first:pl-3"
+                          className="px-2 py-1.5 text-left font-medium text-[var(--text-tertiary)] whitespace-nowrap text-[11px]"
                         >
                           {h}
                         </th>
@@ -3689,106 +3803,96 @@ function MemoPanel() {
                         key={i}
                         className="border-b border-[var(--border-color)] last:border-0"
                       >
-                        {/* 名称（持仓股下拉） */}
+                        {/* 买入时间 */}
                         <td className="px-1 py-1 pl-2">
+                          <input
+                            value={row.buyTime}
+                            onChange={(e) =>
+                              setPlanCell(i, "buyTime", e.target.value)
+                            }
+                            placeholder="如：07/10"
+                            className="w-[80px] bg-[var(--bg-primary)] border border-[var(--border-color)] rounded px-1.5 py-1 text-[var(--text-primary)] outline-none focus:border-[#f5a623]/50 text-xs"
+                          />
+                        </td>
+                        {/* 个股名称 */}
+                        <td className="px-1 py-1">
+                          <input
+                            value={row.stockName}
+                            onChange={(e) =>
+                              setPlanCell(i, "stockName", e.target.value)
+                            }
+                            placeholder="股票名称"
+                            className="w-[90px] bg-[var(--bg-primary)] border border-[var(--border-color)] rounded px-1.5 py-1 text-[var(--text-primary)] outline-none focus:border-[#f5a623]/50 text-xs"
+                          />
+                        </td>
+                        {/* 外部因素 */}
+                        <td className="px-1 py-1">
+                          <input
+                            value={row.externalFactor}
+                            onChange={(e) =>
+                              setPlanCell(i, "externalFactor", e.target.value)
+                            }
+                            placeholder="市场/板块/消息"
+                            className="w-[120px] bg-[var(--bg-primary)] border border-[var(--border-color)] rounded px-1.5 py-1 text-[var(--text-primary)] outline-none focus:border-[#f5a623]/50 text-xs"
+                          />
+                        </td>
+                        {/* 内部因素 */}
+                        <td className="px-1 py-1">
+                          <input
+                            value={row.internalFactor}
+                            onChange={(e) =>
+                              setPlanCell(i, "internalFactor", e.target.value)
+                            }
+                            placeholder="技术/基本面"
+                            className="w-[120px] bg-[var(--bg-primary)] border border-[var(--border-color)] rounded px-1.5 py-1 text-[var(--text-primary)] outline-none focus:border-[#f5a623]/50 text-xs"
+                          />
+                        </td>
+                        {/* 成功/失败 */}
+                        <td className="px-1 py-1">
                           <select
-                            value={row.code}
-                            onChange={(e) => {
-                              const h = holdings.find(
-                                (h) => h.code === e.target.value,
-                              );
-                              setPlanRows((r) =>
-                                r.map((row, idx) =>
-                                  idx === i
-                                    ? {
-                                        ...row,
-                                        code: e.target.value,
-                                        name: h?.name ?? "",
-                                      }
-                                    : row,
-                                ),
-                              );
-                            }}
-                            className="bg-[var(--bg-primary)] border border-[var(--border-color)] rounded px-1.5 py-1 text-xs outline-none focus:border-[#f5a623]/50 text-[var(--text-primary)] min-w-[120px]"
+                            value={row.result}
+                            onChange={(e) =>
+                              setPlanCell(i, "result", e.target.value)
+                            }
+                            className="bg-[var(--bg-primary)] border border-[var(--border-color)] rounded px-1.5 py-1 text-xs outline-none focus:border-[#f5a623]/50 text-[var(--text-primary)] w-[80px]"
                           >
-                            <option value="">选择持仓股...</option>
-                            {holdings.map((h) => (
-                              <option key={h.code} value={h.code}>
-                                {h.name}（{h.code}）
-                              </option>
-                            ))}
+                            <option value="">—</option>
+                            <option>成功</option>
+                            <option>失败</option>
+                            <option>持仓中</option>
                           </select>
                         </td>
-                        {/* 方向 */}
-                        <td className="px-1 py-1">
-                          <select
-                            value={row.dir}
-                            onChange={(e) =>
-                              setPlanCell(i, "dir", e.target.value)
-                            }
-                            className="bg-[var(--bg-primary)] border border-[var(--border-color)] rounded px-1.5 py-1 text-xs outline-none focus:border-[#f5a623]/50 text-[var(--text-primary)]"
-                          >
-                            <option>买入</option>
-                            <option>加仓</option>
-                            <option>减仓</option>
-                            <option>止损</option>
-                            <option>止盈</option>
-                            <option>观察</option>
-                          </select>
-                        </td>
-                        {/* 触发条件 */}
+                        {/* 原因分析 */}
                         <td className="px-1 py-1">
                           <input
-                            value={row.trigger}
+                            value={row.analysis}
                             onChange={(e) =>
-                              setPlanCell(i, "trigger", e.target.value)
+                              setPlanCell(i, "analysis", e.target.value)
                             }
-                            placeholder="如：站上5日线+放量"
-                            className="w-[160px] bg-[var(--bg-primary)] border border-[var(--border-color)] rounded px-1.5 py-1 text-[var(--text-primary)] outline-none focus:border-[#f5a623]/50 text-xs"
+                            placeholder="复盘原因"
+                            className="w-[120px] bg-[var(--bg-primary)] border border-[var(--border-color)] rounded px-1.5 py-1 text-[var(--text-primary)] outline-none focus:border-[#f5a623]/50 text-xs"
                           />
                         </td>
-                        {/* 目标价 */}
+                        {/* 改进措施 */}
                         <td className="px-1 py-1">
                           <input
-                            value={row.target}
+                            value={row.improvement}
                             onChange={(e) =>
-                              setPlanCell(i, "target", e.target.value)
+                              setPlanCell(i, "improvement", e.target.value)
                             }
-                            placeholder="—"
-                            className="w-[60px] bg-[var(--bg-primary)] border border-[var(--border-color)] rounded px-1.5 py-1 text-[var(--text-primary)] outline-none focus:border-[#f5a623]/50 text-xs text-center"
+                            placeholder="下次改进点"
+                            className="w-[120px] bg-[var(--bg-primary)] border border-[var(--border-color)] rounded px-1.5 py-1 text-[var(--text-primary)] outline-none focus:border-[#f5a623]/50 text-xs"
                           />
                         </td>
-                        {/* 止损价 */}
+                        {/* 其他 */}
                         <td className="px-1 py-1">
                           <input
-                            value={row.stop}
+                            value={row.other}
                             onChange={(e) =>
-                              setPlanCell(i, "stop", e.target.value)
+                              setPlanCell(i, "other", e.target.value)
                             }
-                            placeholder="—"
-                            className="w-[60px] bg-[var(--bg-primary)] border border-[var(--border-color)] rounded px-1.5 py-1 text-[var(--text-primary)] outline-none focus:border-[#f5a623]/50 text-xs text-center"
-                          />
-                        </td>
-                        {/* 仓位% */}
-                        <td className="px-1 py-1">
-                          <input
-                            value={row.pos}
-                            onChange={(e) =>
-                              setPlanCell(i, "pos", e.target.value)
-                            }
-                            placeholder="10%"
-                            className="w-[50px] bg-[var(--bg-primary)] border border-[var(--border-color)] rounded px-1.5 py-1 text-[var(--text-primary)] outline-none focus:border-[#f5a623]/50 text-xs text-center"
-                          />
-                        </td>
-                        {/* 备注 */}
-                        <td className="px-1 py-1">
-                          <input
-                            value={row.note}
-                            onChange={(e) =>
-                              setPlanCell(i, "note", e.target.value)
-                            }
-                            placeholder="备注"
-                            className="w-[100px] bg-[var(--bg-primary)] border border-[var(--border-color)] rounded px-1.5 py-1 text-[var(--text-primary)] outline-none focus:border-[#f5a623]/50 text-xs"
+                            placeholder="其他"
+                            className="w-[80px] bg-[var(--bg-primary)] border border-[var(--border-color)] rounded px-1.5 py-1 text-[var(--text-primary)] outline-none focus:border-[#f5a623]/50 text-xs"
                           />
                         </td>
                         {/* 删除 */}
@@ -3878,20 +3982,25 @@ function MemoPanel() {
             const isExpanded = expandedIds.has(m.id);
             const isDragTarget = dragOverId === m.id;
             const plan = parsePlan(m.content);
-            const dailyEntries = !plan ? parseDailyEntries(m.content) : null;
+            const biasTable = !plan ? parseBiasTable(m.content) : null;
+            const dailyEntries =
+              !plan && !biasTable ? parseDailyEntries(m.content) : null;
             const isDailyLog =
               dailyEntries !== null && dailyEntries.length >= 2;
-            const summary = !plan ? extractSummary(m.content) : null;
+            const summary =
+              !plan && !biasTable ? extractSummary(m.content) : null;
 
             // 计算标题展示
             const displayTitle =
               m.title ||
               (plan
                 ? `操作预案 ${parsePlan(m.content)?.date}（${parsePlan(m.content)?.rows.length} 行）`
-                : isDailyLog
-                  ? `${dailyEntries[0].label} — ${dailyEntries[dailyEntries.length - 1].label}（${dailyEntries.length} 天）`
-                  : m.content.slice(0, 40).replace(/\n/g, " ") +
-                    (m.content.length > 40 ? "..." : ""));
+                : biasTable
+                  ? `思维偏见知识表（${biasTable.rows.length} 条）`
+                  : isDailyLog
+                    ? `${dailyEntries[0].label} — ${dailyEntries[dailyEntries.length - 1].label}（${dailyEntries.length} 天）`
+                    : m.content.slice(0, 40).replace(/\n/g, " ") +
+                      (m.content.length > 40 ? "..." : ""));
 
             return (
               <div
@@ -3962,6 +4071,11 @@ function MemoPanel() {
                             size={12}
                             className="text-[var(--text-tertiary)] shrink-0"
                           />
+                        ) : biasTable ? (
+                          <Brain
+                            size={12}
+                            className="text-[#a78bfa] shrink-0"
+                          />
                         ) : isDailyLog ? (
                           <CalendarDays
                             size={12}
@@ -3998,6 +4112,22 @@ function MemoPanel() {
                             <p className="text-xs text-[var(--text-tertiary)]">
                               📋 {plan.date} · {plan.rows.length} 条操作计划
                             </p>
+                          ) : biasTable ? (
+                            <div className="flex flex-wrap gap-1.5 mt-1">
+                              {biasTable.rows.slice(0, 6).map((r, ri) => (
+                                <span
+                                  key={ri}
+                                  className="text-[10px] px-1.5 py-0.5 rounded bg-[#a78bfa]/10 text-[#a78bfa] border border-[#a78bfa]/20"
+                                >
+                                  {r.name}
+                                </span>
+                              ))}
+                              {biasTable.rows.length > 6 && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--bg-tertiary)] text-[var(--text-tertiary)]">
+                                  +{biasTable.rows.length - 6}
+                                </span>
+                              )}
+                            </div>
                           ) : isDailyLog ? (
                             <div className="space-y-1">
                               {/* 日期条目预览 */}
@@ -4044,19 +4174,43 @@ function MemoPanel() {
                                 <table className="w-full text-xs border-collapse">
                                   <thead>
                                     <tr className="bg-[var(--bg-tertiary)] border-b border-[var(--border-color)]">
+                                      <th
+                                        className="px-3 py-2 text-left font-semibold text-[var(--text-tertiary)] whitespace-nowrap"
+                                        rowSpan={2}
+                                      >
+                                        买入时间
+                                      </th>
+                                      <th
+                                        className="px-3 py-1 text-center font-semibold text-[var(--text-tertiary)] whitespace-nowrap border-b border-[var(--border-color)]"
+                                        colSpan={3}
+                                      >
+                                        买入原因
+                                      </th>
+                                      <th
+                                        className="px-3 py-1 text-center font-semibold text-[var(--text-tertiary)] whitespace-nowrap border-b border-[var(--border-color)]"
+                                        colSpan={3}
+                                      >
+                                        事后回溯
+                                      </th>
+                                      <th
+                                        className="px-3 py-2 text-left font-semibold text-[var(--text-tertiary)] whitespace-nowrap"
+                                        rowSpan={2}
+                                      >
+                                        其他
+                                      </th>
+                                    </tr>
+                                    <tr className="bg-[var(--bg-tertiary)] border-b border-[var(--border-color)]">
                                       {[
-                                        "代码",
-                                        "名称",
-                                        "方向",
-                                        "触发条件",
-                                        "目标价",
-                                        "止损价",
-                                        "仓位%",
-                                        "备注",
+                                        "个股名称",
+                                        "外部因素",
+                                        "内部因素",
+                                        "成功/失败",
+                                        "原因分析",
+                                        "改进措施",
                                       ].map((h) => (
                                         <th
                                           key={h}
-                                          className="px-3 py-2 text-left font-semibold text-[var(--text-tertiary)] whitespace-nowrap"
+                                          className="px-3 py-1.5 text-left font-medium text-[var(--text-tertiary)] whitespace-nowrap text-[11px]"
                                         >
                                           {h}
                                         </th>
@@ -4065,15 +4219,14 @@ function MemoPanel() {
                                   </thead>
                                   <tbody>
                                     {plan.rows.map((row, ri) => {
-                                      const DIR_COLOR: Record<string, string> =
-                                        {
-                                          买入: "text-[#e84444]",
-                                          加仓: "text-[#e84444]",
-                                          止损: "text-[#09d464]",
-                                          减仓: "text-[#09d464]",
-                                          止盈: "text-[#09d464]",
-                                          观察: "text-[var(--text-tertiary)]",
-                                        };
+                                      const RESULT_COLOR: Record<
+                                        string,
+                                        string
+                                      > = {
+                                        成功: "text-[#e84444]",
+                                        失败: "text-[#09d464]",
+                                        持仓中: "text-[var(--text-tertiary)]",
+                                      };
                                       return (
                                         <tr
                                           key={ri}
@@ -4083,35 +4236,35 @@ function MemoPanel() {
                                               "bg-[var(--bg-secondary)]/40",
                                           )}
                                         >
-                                          <td className="px-3 py-2 font-mono text-[var(--text-secondary)]">
-                                            {row.code || "—"}
+                                          <td className="px-3 py-2 text-[var(--text-secondary)] whitespace-nowrap">
+                                            {row.buyTime || "—"}
                                           </td>
                                           <td className="px-3 py-2 text-[var(--text-primary)] font-medium whitespace-nowrap">
-                                            {row.name || "—"}
+                                            {row.stockName || "—"}
+                                          </td>
+                                          <td className="px-3 py-2 text-[var(--text-secondary)]">
+                                            {row.externalFactor || "—"}
+                                          </td>
+                                          <td className="px-3 py-2 text-[var(--text-secondary)]">
+                                            {row.internalFactor || "—"}
                                           </td>
                                           <td
                                             className={cn(
                                               "px-3 py-2 font-semibold whitespace-nowrap",
-                                              DIR_COLOR[row.dir] ??
+                                              RESULT_COLOR[row.result] ??
                                                 "text-[var(--text-secondary)]",
                                             )}
                                           >
-                                            {row.dir}
+                                            {row.result || "—"}
                                           </td>
                                           <td className="px-3 py-2 text-[var(--text-secondary)]">
-                                            {row.trigger || "—"}
+                                            {row.analysis || "—"}
                                           </td>
-                                          <td className="px-3 py-2 tabular-nums text-[var(--text-primary)]">
-                                            {row.target || "—"}
-                                          </td>
-                                          <td className="px-3 py-2 tabular-nums text-[var(--text-primary)]">
-                                            {row.stop || "—"}
-                                          </td>
-                                          <td className="px-3 py-2 tabular-nums text-[var(--text-secondary)]">
-                                            {row.pos || "—"}
+                                          <td className="px-3 py-2 text-[var(--text-secondary)]">
+                                            {row.improvement || "—"}
                                           </td>
                                           <td className="px-3 py-2 text-[var(--text-tertiary)]">
-                                            {row.note || ""}
+                                            {row.other || ""}
                                           </td>
                                         </tr>
                                       );
@@ -4119,6 +4272,168 @@ function MemoPanel() {
                                   </tbody>
                                 </table>
                               </div>
+                            </div>
+                          ) : biasTable ? (
+                            /* 思维偏见知识表 */
+                            <div className="mt-3 space-y-2">
+                              {biasTable.rows.map((row, ri) => {
+                                const biasKey = `bias-${m.id}-${ri}`;
+                                const isRowExpanded =
+                                  expandedBiasRows.has(biasKey);
+                                const noteKey = `${m.id}-${ri}`;
+                                const isEditingNote =
+                                  editingBiasNote === noteKey;
+
+                                return (
+                                  <div
+                                    key={ri}
+                                    className={cn(
+                                      "rounded-lg border transition-colors",
+                                      isRowExpanded
+                                        ? "border-[#a78bfa]/40 bg-[#a78bfa]/5"
+                                        : "border-[var(--border-color)] hover:border-[#a78bfa]/30",
+                                    )}
+                                  >
+                                    {/* 行标题（可折叠） */}
+                                    <button
+                                      onClick={() => toggleBiasRow(biasKey)}
+                                      className="w-full flex items-center gap-3 px-3 py-2.5 text-left"
+                                    >
+                                      <span className="shrink-0 text-[10px] px-2 py-0.5 rounded-full bg-[#a78bfa]/15 text-[#a78bfa] font-medium border border-[#a78bfa]/20 whitespace-nowrap">
+                                        {row.name}
+                                      </span>
+                                      {!isRowExpanded && (
+                                        <span className="flex-1 text-xs text-[var(--text-tertiary)] truncate leading-relaxed">
+                                          {row.description
+                                            .slice(0, 60)
+                                            .replace(/\n/g, " ")}
+                                          {row.description.length > 60
+                                            ? "…"
+                                            : ""}
+                                        </span>
+                                      )}
+                                      {isRowExpanded && (
+                                        <span className="flex-1" />
+                                      )}
+                                      {isRowExpanded ? (
+                                        <ChevronDown
+                                          size={13}
+                                          className="text-[#a78bfa] shrink-0"
+                                        />
+                                      ) : (
+                                        <ChevronRight
+                                          size={13}
+                                          className="text-[var(--text-tertiary)] shrink-0"
+                                        />
+                                      )}
+                                    </button>
+
+                                    {/* 展开：详细内容 */}
+                                    {isRowExpanded && (
+                                      <div className="px-3 pb-3 space-y-3 border-t border-[var(--border-color)]">
+                                        {/* 概念描述 */}
+                                        <div className="pt-2.5">
+                                          <p className="text-[10px] font-semibold text-[var(--text-tertiary)] uppercase tracking-wider mb-1.5">
+                                            概念描述
+                                          </p>
+                                          <p className="text-xs text-[var(--text-secondary)] leading-relaxed whitespace-pre-line">
+                                            {row.description}
+                                          </p>
+                                        </div>
+
+                                        {/* 解决方案 */}
+                                        <div>
+                                          <p className="text-[10px] font-semibold text-[var(--text-tertiary)] uppercase tracking-wider mb-1.5">
+                                            解决方案
+                                          </p>
+                                          <ul className="space-y-1.5">
+                                            {row.solutions.map((sol, si) => (
+                                              <li
+                                                key={si}
+                                                className="flex gap-2 text-xs text-[var(--text-secondary)] leading-relaxed"
+                                              >
+                                                <span className="shrink-0 w-4 h-4 rounded-full bg-[#a78bfa]/20 text-[#a78bfa] text-[10px] flex items-center justify-center font-medium mt-0.5">
+                                                  {si + 1}
+                                                </span>
+                                                <span>{sol}</span>
+                                              </li>
+                                            ))}
+                                          </ul>
+                                        </div>
+
+                                        {/* 个人总结 */}
+                                        <div className="border-t border-[var(--border-color)] pt-2.5">
+                                          <div className="flex items-center justify-between mb-1.5">
+                                            <p className="text-[10px] font-semibold text-[#f5a623] uppercase tracking-wider">
+                                              我的总结
+                                            </p>
+                                            {!isEditingNote && (
+                                              <button
+                                                onClick={() => {
+                                                  setEditingBiasNote(noteKey);
+                                                  setBiasNoteValue(
+                                                    row.userNote ?? "",
+                                                  );
+                                                }}
+                                                className="text-[10px] text-[var(--text-tertiary)] hover:text-[#f5a623] transition-colors flex items-center gap-0.5"
+                                              >
+                                                <Pencil size={10} />
+                                                {row.userNote
+                                                  ? "编辑"
+                                                  : "添加总结"}
+                                              </button>
+                                            )}
+                                          </div>
+                                          {isEditingNote ? (
+                                            <div className="space-y-2">
+                                              <textarea
+                                                autoFocus
+                                                value={biasNoteValue}
+                                                onChange={(e) =>
+                                                  setBiasNoteValue(
+                                                    e.target.value,
+                                                  )
+                                                }
+                                                rows={3}
+                                                placeholder="写下你对这个偏见的理解和体会..."
+                                                className="w-full bg-[var(--bg-primary)] border border-[#f5a623]/40 rounded-lg px-2.5 py-2 text-xs text-[var(--text-primary)] placeholder-[var(--text-tertiary)] outline-none resize-none leading-relaxed focus:border-[#f5a623]/70"
+                                              />
+                                              <div className="flex items-center justify-end gap-2">
+                                                <button
+                                                  onClick={() => {
+                                                    setEditingBiasNote(null);
+                                                    setBiasNoteValue("");
+                                                  }}
+                                                  className="text-xs text-[var(--text-tertiary)] hover:text-[var(--text-primary)] px-2 py-1 transition-colors"
+                                                >
+                                                  取消
+                                                </button>
+                                                <button
+                                                  onClick={() =>
+                                                    saveBiasNote(m, ri)
+                                                  }
+                                                  className="flex items-center gap-1 px-2.5 py-1 bg-[#f5a623] text-black rounded text-xs font-medium hover:bg-[#e09510] transition-colors"
+                                                >
+                                                  <Check size={10} />
+                                                  保存
+                                                </button>
+                                              </div>
+                                            </div>
+                                          ) : row.userNote ? (
+                                            <p className="text-xs text-[#f5a623]/80 leading-relaxed whitespace-pre-line bg-[#f5a623]/5 rounded-lg px-2.5 py-2 border border-[#f5a623]/15">
+                                              {row.userNote}
+                                            </p>
+                                          ) : (
+                                            <p className="text-xs text-[var(--text-tertiary)] italic">
+                                              暂无总结，点击"添加总结"记录你的思考
+                                            </p>
+                                          )}
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
                             </div>
                           ) : isDailyLog ? (
                             /* 复盘日记：按日期分块，每块可独立折叠 */

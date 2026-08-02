@@ -25,6 +25,7 @@ from routers import (
     market_flow,
     watchlist,
     margin_trading,
+    backtest,
 )
 import akshare as ak
 from fastapi import HTTPException
@@ -70,6 +71,7 @@ app.include_router(
 app.include_router(
     margin_trading.router, prefix="/api/margin-trading", tags=["融资融券"]
 )
+app.include_router(backtest.router, prefix="/api/backtest", tags=["回测系统"])
 
 _scheduler = BackgroundScheduler(timezone="Asia/Shanghai")
 
@@ -424,11 +426,18 @@ def startup():
             f"[K线增量] 待同步 {len(pending)}/{len(all_codes)} 只（今日已跳过 {len(already)} 只）",
         )
 
-        for code in pending:
+        total = len(pending)
+        for idx, code in enumerate(pending, start=1):
+            if total and (idx == 1 or idx == total or idx % 20 == 0):
+                pct = round(idx / total * 100)
+                sched_log(
+                    "info",
+                    f"[K线增量] 进度 {idx}/{total} ({pct}%) - {code}",
+                )
             try:
                 _sync_klines(code, "daily")
             except Exception as e:
-                print(f"[kline_incr] error {code}: {e}")
+                sched_log("error", f"[K线增量] {code} 失败: {e}")
             import time as _t
 
             _t.sleep(0.1)
@@ -754,13 +763,6 @@ def startup():
     CATCHUP_RULES = [
         # ---- 日频任务，仅交易日补跑 ----
         dict(
-            task_id="daily_sync",
-            max_gap_days=3,
-            trading_day_only=True,
-            fn=lambda: industry.sync_all_data(),
-            desc="每日全量行情",
-        ),
-        dict(
             task_id="daily_klines_incremental",
             max_gap_days=3,
             trading_day_only=True,
@@ -929,14 +931,7 @@ def startup():
 
     now = datetime.now().time()
     if now >= dtime(17, 30):
-        print("[startup] after 17:30 — triggering immediate full sync")
-        from routers.sync import _run_full_sync, _status, _lock
-
-        with _lock:
-            if not _status["running"]:
-                threading.Thread(target=_run_full_sync, daemon=True).start()
-            else:
-                print("[startup] sync already running, skipping startup sync")
+        print("[startup] after 17:30 — waiting for scheduled daily_sync only")
     elif now >= dtime(15, 0):
         print(f"[startup] {now.strftime('%H:%M')} — market closed, syncing quotes only")
         threading.Thread(target=industry._sync_all_quotes, daemon=True).start()

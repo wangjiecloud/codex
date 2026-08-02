@@ -64,7 +64,7 @@ const AGENTS = [
     label: "盘面分析",
     emoji: "💹",
     description:
-      "分析大盘资金流向、板块轮动、融资融券、市场情绪与全球市场联动，判断当前市场偏进攻还是偏防守",
+      "分析大盘资金流向、板块轮动、市场情绪与全球联动；识别资金移动板块，判断龙头股与中军股，结合自选股给出综合选股报告",
     color: "#38bdf8",
   },
   {
@@ -458,7 +458,9 @@ export default function AgentsPage() {
     ) ?? null;
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
-    messagesEndRef.current?.scrollIntoView({ behavior });
+    const node = messagesContainerRef.current;
+    if (!node) return;
+    node.scrollTo({ top: node.scrollHeight, behavior });
   }, []);
 
   const loadSessionMessages = useCallback(

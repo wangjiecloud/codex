@@ -15,10 +15,12 @@ import {
   ImageIcon,
   Check,
   Square,
-  ExternalLink,
+  X,
   FileText,
   Search,
-  X,
+  ExternalLink,
+  Pencil,
+  RotateCcw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -699,14 +701,19 @@ export default function AgentsPage() {
     }
   };
 
-  const sendMessage = async (agentId: string) => {
+  const sendMessage = async (
+    agentId: string,
+    overrideText?: string,
+    truncateBeforeIndex?: number,
+  ) => {
     const state = agentStates[agentId];
-    if ((!state.input.trim() && !state.pastedImage) || state.loading) return;
+    const inputText = overrideText ?? state.input;
+    if ((!inputText.trim() && !state.pastedImage) || state.loading) return;
     const session = state.sessions.find((s) => s.id === state.activeSessionId);
     if (!session) return;
 
-    const userText = state.input;
-    const pastedImage = state.pastedImage;
+    const userText = inputText;
+    const pastedImage = overrideText ? undefined : state.pastedImage;
     const placeholderId = `placeholder-${Date.now()}`;
     const userMsg: ChatMessage = {
       role: "user",
@@ -737,7 +744,13 @@ export default function AgentsPage() {
             ? {
                 ...s,
                 title: newTitle,
-                messages: [...s.messages, userMsg, placeholderMsg],
+                messages: [
+                  ...(truncateBeforeIndex !== undefined
+                    ? s.messages.slice(0, truncateBeforeIndex)
+                    : s.messages),
+                  userMsg,
+                  placeholderMsg,
+                ],
                 messageCount: (s.messageCount ?? s.messages.length) + 2,
                 loadedCount: (s.loadedCount ?? s.messages.length) + 2,
               }
@@ -1531,7 +1544,44 @@ export default function AgentsPage() {
             className="flex-1 overflow-y-auto overflow-x-hidden p-4 space-y-4"
           >
             {activeSession.messages.map((msg, i) => (
-              <AgentMessage key={i} msg={msg} activeAgent={activeAgent} />
+              <AgentMessage
+                key={i}
+                msg={msg}
+                activeAgent={activeAgent}
+                onEdit={
+                  msg.role === "user"
+                    ? (newContent) => {
+                        // 更新该条消息内容，截断后续消息
+                        setAgentStates((prev) => ({
+                          ...prev,
+                          [activeAgentId!]: {
+                            ...prev[activeAgentId!],
+                            sessions: prev[activeAgentId!].sessions.map((s) =>
+                              s.id === activeAgentState?.activeSessionId
+                                ? {
+                                    ...s,
+                                    messages: s.messages.map((m, mi) =>
+                                      mi === i
+                                        ? { ...m, content: newContent }
+                                        : m,
+                                    ),
+                                  }
+                                : s,
+                            ),
+                          },
+                        }));
+                      }
+                    : undefined
+                }
+                onResend={
+                  msg.role === "user"
+                    ? (content) => {
+                        // 截断该消息（含）之后的所有消息，然后重新发送
+                        sendMessage(activeAgentId!, content, i);
+                      }
+                    : undefined
+                }
+              />
             ))}
             {activeAgentState?.loading && (
               <div className="flex justify-start">
@@ -1680,12 +1730,18 @@ export default function AgentsPage() {
 function AgentMessage({
   msg,
   activeAgent,
+  onEdit,
+  onResend,
 }: {
   msg: { role: string; content: string; image?: string };
   activeAgent: { emoji: string; color: string; label: string };
+  onEdit?: (newContent: string) => void;
+  onResend?: (content: string) => void;
 }) {
   const bubbleRef = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editText, setEditText] = useState(msg.content);
 
   const handleCopyImage = async () => {
     if (!bubbleRef.current) return;
@@ -1761,8 +1817,60 @@ function AgentMessage({
                   className="max-h-48 max-w-full rounded-lg object-contain"
                 />
               )}
-              {msg.content && (
-                <p className="whitespace-pre-wrap break-words">{msg.content}</p>
+              {editing ? (
+                <div className="space-y-2 min-w-[180px]">
+                  <textarea
+                    autoFocus
+                    value={editText}
+                    onChange={(e) => setEditText(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Escape") {
+                        setEditing(false);
+                        setEditText(msg.content);
+                      }
+                    }}
+                    className="w-full bg-black/20 text-black rounded-lg px-2 py-1.5 text-sm resize-none outline-none border border-black/20 placeholder:text-black/40 min-h-[60px]"
+                    rows={3}
+                  />
+                  <div className="flex gap-1.5 justify-end">
+                    <button
+                      onClick={() => {
+                        setEditing(false);
+                        setEditText(msg.content);
+                      }}
+                      className="px-2 py-1 rounded text-xs bg-black/10 hover:bg-black/20 transition-colors"
+                    >
+                      取消
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (editText.trim()) {
+                          onEdit?.(editText.trim());
+                        }
+                        setEditing(false);
+                      }}
+                      className="px-2 py-1 rounded text-xs bg-black/20 hover:bg-black/30 font-medium transition-colors"
+                    >
+                      保存
+                    </button>
+                    <button
+                      onClick={() => {
+                        setEditing(false);
+                        onResend?.(editText.trim() || msg.content);
+                      }}
+                      className="px-2 py-1 rounded text-xs bg-black/25 hover:bg-black/35 font-medium transition-colors flex items-center gap-1"
+                    >
+                      <RotateCcw size={10} />
+                      重新发送
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                msg.content && (
+                  <p className="whitespace-pre-wrap break-words">
+                    {msg.content}
+                  </p>
+                )
               )}
             </div>
           ) : (
@@ -1770,7 +1878,7 @@ function AgentMessage({
           )}
         </div>
 
-        {/* 复制图片按钮：hover 时显示，与气泡并排 */}
+        {/* Markdown 预览按钮：hover 时显示，与气泡并排 */}
         <button
           onClick={handlePreview}
           title="Markdown 预览"
@@ -1779,6 +1887,7 @@ function AgentMessage({
             "bg-[var(--bg-secondary)] border border-[var(--border-color)] shadow-sm",
             "text-[var(--text-tertiary)] hover:text-[#f5a623] hover:border-[#f5a623]",
             "opacity-0 group-hover:opacity-100",
+            msg.role === "user" && "hidden",
           )}
         >
           <ExternalLink size={12} />
@@ -1797,6 +1906,39 @@ function AgentMessage({
         >
           {copied ? <Check size={12} /> : <ImageIcon size={12} />}
         </button>
+
+        {/* 用户消息：编辑 & 重新发送按钮 */}
+        {msg.role === "user" && !editing && onEdit && (
+          <button
+            onClick={() => {
+              setEditText(msg.content);
+              setEditing(true);
+            }}
+            title="编辑消息"
+            className={cn(
+              "shrink-0 mt-1 w-6 h-6 rounded-md flex items-center justify-center transition-all duration-150",
+              "bg-[var(--bg-secondary)] border border-[var(--border-color)] shadow-sm",
+              "text-[var(--text-tertiary)] hover:text-[#f5a623] hover:border-[#f5a623]",
+              "opacity-0 group-hover:opacity-100",
+            )}
+          >
+            <Pencil size={12} />
+          </button>
+        )}
+        {msg.role === "user" && !editing && onResend && (
+          <button
+            onClick={() => onResend(msg.content)}
+            title="重新发送"
+            className={cn(
+              "shrink-0 mt-1 w-6 h-6 rounded-md flex items-center justify-center transition-all duration-150",
+              "bg-[var(--bg-secondary)] border border-[var(--border-color)] shadow-sm",
+              "text-[var(--text-tertiary)] hover:text-[#f5a623] hover:border-[#f5a623]",
+              "opacity-0 group-hover:opacity-100",
+            )}
+          >
+            <RotateCcw size={12} />
+          </button>
+        )}
       </div>
     </div>
   );

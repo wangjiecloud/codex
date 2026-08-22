@@ -805,18 +805,18 @@ ORDER BY k.close / k.ma20 DESC""",
             "20日均线向上（趋势向上）",
             "排除 ST 股",
         ],
-        "sql": """WITH boll AS (
-  SELECT code, trade_date, close, volume, high, low,
+        "sql": """WITH boll_prep AS (
+  SELECT code, trade_date, close, volume,
     AVG(close) OVER (PARTITION BY code ORDER BY trade_date ROWS BETWEEN 19 PRECEDING AND CURRENT ROW) AS ma20,
     AVG(volume) OVER (PARTITION BY code ORDER BY trade_date ROWS BETWEEN  9 PRECEDING AND CURRENT ROW) AS vol_avg10,
-    AVG(close) OVER (PARTITION BY code ORDER BY trade_date ROWS BETWEEN 19 PRECEDING AND CURRENT ROW)
-      + 2 * AVG(ABS(close - AVG(close) OVER (PARTITION BY code ORDER BY trade_date ROWS BETWEEN 19 PRECEDING AND CURRENT ROW)))
-        OVER (PARTITION BY code ORDER BY trade_date ROWS BETWEEN 19 PRECEDING AND CURRENT ROW) AS boll_upper,
-    AVG(close) OVER (PARTITION BY code ORDER BY trade_date ROWS BETWEEN 19 PRECEDING AND CURRENT ROW)
-      - 2 * AVG(ABS(close - AVG(close) OVER (PARTITION BY code ORDER BY trade_date ROWS BETWEEN 19 PRECEDING AND CURRENT ROW)))
-        OVER (PARTITION BY code ORDER BY trade_date ROWS BETWEEN 19 PRECEDING AND CURRENT ROW) AS boll_lower,
     ROW_NUMBER() OVER (PARTITION BY code ORDER BY trade_date DESC) AS rn
   FROM stock_kline WHERE period = 'daily'
+),
+boll AS (
+  SELECT code, trade_date, close, volume, ma20, vol_avg10, rn,
+    ma20 + 2 * AVG(ABS(close - ma20)) OVER (PARTITION BY code ORDER BY trade_date ROWS BETWEEN 19 PRECEDING AND CURRENT ROW) AS boll_upper,
+    ma20 - 2 * AVG(ABS(close - ma20)) OVER (PARTITION BY code ORDER BY trade_date ROWS BETWEEN 19 PRECEDING AND CURRENT ROW) AS boll_lower
+  FROM boll_prep
 ),
 boll_width AS (
   SELECT code,
@@ -1088,13 +1088,14 @@ def _run_single_stock_backtest(
     stop_loss = strategy["stop_loss"]
     max_hold_days = strategy["max_hold_days"]
 
-    # 注入个股过滤 + 日期限制（inject_date_limit 会在 _extract_signal_codes_on_date 中处理）
-    # 对于 analyze 接口，直接在 SQL 末尾加个股条件
-    if "AND q.code = " not in sql and "WHERE" in sql.upper():
-        if "ORDER BY" in sql.upper():
-            idx = sql.upper().rfind("ORDER BY")
-            sql = sql[:idx] + f"\n  AND q.code = '{code}'\n" + sql[idx:]
-        else:
+    # 注入个股过滤：在 "AND q.name NOT LIKE '%ST%'" 前插入，避免 rfind("ORDER BY")
+    # 误匹配 OVER 子句内部的 ORDER BY（如 ROW_NUMBER() OVER (... ORDER BY trade_date DESC)）
+    if "AND q.code = " not in sql:
+        st_anchor = "AND q.name NOT LIKE '%ST%'"
+        if st_anchor in sql:
+            sql = sql.replace(st_anchor, f"AND q.code = '{code}'\n  {st_anchor}", 1)
+        elif "WHERE" in sql.upper():
+            # 没有 ST 过滤锚点时，追加到末尾
             sql = sql + f"\n  AND q.code = '{code}'"
 
     extended_end = (
@@ -1694,9 +1695,11 @@ def analyze_stock(
         try:
             sql = strategy["sql"]
             if "AND q.code = " not in sql:
-                if "ORDER BY" in sql.upper():
-                    idx = sql.upper().rfind("ORDER BY")
-                    sql = sql[:idx] + f"\n  AND q.code = '{code}'\n" + sql[idx:]
+                st_anchor = "AND q.name NOT LIKE '%ST%'"
+                if st_anchor in sql:
+                    sql = sql.replace(
+                        st_anchor, f"AND q.code = '{code}'\n  {st_anchor}", 1
+                    )
                 else:
                     sql = sql + f"\n  AND q.code = '{code}'"
             codes = _extract_signal_codes_on_date(sql, end_date)

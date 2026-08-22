@@ -31,9 +31,9 @@ from sqlalchemy import event
 @event.listens_for(engine, "connect")
 def set_wal_mode(dbapi_conn, connection_record):
     dbapi_conn.execute("PRAGMA journal_mode=WAL")
-    # FULL：每次commit都fsync，防止OS crash/进程kill时WAL损坏
-    # 代价：写入略慢（约慢10-20%），但对低频批量写场景（K线/行情）完全可接受
-    dbapi_conn.execute("PRAGMA synchronous=FULL")
+    # NORMAL：WAL模式下只在checkpoint时fsync，写性能提升3-5x
+    # 安全性：进程crash不会损坏数据库（WAL保证原子性），仅OS级掉电才有极小风险
+    dbapi_conn.execute("PRAGMA synchronous=NORMAL")
     dbapi_conn.execute("PRAGMA busy_timeout=60000")
     dbapi_conn.execute("PRAGMA cache_size=-64000")
     # WAL文件超过64MB时自动触发checkpoint，防止WAL无限膨胀
@@ -507,6 +507,7 @@ class PortfolioHolding(Base):
     name = Column(String(50))
     cost_price = Column(_P)
     shares = Column(Integer)
+    closed_pnl_override = Column(_P, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -544,10 +545,39 @@ class SwIndustry(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class SwIndustryDaily(Base):
+    """申万行业板块每日行情历史（每个交易日收盘后写一条，用于近1周/近2周累计涨幅计算）"""
+
+    __tablename__ = "sw_industry_daily"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    trade_date = Column(String(10), index=True)  # YYYY-MM-DD，当日交易日期
+    code = Column(String(20), index=True)
+    name = Column(String(100))
+    change_pct = Column(_P, default=0.0)  # 当日涨跌幅（%）
+    close = Column(_P, default=0.0)  # 当日收盘价（price）
+    volume = Column(Float, default=0.0)
+    turnover = Column(Float, default=0.0)
+    updated_at = Column(DateTime, default=datetime.utcnow)
+    __table_args__ = (UniqueConstraint("trade_date", "code"),)
+
+
 class SwIndustryConstituent(Base):
     __tablename__ = "sw_industry_constituent"
     id = Column(Integer, primary_key=True, autoincrement=True)
     board_code = Column(String(20), index=True)
+    stock_code = Column(String(10), index=True)
+    stock_name = Column(String(50))
+    updated_at = Column(DateTime, default=datetime.utcnow)
+    __table_args__ = (UniqueConstraint("board_code", "stock_code"),)
+
+
+class ConceptBoardConstituent(Base):
+    """东财概念板块成分股"""
+
+    __tablename__ = "concept_board_constituent"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    board_code = Column(String(20), index=True)  # concept_board.code
+    board_name = Column(String(100))
     stock_code = Column(String(10), index=True)
     stock_name = Column(String(50))
     updated_at = Column(DateTime, default=datetime.utcnow)
@@ -1181,6 +1211,34 @@ def init_db():
                     row_count      INTEGER DEFAULT 0,
                     last_synced_at DATETIME,
                     updated_at     DATETIME
+                )
+                """)
+            )
+            conn.commit()
+
+        # ── user_strategy：用户自定义策略（AI 智定 + 手工编辑） ────────────────
+        if "user_strategy" not in existing_tables2:
+            conn.execute(
+                text("""
+                CREATE TABLE user_strategy (
+                    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name         VARCHAR(100) NOT NULL,
+                    description  TEXT,
+                    for_code     VARCHAR(10),
+                    for_name     VARCHAR(50),
+                    sql_text     TEXT NOT NULL,
+                    stop_profit  FLOAT DEFAULT 10.0,
+                    stop_loss    FLOAT DEFAULT 6.0,
+                    max_hold_days INTEGER DEFAULT 10,
+                    win_rate     FLOAT,
+                    avg_return   FLOAT,
+                    trade_count  INTEGER,
+                    score        FLOAT,
+                    indicators   TEXT,
+                    params_json  TEXT,
+                    source       VARCHAR(20) DEFAULT 'auto',
+                    created_at   DATETIME DEFAULT (datetime('now','localtime')),
+                    updated_at   DATETIME DEFAULT (datetime('now','localtime'))
                 )
                 """)
             )

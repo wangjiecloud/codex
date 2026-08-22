@@ -26,6 +26,7 @@ from routers import (
     watchlist,
     margin_trading,
     backtest,
+    auto_strategy,
 )
 import akshare as ak
 from fastapi import HTTPException
@@ -72,6 +73,7 @@ app.include_router(
     margin_trading.router, prefix="/api/margin-trading", tags=["融资融券"]
 )
 app.include_router(backtest.router, prefix="/api/backtest", tags=["回测系统"])
+app.include_router(auto_strategy.router, prefix="/api/backtest", tags=["AI策略定制"])
 
 _scheduler = BackgroundScheduler(timezone="Asia/Shanghai")
 
@@ -388,15 +390,38 @@ def startup():
         replace_existing=True,
     )
 
-    # 每天18:00增量同步K线（只同步今日未更新的股票，支持中断续传）
+    # 每天20:00增量同步K线（推迟到20:00，等17:30全量同步跑完，避免并发争抢baostock连接）
     def _daily_klines_incremental():
-        """K线增量同步：查今日未更新的股票，依次同步，内部已有today跳过逻辑"""
+        """K线增量同步：查今日未更新的股票，依次同步，内部已有today跳过逻辑。
+        启动前检测全量同步是否仍在运行，若在运行则等待最多30分钟后放弃。"""
         from db import SessionLocal
         from routers.industry import is_trading_day, _sync_klines
         from routers.system import sched_log
         from datetime import date as _date
+        import time as _t
 
         if not is_trading_day():
+            return
+
+        from routers.sync import _status as _full_sync_status, _lock as _full_sync_lock
+
+        _wait_max = 30 * 60
+        _waited = 0
+        _poll = 30
+        while _waited < _wait_max:
+            with _full_sync_lock:
+                if not _full_sync_status.get("running", False):
+                    break
+            sched_log(
+                "info",
+                f"[K线增量] 全量同步仍在运行，等待中...（已等{_waited}s/{_wait_max}s）",
+            )
+            _t.sleep(_poll)
+            _waited += _poll
+        else:
+            sched_log(
+                "warning", "[K线增量] 等待全量同步超时（30分钟），跳过本次增量同步"
+            )
             return
 
         today_str = _date.today().strftime("%Y-%m-%d")
@@ -438,7 +463,6 @@ def startup():
                 _sync_klines(code, "daily")
             except Exception as e:
                 sched_log("error", f"[K线增量] {code} 失败: {e}")
-            import time as _t
 
             _t.sleep(0.1)
 
@@ -447,7 +471,7 @@ def startup():
     _scheduler.add_job(
         _daily_klines_incremental,
         trigger="cron",
-        hour=18,
+        hour=20,
         minute=0,
         id="daily_klines_incremental",
         replace_existing=True,
@@ -913,15 +937,15 @@ def startup():
 
         sched_log("info", "[catchup] 全部检查完毕")
 
-    threading.Thread(target=_run_catchup_checks, daemon=True).start()
-
     # 检查是否在生产环境中启用自动同步
     # 可以通过环境变量 AUTO_SYNC_ON_STARTUP=false 来禁用
     auto_sync = os.getenv("AUTO_SYNC_ON_STARTUP", "true").lower() == "true"
 
     if not auto_sync:
-        print("[startup] AUTO_SYNC_ON_STARTUP=false, skipping startup sync")
+        print("[startup] AUTO_SYNC_ON_STARTUP=false, skipping startup sync & catchup")
         return
+
+    threading.Thread(target=_run_catchup_checks, daemon=True).start()
 
     from routers.industry import is_trading_day
 

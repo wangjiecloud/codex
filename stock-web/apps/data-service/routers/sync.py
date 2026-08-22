@@ -801,3 +801,590 @@ async def trigger_sync_klines(background_tasks: BackgroundTasks):
             return {"status": "already_running", **_status}
     background_tasks.add_task(_run_klines_sync)
     return {"status": "started"}
+
+
+# ────────────────────────────────────────────────────────────────────
+#  全量 K 线补全（日K / 周K / 月K，从上市日起，支持断点续传）
+# ────────────────────────────────────────────────────────────────────
+
+_KLINE_BACKFILL_CURSOR_FILE = os.path.join(
+    os.path.dirname(__file__), "..", "kline_backfill_cursor.json"
+)
+
+# 补全任务独立状态（与 _status 隔离，互不影响）
+_backfill_status: dict = {
+    "running": False,
+    "phase": "",  # "daily" | "weekly" | "monthly" | "done" | "stopped"
+    "total": 0,
+    "done": 0,
+    "current": "",
+    "started_at": "",
+    "finished_at": "",
+    "periods_done": [],  # 已完成的周期列表
+}
+_backfill_lock = threading.Lock()
+_backfill_stop = threading.Event()
+
+
+def _save_backfill_cursor(codes: list, period_idx: int, code_idx: int):
+    """保存全量K线补全游标（原子写入，防止进程中断导致文件损坏）"""
+    cursor = {
+        "codes": codes,
+        "period_idx": period_idx,
+        "code_idx": code_idx,
+    }
+    tmp_file = _KLINE_BACKFILL_CURSOR_FILE + ".tmp"
+    try:
+        with open(tmp_file, "w", encoding="utf-8") as f:
+            json.dump(cursor, f)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_file, _KLINE_BACKFILL_CURSOR_FILE)
+    except Exception as e:
+        print(f"[backfill] failed to save cursor: {e}")
+        try:
+            os.remove(tmp_file)
+        except Exception:
+            pass
+
+
+def _load_backfill_cursor():
+    """加载全量K线补全游标，返回 (codes, period_idx, code_idx) 或 None"""
+    try:
+        if not os.path.exists(_KLINE_BACKFILL_CURSOR_FILE):
+            return None
+        with open(_KLINE_BACKFILL_CURSOR_FILE, "r", encoding="utf-8") as f:
+            cursor = json.load(f)
+        codes = cursor.get("codes")
+        period_idx = cursor.get("period_idx", 0)
+        code_idx = cursor.get("code_idx", 0)
+        if isinstance(codes, list) and len(codes) > 0:
+            return codes, period_idx, code_idx
+    except Exception as e:
+        print(f"[backfill] failed to load cursor: {e}")
+    return None
+
+
+def _clear_backfill_cursor():
+    try:
+        if os.path.exists(_KLINE_BACKFILL_CURSOR_FILE):
+            os.remove(_KLINE_BACKFILL_CURSOR_FILE)
+    except Exception:
+        pass
+
+
+def _get_ipo_date(code: str) -> str:
+    """通过 baostock 查询上市日期，失败则返回 '1990-01-01'"""
+    from bs_session import get_bs, reset_bs
+
+    _DEFAULT = "1990-01-01"
+    try:
+        bs = get_bs()
+        bs_code = f"sh.{code}" if code.startswith(("6", "5")) else f"sz.{code}"
+        rs = bs.query_stock_basic(code=bs_code)
+        if rs.error_code != "0":
+            return _DEFAULT
+        if rs.next():
+            row = rs.get_row_data()
+            # fields: code,code_name,ipoDate,outDate,type,status
+            if row and len(row) >= 3 and row[2]:
+                ipo = row[2].strip()
+                if len(ipo) == 10:
+                    return ipo
+    except Exception as e:
+        print(f"[backfill] get_ipo_date {code} error: {e}")
+    return _DEFAULT
+
+
+def _has_kline_data(code: str, period: str) -> bool:
+    """检查 stock_kline 中该 code+period 是否已有数据，有则返回 True（跳过）。"""
+    from db import SessionLocal, StockKline
+
+    db = SessionLocal()
+    try:
+        exists = (
+            db.query(StockKline.code)
+            .filter(StockKline.code == code, StockKline.period == period)
+            .limit(1)
+            .first()
+        )
+        return exists is not None
+    except Exception:
+        return False
+    finally:
+        db.close()
+
+
+def _fetch_full_klines(code: str, period: str, start_date: str):
+    """
+    从 start_date 到今日，全量抓取指定周期K线并写入 stock_kline 表。
+    使用 baostock，每次最多拉 5000 条（baostock 实际无上限但网络较慢时分段）。
+    """
+    from bs_session import get_bs, reset_bs
+    from db import SessionLocal, StockKline
+    from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+    from datetime import datetime, date
+
+    bs_period = "d" if period == "daily" else ("w" if period == "weekly" else "m")
+    bs_code = f"sh.{code}" if code.startswith(("6", "5")) else f"sz.{code}"
+    end_date = date.today().strftime("%Y-%m-%d")
+    fields = "date,code,open,high,low,close,volume,amount,turn,pctChg"
+
+    def _safe_float(val, default=0.0):
+        try:
+            v = float(str(val).strip())
+            return v if v == v else default
+        except Exception:
+            return default
+
+    max_attempts = 3
+    for attempt in range(max_attempts):
+        try:
+            bs = get_bs()
+            rs = bs.query_history_k_data_plus(
+                bs_code,
+                fields,
+                start_date=start_date,
+                end_date=end_date,
+                frequency=bs_period,
+                adjustflag="2",
+            )
+            if rs.error_code != "0":
+                reset_bs()
+                if attempt < max_attempts - 1:
+                    _time.sleep(2)
+                    continue
+                return 0
+
+            rows = []
+            while True:
+                try:
+                    has_next = rs.next()
+                except IndexError:
+                    reset_bs()
+                    break
+                if not has_next:
+                    break
+                try:
+                    r = rs.get_row_data()
+                except IndexError:
+                    reset_bs()
+                    break
+                if r and len(r) >= 10:
+                    rows.append(r)
+
+            if not rows:
+                return 0
+
+            db = SessionLocal()
+            try:
+                for r in rows:
+                    stmt = sqlite_insert(StockKline).values(
+                        code=code,
+                        period=period,
+                        trade_date=r[0],
+                        open=round(_safe_float(r[2]), 4),
+                        high=round(_safe_float(r[3]), 4),
+                        low=round(_safe_float(r[4]), 4),
+                        close=round(_safe_float(r[5]), 4),
+                        volume=int(_safe_float(r[6])),
+                        turnover=_safe_float(r[7]),
+                        turn_rate=_safe_float(r[8]),
+                        change_pct=round(_safe_float(r[9]), 4),
+                        updated_at=datetime.utcnow(),
+                    )
+                    stmt = stmt.on_conflict_do_update(
+                        index_elements=["code", "period", "trade_date"],
+                        set_={
+                            "open": stmt.excluded.open,
+                            "high": stmt.excluded.high,
+                            "low": stmt.excluded.low,
+                            "close": stmt.excluded.close,
+                            "volume": stmt.excluded.volume,
+                            "turnover": stmt.excluded.turnover,
+                            "turn_rate": stmt.excluded.turn_rate,
+                            "change_pct": stmt.excluded.change_pct,
+                            "updated_at": stmt.excluded.updated_at,
+                        },
+                    )
+                    db.execute(stmt)
+                db.commit()
+                return len(rows)
+            except Exception as e:
+                db.rollback()
+                print(f"[backfill] db error {code}/{period}: {e}")
+                return 0
+            finally:
+                db.close()
+
+        except Exception as e:
+            print(f"[backfill] fetch error {code}/{period} attempt {attempt + 1}: {e}")
+            reset_bs()
+            if attempt < max_attempts - 1:
+                _time.sleep(2 * (attempt + 1))
+            continue
+
+    return 0
+
+
+def _fetch_all_market_codes() -> tuple:
+    """
+    从 baostock 拉取全市场 A 股 + ETF 股票代码列表，
+    并与 stock_meta 表中的代码合并去重，返回 (排序后的代码列表, 代码信息字典)。
+    type=1 股票（含主板/创业板/科创板），type=2 指数，type=3 其他，type=5 ETF
+    返回值：
+      codes: list[str] - 排序后的全部代码
+      bs_info: dict[str, dict] - baostock 拉到的信息 {code: {name, market, stock_type}}
+    """
+    from bs_session import get_bs, reset_bs
+
+    market_codes: set = set()
+    # 缓存 baostock 拉到的完整信息，供后续补写 stock_meta/stock_quote 使用
+    bs_info: dict = {}  # code -> {name, market, stock_type}
+
+    # 最多重试3次，应对 baostock 编码错误/网络抖动
+    for attempt in range(3):
+        try:
+            bs_inst = get_bs()
+            # 不传 code 参数，拉全市场所有证券（sh. + sz.），只取股票(type=1)和ETF(type=5)
+            # 注意：query_stock_basic(code="sh.") 会报错"股票代码应为9位"，必须不传 code
+            rs = bs_inst.query_stock_basic()
+            if rs.error_code != "0":
+                reset_bs()
+                _time.sleep(2)
+                continue
+            # 逐行读取，捕获编码异常后继续而非中断
+            while True:
+                try:
+                    has_next = rs.next()
+                except Exception as e:
+                    print(f"[backfill] query_stock_basic rs.next() error: {e}, 跳过")
+                    break
+                if not has_next:
+                    break
+                try:
+                    row = rs.get_row_data()
+                    # fields: code,code_name,ipoDate,outDate,type,status
+                    if not row or len(row) < 6:
+                        continue
+                    bs_code_full = row[0]  # e.g. "sh.600036" or "sz.000001"
+                    code_name = row[1].strip() if len(row) > 1 else ""
+                    stock_type = row[4].strip() if len(row) > 4 else ""
+                    # type=1: 股票, type=5: ETF
+                    if stock_type not in ("1", "5"):
+                        continue
+                    # 从 sh./sz. 前缀推断市场
+                    if "." in bs_code_full:
+                        mkt_prefix, pure_code = bs_code_full.split(".", 1)
+                        market_label = "SH" if mkt_prefix == "sh" else "SZ"
+                    else:
+                        pure_code = bs_code_full
+                        market_label = (
+                            "SH" if pure_code.startswith(("6", "5")) else "SZ"
+                        )
+                    if len(pure_code) == 6 and pure_code.isdigit():
+                        market_codes.add(pure_code)
+                        bs_info[pure_code] = {
+                            "name": code_name,
+                            "market": market_label,
+                            "stock_type": stock_type,  # "1"=股票, "5"=ETF
+                        }
+                except Exception:
+                    continue
+            # 如果拿到了足够的代码就退出重试
+            if len(market_codes) > 1000:
+                break
+            print(
+                f"[backfill] query_stock_basic 拿到 {len(market_codes)} 只，不足，重试 {attempt + 1}/3"
+            )
+            reset_bs()
+            _time.sleep(2)
+        except Exception as e:
+            print(
+                f"[backfill] _fetch_all_market_codes attempt {attempt + 1} error: {e}"
+            )
+            reset_bs()
+            _time.sleep(2)
+
+    # 合并 stock_meta 中已有的代码（只取真实 A 股 / ETF，过滤 801xxx 申万指数等非股票代码）
+    def _is_valid_stock_code(code: str) -> bool:
+        """只保留 A 股主板/创业板/科创板/北交所/ETF 的6位数字代码，排除申万指数(801xxx)等"""
+        if not (len(code) == 6 and code.isdigit()):
+            return False
+        # 申万行业指数：801xxx，排除
+        if code.startswith("8"):
+            return False
+        return True
+
+    db = SessionLocal()
+    try:
+        db_codes = {
+            row.code
+            for row in db.query(StockMeta.code).all()
+            if _is_valid_stock_code(row.code)
+        }
+    finally:
+        db.close()
+
+    # market_codes 来自 baostock，已经是合法股票/ETF，直接合并
+    all_codes = sorted(market_codes | db_codes)
+    print(
+        f"[backfill] 全市场代码：baostock={len(market_codes)}，"
+        f"stock_meta有效={len(db_codes)}，合并去重后={len(all_codes)}"
+    )
+    return all_codes, bs_info
+
+
+def _ensure_stock_meta_and_quote(code: str, bs_info: dict) -> None:
+    """
+    若 code 不在 stock_meta 表中，则自动补写 stock_meta 和 stock_quote（默认值）。
+    bs_info: {code: {name, market, stock_type}} — 由 _fetch_all_market_codes 构建。
+    """
+    db = SessionLocal()
+    try:
+        exists = db.query(StockMeta.code).filter(StockMeta.code == code).first()
+        if exists:
+            return
+
+        info = bs_info.get(code, {})
+        name = info.get("name", "")
+        market = info.get("market", "SH" if code.startswith(("6", "5")) else "SZ")
+
+        # 补写 stock_meta
+        stmt_meta = (
+            sqlite_insert(StockMeta)
+            .values(
+                code=code,
+                name=name,
+                market=market,
+                industry_ids="",
+            )
+            .on_conflict_do_nothing(index_elements=["code"])
+        )
+        db.execute(stmt_meta)
+
+        # 补写 stock_quote（price 等行情字段全部默认 0，等行情同步时刷新）
+        stmt_quote = (
+            sqlite_insert(StockQuote)
+            .values(
+                code=code,
+                name=name,
+                price=0.0,
+                change=0.0,
+                change_amt=0.0,
+                open=0.0,
+                prev_close=0.0,
+                high=0.0,
+                low=0.0,
+                volume=0.0,
+                turnover=0.0,
+                market_cap=0.0,
+                pe=0.0,
+                pb=0.0,
+                turnover_rate=0.0,
+                amplitude=0.0,
+            )
+            .on_conflict_do_nothing(index_elements=["code"])
+        )
+        db.execute(stmt_quote)
+
+        db.commit()
+        print(f"[backfill] 自动补写 stock_meta/stock_quote: {code} ({name}, {market})")
+    except Exception as e:
+        db.rollback()
+        print(f"[backfill] _ensure_stock_meta_and_quote {code} error: {e}")
+    finally:
+        db.close()
+
+
+def _run_kline_backfill():
+    """全量K线补全主函数，支持断点续传"""
+    from routers.system import sched_log
+
+    _backfill_stop.clear()
+    PERIODS = ["daily", "weekly", "monthly"]
+
+    codes: list = []
+    start_period_idx = 0
+    start_code_idx = 0
+    bs_info: dict = {}
+
+    try:
+        # ── 尝试加载断点游标 ──
+        resumed = _load_backfill_cursor()
+        if resumed:
+            codes, start_period_idx, start_code_idx = resumed
+            sched_log(
+                "info",
+                f"全量K线补全断点续传：从周期={PERIODS[start_period_idx]}，"
+                f"第 {start_code_idx + 1}/{len(codes)} 只继续",
+            )
+        else:
+            sched_log("info", "全量K线补全：正在从 baostock 拉取全市场股票列表…")
+            codes, bs_info = _fetch_all_market_codes()
+            start_period_idx = 0
+            start_code_idx = 0
+            sched_log(
+                "info",
+                f"开始全量K线补全，共 {len(codes)} 只股票/ETF × 3 周期（日K/周K/月K）",
+            )
+
+        total_codes = len(codes)
+        # 计算总任务量（剩余周期 × 总只数 - 当前周期已完成的）
+        remaining = (len(PERIODS) - start_period_idx) * total_codes - start_code_idx
+
+        with _backfill_lock:
+            _backfill_status.update(
+                running=True,
+                phase=PERIODS[start_period_idx],
+                total=remaining,
+                done=0,
+                current="",
+                started_at=datetime.utcnow().isoformat(),
+                finished_at="",
+                periods_done=PERIODS[:start_period_idx],
+            )
+
+        global_done = 0
+
+        for period_idx in range(start_period_idx, len(PERIODS)):
+            period = PERIODS[period_idx]
+
+            with _backfill_lock:
+                _backfill_status["phase"] = period
+
+            code_start = start_code_idx if period_idx == start_period_idx else 0
+
+            sched_log("info", f"全量K线补全：开始 {period}，共 {total_codes} 只")
+
+            for code_idx in range(code_start, total_codes):
+                if _backfill_stop.is_set():
+                    # 保存游标后退出
+                    _save_backfill_cursor(codes, period_idx, code_idx)
+                    sched_log(
+                        "warning",
+                        f"全量K线补全已停止（游标已保存，下次可续传）"
+                        f"：{period} 第 {code_idx}/{total_codes}",
+                    )
+                    with _backfill_lock:
+                        _backfill_status.update(
+                            running=False,
+                            phase="stopped",
+                            finished_at=datetime.utcnow().isoformat(),
+                        )
+                    return
+
+                code = codes[code_idx]
+                with _backfill_lock:
+                    _backfill_status["current"] = code
+                    _backfill_status["done"] = global_done
+
+                # 已有数据则跳过（不发网络请求），游标照常推进
+                if _has_kline_data(code, period):
+                    _save_backfill_cursor(codes, period_idx, code_idx + 1)
+                    global_done += 1
+                    continue
+
+                # 获取上市日期作为抓取起始日
+                ipo_date = _get_ipo_date(code)
+
+                # daily 阶段：若 stock_meta 里没有该股票，自动补写 stock_meta + stock_quote
+                if period == "daily":
+                    _ensure_stock_meta_and_quote(code, bs_info)
+
+                saved = _fetch_full_klines(code, period, ipo_date)
+
+                global_done += 1
+                with _backfill_lock:
+                    _backfill_status["done"] = global_done
+
+                # 每完成一只立即更新游标
+                _save_backfill_cursor(codes, period_idx, code_idx + 1)
+
+                if (code_idx + 1) % 200 == 0:
+                    sched_log(
+                        "info",
+                        f"全量K线补全进度：{period} {code_idx + 1}/{total_codes}，"
+                        f"总进度 {global_done}/{remaining}",
+                    )
+
+                _time.sleep(0.15)  # 避免过于频繁请求
+
+            # 完成一个周期
+            with _backfill_lock:
+                _backfill_status["periods_done"] = PERIODS[: period_idx + 1]
+
+            sched_log("success", f"全量K线补全：{period} 完成，共 {total_codes} 只")
+
+        # 全部完成
+        _clear_backfill_cursor()
+        with _backfill_lock:
+            _backfill_status.update(
+                running=False,
+                phase="done",
+                current="",
+                done=global_done,
+                finished_at=datetime.utcnow().isoformat(),
+            )
+        sched_log(
+            "success",
+            f"全量K线补全完成！日K/周K/月K 共处理 {total_codes} 只股票",
+        )
+
+    except Exception as e:
+        import traceback
+
+        err_msg = traceback.format_exc()
+        print(f"[backfill] _run_kline_backfill 未捕获异常: {e}\n{err_msg}")
+        # 游标已在每只股票完成后实时保存，无需在此重复保存
+        with _backfill_lock:
+            _backfill_status.update(
+                running=False,
+                phase="error",
+                finished_at=datetime.utcnow().isoformat(),
+            )
+        try:
+            sched_log("error", f"全量K线补全异常退出：{e}")
+        except Exception:
+            pass
+
+
+@router.post("/kline-backfill")
+async def trigger_kline_backfill(
+    background_tasks: BackgroundTasks, force: bool = False
+):
+    """启动全量K线补全任务（日K/周K/月K，从上市日起）。force=true 时清除游标重新开始"""
+    with _backfill_lock:
+        if _backfill_status["running"]:
+            return {"status": "already_running", **_backfill_status}
+    if force:
+        _clear_backfill_cursor()
+    background_tasks.add_task(_run_kline_backfill)
+    return {"status": "started"}
+
+
+@router.post("/kline-backfill/stop")
+async def stop_kline_backfill():
+    """停止全量K线补全任务（游标已保存，下次启动自动续传）"""
+    _backfill_stop.set()
+    return {"status": "stop_requested"}
+
+
+@router.get("/kline-backfill/status")
+async def get_kline_backfill_status():
+    """查询全量K线补全任务状态"""
+    with _backfill_lock:
+        status = dict(_backfill_status)
+
+    # 附加游标信息（是否有可续传的进度）
+    cursor = _load_backfill_cursor()
+    status["has_cursor"] = cursor is not None
+    if cursor:
+        codes, period_idx, code_idx = cursor
+        PERIODS = ["daily", "weekly", "monthly"]
+        status["cursor_info"] = {
+            "period": PERIODS[period_idx] if period_idx < len(PERIODS) else "done",
+            "code_idx": code_idx,
+            "total_codes": len(codes),
+        }
+    return status

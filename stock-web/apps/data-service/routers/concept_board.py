@@ -2,11 +2,12 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from datetime import datetime
+from typing import List, Optional
 import threading
 import time
 import requests
 
-from db import get_db, SessionLocal, ConceptBoard
+from db import get_db, SessionLocal, ConceptBoard, ConceptBoardConstituent
 
 router = APIRouter()
 
@@ -352,15 +353,18 @@ def calc_industry_board_kline(days: int = 60, force: bool = False) -> int:
     # 非交易日 或 今日已算过则跳过（force=True 时完全跳过此判断）
     if not force:
         from routers.industry import is_trading_day
+
         today_str = date_type.today().strftime("%Y-%m-%d")
 
         # 先查出当前数据库中有哪些产业板块的最新日期
         db_check = SessionLocal()
         try:
-            rows = db_check.execute(text(
-                "SELECT code, MAX(trade_date) as latest FROM stock_kline "
-                "WHERE period='daily' AND instr(code,'_')>0 GROUP BY code"
-            )).fetchall()
+            rows = db_check.execute(
+                text(
+                    "SELECT code, MAX(trade_date) as latest FROM stock_kline "
+                    "WHERE period='daily' AND instr(code,'_')>0 GROUP BY code"
+                )
+            ).fetchall()
             existing_latest = {r[0]: r[1] for r in rows}
         finally:
             db_check.close()
@@ -376,30 +380,38 @@ def calc_industry_board_kline(days: int = 60, force: bool = False) -> int:
                     # 还需要检查 industry_node 里是否有新产业还没有计算过
                     db_check2 = SessionLocal()
                     try:
-                        node_rows = db_check2.execute(text(
-                            "SELECT DISTINCT industry_id || '_' || layer as code FROM industry_node "
-                            "WHERE stocks IS NOT NULL AND stocks != '[]'"
-                        )).fetchall()
+                        node_rows = db_check2.execute(
+                            text(
+                                "SELECT DISTINCT industry_id || '_' || layer as code FROM industry_node "
+                                "WHERE stocks IS NOT NULL AND stocks != '[]'"
+                            )
+                        ).fetchall()
                         all_board_codes = {r[0] for r in node_rows}
                     finally:
                         db_check2.close()
 
                     missing_boards = all_board_codes - set(existing_latest.keys())
                     if max_age <= 4 and not missing_boards:
-                        print(f"[calc_industry_kline] skipped — non-trading day, data is {max_age}d old, no missing boards")
+                        print(
+                            f"[calc_industry_kline] skipped — non-trading day, data is {max_age}d old, no missing boards"
+                        )
                         return 0
                     if missing_boards:
-                        print(f"[calc_industry_kline] found {len(missing_boards)} new boards with no data, proceeding")
+                        print(
+                            f"[calc_industry_kline] found {len(missing_boards)} new boards with no data, proceeding"
+                        )
                 except Exception:
                     pass
         else:
             # 交易日：所有板块今日都已算过，且没有新板块 → 跳过
             db_check3 = SessionLocal()
             try:
-                node_rows = db_check3.execute(text(
-                    "SELECT DISTINCT industry_id || '_' || layer as code FROM industry_node "
-                    "WHERE stocks IS NOT NULL AND stocks != '[]'"
-                )).fetchall()
+                node_rows = db_check3.execute(
+                    text(
+                        "SELECT DISTINCT industry_id || '_' || layer as code FROM industry_node "
+                        "WHERE stocks IS NOT NULL AND stocks != '[]'"
+                    )
+                ).fetchall()
                 all_board_codes = {r[0] for r in node_rows}
             finally:
                 db_check3.close()
@@ -407,7 +419,9 @@ def calc_industry_board_kline(days: int = 60, force: bool = False) -> int:
             missing_boards = all_board_codes - set(existing_latest.keys())
             stale_boards = {c for c, d in existing_latest.items() if d < today_str}
             if not missing_boards and not stale_boards:
-                print(f"[calc_industry_kline] skipped — all boards up to date ({today_str})")
+                print(
+                    f"[calc_industry_kline] skipped — all boards up to date ({today_str})"
+                )
                 return 0
     else:
         print(f"[calc_industry_kline] force mode — skipping staleness check")
@@ -526,7 +540,7 @@ def trigger_calc_industry_kline(
     force: bool = Query(default=False),
 ):
     """手动触发产业板块 K 线聚合计算（后台执行），供前端进入页面时调用
-    
+
     force=true 时强制重新计算，忽略"非交易日/已是最新"跳过检查
     """
     background_tasks.add_task(calc_industry_board_kline, days, force)
@@ -544,9 +558,11 @@ def _sync_missing_industry_stocks_klines():
     db = SessionLocal()
     try:
         # 1. 取出所有产业节点里的 A 股
-        rows = db.execute(text(
-            "SELECT stocks FROM industry_node WHERE stocks IS NOT NULL AND stocks != '[]'"
-        )).fetchall()
+        rows = db.execute(
+            text(
+                "SELECT stocks FROM industry_node WHERE stocks IS NOT NULL AND stocks != '[]'"
+            )
+        ).fetchall()
         all_stocks: set[str] = set()
         for r in rows:
             try:
@@ -562,10 +578,12 @@ def _sync_missing_industry_stocks_klines():
 
         # 2. 查出已经有日线 K 线的股票
         placeholders = ",".join([f"'{s}'" for s in all_stocks])
-        existing = db.execute(text(
-            f"SELECT DISTINCT code FROM stock_kline "
-            f"WHERE period='daily' AND code IN ({placeholders})"
-        )).fetchall()
+        existing = db.execute(
+            text(
+                f"SELECT DISTINCT code FROM stock_kline "
+                f"WHERE period='daily' AND code IN ({placeholders})"
+            )
+        ).fetchall()
         existing_codes = {r[0] for r in existing}
 
         missing = all_stocks - existing_codes
@@ -573,10 +591,14 @@ def _sync_missing_industry_stocks_klines():
         db.close()
 
     if not missing:
-        print(f"[sync_missing_industry_stocks] all {len(all_stocks)} stocks have klines, nothing to do")
+        print(
+            f"[sync_missing_industry_stocks] all {len(all_stocks)} stocks have klines, nothing to do"
+        )
         return
 
-    print(f"[sync_missing_industry_stocks] {len(missing)} stocks missing klines, syncing...")
+    print(
+        f"[sync_missing_industry_stocks] {len(missing)} stocks missing klines, syncing..."
+    )
     success_count = 0
     fail_count = 0
     for code in sorted(missing):
@@ -591,7 +613,9 @@ def _sync_missing_industry_stocks_klines():
             continue
         # 正常调用间隔 0.3s，避免单连接高频请求导致 baostock 错误
         time.sleep(0.3)
-    print(f"[sync_missing_industry_stocks] done: success={success_count}, fail={fail_count}, total={len(missing)}")
+    print(
+        f"[sync_missing_industry_stocks] done: success={success_count}, fail={fail_count}, total={len(missing)}"
+    )
 
 
 @router.post("/sync-industry-stocks")
@@ -707,12 +731,15 @@ async def get_industry_rotation(
 
             # 数据陈旧（最新日期超过3天前）时触发后台重算
             from datetime import date as _date
+
             if sorted_dates:
                 try:
                     latest_dt = _date.fromisoformat(sorted_dates[-1])
                     if (_date.today() - latest_dt).days > 3:
                         threading.Thread(
-                            target=calc_industry_board_kline, args=(days * 2,), daemon=True
+                            target=calc_industry_board_kline,
+                            args=(days * 2,),
+                            daemon=True,
                         ).start()
                 except Exception:
                     pass
@@ -848,6 +875,172 @@ def get_industry_constituents(
 
     result.sort(key=lambda x: x["changePct"], reverse=True)
     return result
+
+
+# ───────────────────────────────────────────────
+# 概念板块成分股同步
+# ───────────────────────────────────────────────
+
+_CONSTITUENT_SYNC_LOCK = threading.Lock()
+_CONSTITUENT_SYNCING: set[str] = set()
+
+
+def _fetch_concept_constituents(board_code: str, board_name: str) -> list[dict]:
+    """
+    从东方财富拉取单个概念板块的全量成分股。
+    返回 list[{stock_code, stock_name}]，空列表表示失败。
+    """
+    results = []
+    page = 1
+    page_size = 100
+    for _ in range(20):  # 最多 2000 只
+        url = "https://push2.eastmoney.com/api/qt/clist/get"
+        params = {
+            "pn": page,
+            "pz": page_size,
+            "po": 1,
+            "np": 1,
+            "fltt": 2,
+            "invt": 2,
+            "fid": "f3",
+            "fs": f"b:{board_code}+f:!t4",
+            "fields": "f12,f14",
+        }
+        try:
+            r = requests.get(url, params=params, headers=_HEADERS, timeout=15)
+            data = r.json().get("data", {})
+            items = data.get("diff", []) or []
+            total = data.get("total", 0)
+            for it in items:
+                code = str(it.get("f12", "")).strip()
+                name = str(it.get("f14", "")).strip()
+                if code and len(code) == 6:
+                    results.append({"stock_code": code, "stock_name": name})
+            if len(results) >= total or not items:
+                break
+            page += 1
+            time.sleep(0.3)
+        except Exception as e:
+            print(f"[concept_constituent] fetch {board_code} page {page} error: {e}")
+            break
+    return results
+
+
+def sync_concept_constituents(board_codes: Optional[List[str]] = None) -> dict:
+    """
+    同步概念板块成分股到 concept_board_constituent 表。
+    board_codes=None 时同步 concept_board 表中所有板块（全量，后台任务用）。
+    返回 {synced: int, total: int}
+    """
+    db = SessionLocal()
+    try:
+        if board_codes is None:
+            rows = db.query(ConceptBoard.code, ConceptBoard.name).all()
+            boards = [(r.code, r.name) for r in rows]
+        else:
+            rows = (
+                db.query(ConceptBoard.code, ConceptBoard.name)
+                .filter(ConceptBoard.code.in_(board_codes))
+                .all()
+            )
+            boards = [(r.code, r.name) for r in rows]
+    finally:
+        db.close()
+
+    synced = 0
+    for board_code, board_name in boards:
+        with _CONSTITUENT_SYNC_LOCK:
+            if board_code in _CONSTITUENT_SYNCING:
+                continue
+            _CONSTITUENT_SYNCING.add(board_code)
+        try:
+            constituents = _fetch_concept_constituents(board_code, board_name)
+            if not constituents:
+                continue
+            db2 = SessionLocal()
+            try:
+                for c in constituents:
+                    stmt = sqlite_insert(ConceptBoardConstituent).values(
+                        board_code=board_code,
+                        board_name=board_name,
+                        stock_code=c["stock_code"],
+                        stock_name=c["stock_name"],
+                        updated_at=datetime.utcnow(),
+                    )
+                    stmt = stmt.on_conflict_do_update(
+                        index_elements=["board_code", "stock_code"],
+                        set_={
+                            "stock_name": stmt.excluded.stock_name,
+                            "board_name": stmt.excluded.board_name,
+                            "updated_at": stmt.excluded.updated_at,
+                        },
+                    )
+                    db2.execute(stmt)
+                db2.commit()
+                synced += 1
+                print(
+                    f"[concept_constituent] {board_name}({board_code}): {len(constituents)} stocks"
+                )
+            except Exception as e:
+                db2.rollback()
+                print(f"[concept_constituent] db error for {board_code}: {e}")
+            finally:
+                db2.close()
+        finally:
+            with _CONSTITUENT_SYNC_LOCK:
+                _CONSTITUENT_SYNCING.discard(board_code)
+        time.sleep(0.5)
+
+    return {"synced": synced, "total": len(boards)}
+
+
+@router.post("/constituents/sync")
+def trigger_constituents_sync(
+    background_tasks: BackgroundTasks,
+    codes: str = Query(
+        default="",
+        description="逗号分隔的板块代码，如 BK1629,BK1111；为空则全量同步所有概念板块",
+    ),
+):
+    """
+    同步概念板块成分股。
+    - codes 为空：后台全量同步所有 462 个概念板块（耗时较长，约 10-30 分钟）
+    - codes 指定：只同步指定板块，立即执行，适合 Agent 按需触发
+    """
+    board_codes = [c.strip() for c in codes.split(",") if c.strip()] or None
+    background_tasks.add_task(sync_concept_constituents, board_codes)
+    return {
+        "message": "成分股同步任务已启动",
+        "scope": "指定板块" if board_codes else "全量",
+        "codes": board_codes,
+    }
+
+
+@router.get("/constituents/{board_code}")
+def get_constituents(board_code: str, db: Session = Depends(get_db)):
+    """
+    获取单个概念板块的成分股列表。
+    若该板块尚未同步，自动触发同步并返回空列表（下次调用时会有数据）。
+    """
+    rows = (
+        db.query(ConceptBoardConstituent)
+        .filter(ConceptBoardConstituent.board_code == board_code)
+        .order_by(ConceptBoardConstituent.stock_code)
+        .all()
+    )
+    if not rows:
+        # 触发异步单板块同步
+        threading.Thread(
+            target=sync_concept_constituents, args=([board_code],), daemon=True
+        ).start()
+        return {"board_code": board_code, "constituents": [], "syncing": True}
+
+    return {
+        "board_code": board_code,
+        "constituents": [{"code": r.stock_code, "name": r.stock_name} for r in rows],
+        "syncing": False,
+        "updated_at": rows[0].updated_at.isoformat() if rows else None,
+    }
 
 
 @router.delete("/industry/{board_code}")

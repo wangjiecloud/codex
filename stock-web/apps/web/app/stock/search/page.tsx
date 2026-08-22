@@ -1,5 +1,6 @@
 "use client";
 
+import React from "react";
 import {
   useState,
   useEffect,
@@ -64,12 +65,21 @@ import {
 import { cn } from "@/lib/utils";
 import ReviewTab from "@/components/stock/ReviewTab";
 import BacktestTab from "@/components/stock/BacktestTab";
+import ScreenerPanel from "@/components/stock/ScreenerPanel";
 
 const VISIBLE_DEFAULT = 50;
 const VISIBLE_ALL = 100;
 
 type SortMode = "hot" | "rise";
-type MainTab = "stock" | "news" | "relation" | "memo" | "review" | "backtest";
+type MainTab =
+  | "screener"
+  | "stock"
+  | "popular"
+  | "news"
+  | "relation"
+  | "memo"
+  | "review"
+  | "backtest";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 选股相关类型
@@ -2598,11 +2608,126 @@ function NewsPanel() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 操作预案：每行个股搜索框（独立组件，避免竞争条件）
+// ─────────────────────────────────────────────────────────────────────────────
+interface PlanStockResult {
+  code: string;
+  name: string;
+  price?: number;
+}
+function PlanRowStockSearch({
+  value,
+  onSelect,
+}: {
+  value: string;
+  onSelect: (name: string, code: string) => void;
+}) {
+  const [query, setQuery] = useState(value);
+  const [results, setResults] = useState<PlanStockResult[]>([]);
+  const [showDropdown, setShowDropdown] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // 同步外部 value 变化（如加载历史数据时）
+  useEffect(() => {
+    setQuery(value);
+  }, [value]);
+
+  // 监听 query 变化触发搜索
+  useEffect(() => {
+    const q = query.trim();
+    if (!q) {
+      setResults([]);
+      setShowDropdown(false);
+      return;
+    }
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => {
+      fetch(
+        `http://localhost:8000/api/search?q=${encodeURIComponent(q)}&limit=8`,
+      )
+        .then((r) => r.json())
+        .then((d: { results?: PlanStockResult[] }) => {
+          const list = d.results ?? [];
+          setResults(list);
+          setShowDropdown(list.length > 0);
+        })
+        .catch(() => {});
+    }, 200);
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, [query]);
+
+  // 点击外部关闭下拉
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        inputRef.current &&
+        !inputRef.current.contains(e.target as Node) &&
+        dropdownRef.current &&
+        !dropdownRef.current.contains(e.target as Node)
+      ) {
+        setShowDropdown(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const handleSelect = (stock: PlanStockResult) => {
+    setQuery(stock.name);
+    setShowDropdown(false);
+    setResults([]);
+    onSelect(stock.name, stock.code);
+  };
+
+  return (
+    <div className="relative">
+      <input
+        ref={inputRef}
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        onFocus={() => results.length > 0 && setShowDropdown(true)}
+        placeholder="股票名称"
+        className="w-[110px] bg-[var(--bg-primary)] border border-[var(--border-color)] rounded px-1.5 py-1 text-[var(--text-primary)] outline-none focus:border-[#f5a623]/50 text-xs"
+      />
+      {showDropdown && results.length > 0 && (
+        <div
+          ref={dropdownRef}
+          className="absolute z-50 top-full left-0 mt-0.5 w-[180px] bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg shadow-lg overflow-hidden"
+        >
+          {results.map((h) => (
+            <button
+              key={h.code}
+              type="button"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                handleSelect(h);
+              }}
+              className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left hover:bg-[var(--bg-tertiary)] transition-colors"
+            >
+              <span className="text-xs text-[var(--text-primary)]">
+                {h.name}
+              </span>
+              <span className="text-[10px] text-[var(--text-tertiary)] font-mono ml-auto">
+                {h.code}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 主页面
 // ─────────────────────────────────────────────────────────────────────────────
 export default function StockSearchPage() {
   const router = useRouter();
-  const [mainTab, setMainTab] = useState<MainTab>("stock");
+  const [mainTab, setMainTab] = useState<MainTab>("screener");
   const [sortMode, setSortMode] = useState<SortMode>("hot");
   const [stocks, setStocks] = useState<PopularStock[]>([]);
   const [loading, setLoading] = useState(true);
@@ -2757,7 +2882,7 @@ export default function StockSearchPage() {
     <div
       className={cn(
         "min-h-full p-6",
-        mainTab !== "review" && "max-w-5xl mx-auto",
+        mainTab !== "review" && mainTab !== "screener" && "max-w-5xl mx-auto",
       )}
     >
       {/* Header：标题 + 主 Tab */}
@@ -2765,31 +2890,59 @@ export default function StockSearchPage() {
         <div>
           <div className="flex items-center gap-3 mb-1">
             <h1 className="text-2xl font-bold text-[var(--text-primary)]">
-              {mainTab === "stock"
-                ? "选股"
-                : mainTab === "news"
-                  ? "资讯"
-                  : mainTab === "relation"
-                    ? "关联"
-                    : mainTab === "review"
-                      ? "复盘"
-                      : mainTab === "backtest"
-                        ? "回测"
-                        : "备忘录"}
+              {mainTab === "screener"
+                ? "智能选股"
+                : mainTab === "stock"
+                  ? "AI选股"
+                  : mainTab === "popular"
+                    ? "人气榜"
+                    : mainTab === "news"
+                      ? "资讯"
+                      : mainTab === "relation"
+                        ? "关联"
+                        : mainTab === "review"
+                          ? "复盘"
+                          : mainTab === "backtest"
+                            ? "回测"
+                            : "备忘录"}
             </h1>
             {/* 主 Tab 切换 */}
             <div className="flex items-center gap-0.5 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg p-0.5">
+              <button
+                onClick={() => setMainTab("screener")}
+                className={cn(
+                  "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all",
+                  mainTab === "screener"
+                    ? "bg-[#f5a623] text-black shadow-sm"
+                    : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]",
+                )}
+              >
+                <Zap size={12} />
+                智能选股
+              </button>
               <button
                 onClick={() => setMainTab("stock")}
                 className={cn(
                   "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all",
                   mainTab === "stock"
-                    ? "bg-[#f5a623] text-black shadow-sm"
+                    ? "bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-sm border border-[var(--border-color)]"
                     : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]",
                 )}
               >
                 <BarChart2 size={12} />
-                选股
+                AI 选股
+              </button>
+              <button
+                onClick={() => setMainTab("popular")}
+                className={cn(
+                  "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all",
+                  mainTab === "popular"
+                    ? "bg-[#f5a623] text-black shadow-sm"
+                    : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]",
+                )}
+              >
+                <Flame size={12} />
+                人气榜
               </button>
               <button
                 onClick={() => setMainTab("news")}
@@ -2854,26 +3007,34 @@ export default function StockSearchPage() {
             </div>
           </div>
           <p className="text-[var(--text-tertiary)] text-sm">
-            {mainTab === "stock"
-              ? "AI 智能选股，热门股票榜单实时更新"
-              : mainTab === "news"
-                ? "热门板块最新资讯，每 15 分钟自动更新"
-                : mainTab === "relation"
-                  ? "基于股吧帖子正文挖掘的股票共现关联关系"
-                  : mainTab === "review"
-                    ? "全球主要指数 K 线一览，支持日/周/月周期切换"
-                    : mainTab === "backtest"
-                      ? "基于历史 K 线数据，模拟策略在选定时间范围内的收益率"
-                      : "记录你的投资思考与分析笔记"}
+            {mainTab === "screener"
+              ? "11 大内置策略全市场扫描，多维评分自动推荐强势标的"
+              : mainTab === "stock"
+                ? "AI 智能选股，用自然语言从数据库筛选"
+                : mainTab === "popular"
+                  ? "东方财富人气榜/飙升榜，热门股票实时更新"
+                  : mainTab === "news"
+                    ? "热门板块最新资讯，每 15 分钟自动更新"
+                    : mainTab === "relation"
+                      ? "基于股吧帖子正文挖掘的股票共现关联关系"
+                      : mainTab === "review"
+                        ? "全球主要指数 K 线一览，支持日/周/月周期切换"
+                        : mainTab === "backtest"
+                          ? "基于历史 K 线数据，模拟策略在选定时间范围内的收益率"
+                          : "记录你的投资思考与分析笔记"}
           </p>
         </div>
       </div>
 
-      {mainTab === "stock" ? (
+      {mainTab === "screener" ? (
+        <ScreenerPanel />
+      ) : mainTab === "stock" ? (
         <>
           {/* AI 智能选股 */}
           <AISearchPanel />
-
+        </>
+      ) : mainTab === "popular" ? (
+        <>
           {/* 榜单模块 */}
           <div>
             {/* 标题栏 + Tab + 刷新 */}
@@ -3314,8 +3475,12 @@ function MemoPanel() {
 
   // 操作预案表格行（复盘记录）
   interface PlanRow {
-    buyTime: string; // 买入时间
+    buyTime: string; // 操作时间
     stockName: string; // 个股名称
+    stockCode: string; // 股票代码（用于同步持仓）
+    tradeType: string; // 操作类型：buy / sell
+    price: string; // 价格
+    shares: string; // 数量
     externalFactor: string; // 外部因素（买入原因）
     internalFactor: string; // 内部因素（买入原因）
     result: string; // 成功/失败（事后回溯）
@@ -3323,9 +3488,17 @@ function MemoPanel() {
     improvement: string; // 改进措施（事后回溯）
     other: string; // 其他
   }
+  const todayStr = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  };
   const EMPTY_ROW: PlanRow = {
-    buyTime: "",
+    buyTime: todayStr(),
     stockName: "",
+    stockCode: "",
+    tradeType: "buy",
+    price: "",
+    shares: "",
     externalFactor: "",
     internalFactor: "",
     result: "",
@@ -3333,11 +3506,6 @@ function MemoPanel() {
     improvement: "",
     other: "",
   };
-  const [planDate, setPlanDate] = useState(() => {
-    const d = new Date();
-    d.setDate(d.getDate() + 1);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  });
   const [planRows, setPlanRows] = useState<PlanRow[]>([{ ...EMPTY_ROW }]);
 
   const addPlanRow = () => setPlanRows((r) => [...r, { ...EMPTY_ROW }]);
@@ -3349,8 +3517,7 @@ function MemoPanel() {
     );
 
   // 将表格序列化为存储内容（JSON 前缀标记）
-  const serializePlan = () =>
-    JSON.stringify({ _type: "plan", date: planDate, rows: planRows });
+  const serializePlan = () => JSON.stringify({ _type: "plan", rows: planRows });
 
   // 解析内容：判断是否是操作预案 JSON
   const parsePlan = (
@@ -3363,7 +3530,10 @@ function MemoPanel() {
         rows?: PlanRow[];
       };
       if (obj._type === "plan" && obj.rows)
-        return { date: obj.date ?? "", rows: obj.rows };
+        return {
+          date: obj.date ?? "",
+          rows: obj.rows.map((r) => ({ ...EMPTY_ROW, ...r })),
+        };
     } catch {
       /* not json */
     }
@@ -3432,6 +3602,30 @@ function MemoPanel() {
 
   const toggleBiasRow = (key: string) => {
     setExpandedBiasRows((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  // 改进措施展开状态：key = `${memoId}-${rowIdx}`
+  const [expandedImprovements, setExpandedImprovements] = useState<Set<string>>(
+    new Set(),
+  );
+  const [expandedAnalysis, setExpandedAnalysis] = useState<Set<string>>(
+    new Set(),
+  );
+  const toggleAnalysis = (key: string) => {
+    setExpandedAnalysis((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+  const toggleImprovement = (key: string) => {
+    setExpandedImprovements((prev) => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
       else next.add(key);
@@ -3566,11 +3760,6 @@ function MemoPanel() {
     setFormTitle("");
     setFormContent("");
     setFormMode("plan");
-    const d = new Date();
-    d.setDate(d.getDate() + 1);
-    setPlanDate(
-      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`,
-    );
     setPlanRows([{ ...EMPTY_ROW }]);
     setSaveError(null);
     setShowForm(true);
@@ -3583,7 +3772,6 @@ function MemoPanel() {
     const plan = parsePlan(m.content);
     if (plan) {
       setFormMode("plan");
-      setPlanDate(plan.date);
       setPlanRows(plan.rows);
     } else {
       setFormMode("text");
@@ -3599,6 +3787,165 @@ function MemoPanel() {
     setFormContent("");
     setFormMode("text");
     setSaveError(null);
+  };
+
+  const PORTFOLIO_API = "http://localhost:8000/api/portfolio";
+
+  // 将复盘中有效的交易行同步到持仓股
+  const syncTradesToPortfolio = async (memoId: number, rows: PlanRow[]) => {
+    let codeToHoldingId: Map<string, string> = new Map();
+    type HoldingWithTrades = {
+      id: string;
+      code: string;
+      trades: {
+        id: string;
+        type: string;
+        date: string;
+        price: number;
+        shares: number;
+        note: string;
+      }[];
+    };
+    let allHoldings: HoldingWithTrades[] = [];
+    try {
+      const r = await fetch(PORTFOLIO_API);
+      if (r.ok) {
+        allHoldings = (await r.json()) as HoldingWithTrades[];
+        allHoldings.forEach((h) => codeToHoldingId.set(h.code, h.id));
+      }
+    } catch {
+      /* ignore */
+    }
+
+    // 收集该备忘录已有的所有 trade，用 tradeId -> { holdingId, trade } 做映射
+    const prefix = `trade-memo${memoId}-row`;
+    const existingMap = new Map<
+      string,
+      {
+        holdingId: string;
+        type: string;
+        date: string;
+        price: number;
+        shares: number;
+      }
+    >();
+    for (const h of allHoldings) {
+      for (const t of h.trades) {
+        if (t.id.startsWith(prefix) && t.note?.includes(`复盘 #${memoId}`)) {
+          existingMap.set(t.id, {
+            holdingId: h.id,
+            type: t.type,
+            date: t.date,
+            price: t.price,
+            shares: t.shares,
+          });
+        }
+      }
+    }
+
+    const syncedIds = new Set<string>();
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const code = row.stockCode?.trim();
+      const price = parseFloat(row.price);
+      const shares = parseInt(row.shares, 10);
+      if (
+        !code ||
+        !row.stockName?.trim() ||
+        isNaN(price) ||
+        price <= 0 ||
+        isNaN(shares) ||
+        shares <= 0
+      )
+        continue;
+
+      const tradeType = row.tradeType === "sell" ? "sell" : "buy";
+      const tradeDate = row.buyTime || new Date().toISOString().slice(0, 10);
+
+      // 1. 持仓不存在时才创建（避免覆盖成本价）
+      if (!codeToHoldingId.has(code)) {
+        const holdingId = `holding-${code}`;
+        try {
+          const cr = await fetch(PORTFOLIO_API, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              id: holdingId,
+              code,
+              name: row.stockName.trim(),
+              cost_price: 0,
+              shares: 0,
+            }),
+          });
+          if (cr.ok) {
+            codeToHoldingId.set(code, holdingId);
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+
+      const holdingId = codeToHoldingId.get(code);
+      if (!holdingId) continue;
+
+      const tradeId = `trade-memo${memoId}-row${i}`;
+      syncedIds.add(tradeId);
+
+      const existing = existingMap.get(tradeId);
+      if (existing) {
+        // 已存在：对比参数是否变化，变了就删除旧的再重新写入
+        const sameHolding = existing.holdingId === holdingId;
+        const sameType = existing.type === tradeType;
+        const sameDate = existing.date === tradeDate;
+        const samePrice = Math.abs(existing.price - price) < 0.001;
+        const sameShares = existing.shares === shares;
+        if (sameHolding && sameType && sameDate && samePrice && sameShares) {
+          continue; // 完全一致，跳过
+        }
+        // 参数变了，先删旧的
+        try {
+          await fetch(
+            `${PORTFOLIO_API}/${existing.holdingId}/trades/${tradeId}`,
+            { method: "DELETE" },
+          );
+        } catch {
+          /* ignore */
+        }
+      }
+
+      // 2. 写入交易记录
+      try {
+        await fetch(`${PORTFOLIO_API}/${holdingId}/trades`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id: tradeId,
+            holding_id: holdingId,
+            trade_type: tradeType,
+            trade_date: tradeDate,
+            price,
+            shares,
+            note: `来自复盘 #${memoId}`,
+          }),
+        });
+      } catch {
+        /* ignore */
+      }
+    }
+
+    // 3. 清理该备忘录中不再存在的旧 trade（行被删除的情况）
+    for (const [tradeId, info] of existingMap) {
+      if (!syncedIds.has(tradeId)) {
+        try {
+          await fetch(`${PORTFOLIO_API}/${info.holdingId}/trades/${tradeId}`, {
+            method: "DELETE",
+          });
+        } catch {
+          /* ignore */
+        }
+      }
+    }
   };
 
   const saveMemo = async () => {
@@ -3622,6 +3969,25 @@ function MemoPanel() {
         });
       }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      // 如果是复盘表格，将有效交易行同步到持仓股
+      if (formMode === "plan") {
+        let memoId = editingId;
+        if (memoId === null) {
+          // 新建：从响应体里拿到真实 id
+          try {
+            const created = (await res.json()) as { id?: number };
+            memoId = created.id ?? null;
+          } catch {
+            /* ignore */
+          }
+        }
+        if (memoId !== null) {
+          // 不 await，异步同步，不阻塞 UI
+          syncTradesToPortfolio(memoId, planRows).catch(() => {});
+        }
+      }
+
       cancelForm();
       await fetchMemos();
     } catch (e: unknown) {
@@ -3738,17 +4104,6 @@ function MemoPanel() {
           {formMode === "plan" ? (
             /* ── 操作预案表格编辑器 ── */
             <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-[var(--text-tertiary)]">
-                  预案日期：
-                </span>
-                <input
-                  type="date"
-                  value={planDate}
-                  onChange={(e) => setPlanDate(e.target.value)}
-                  className="text-xs bg-[var(--bg-primary)] border border-[var(--border-color)] rounded px-2 py-1 text-[var(--text-primary)] outline-none focus:border-[#f5a623]/50"
-                />
-              </div>
               <div className="overflow-x-auto rounded-lg border border-[var(--border-color)]">
                 <table className="w-full text-xs border-collapse">
                   <thead>
@@ -3757,13 +4112,13 @@ function MemoPanel() {
                         className="px-2 py-2 text-left font-semibold text-[var(--text-tertiary)] whitespace-nowrap pl-3"
                         rowSpan={2}
                       >
-                        买入时间
+                        操作时间
                       </th>
                       <th
                         className="px-2 py-1 text-center font-semibold text-[var(--text-tertiary)] whitespace-nowrap border-b border-[var(--border-color)]"
-                        colSpan={3}
+                        colSpan={4}
                       >
-                        买入原因
+                        操作记录
                       </th>
                       <th
                         className="px-2 py-1 text-center font-semibold text-[var(--text-tertiary)] whitespace-nowrap border-b border-[var(--border-color)]"
@@ -3782,8 +4137,9 @@ function MemoPanel() {
                     <tr className="bg-[var(--bg-tertiary)] border-b border-[var(--border-color)]">
                       {[
                         "个股名称",
-                        "外部因素",
-                        "内部因素",
+                        "类型",
+                        "价格",
+                        "数量",
                         "成功/失败",
                         "原因分析",
                         "改进措施",
@@ -3803,48 +4159,69 @@ function MemoPanel() {
                         key={i}
                         className="border-b border-[var(--border-color)] last:border-0"
                       >
-                        {/* 买入时间 */}
+                        {/* 操作时间 */}
                         <td className="px-1 py-1 pl-2">
                           <input
+                            type="date"
                             value={row.buyTime}
                             onChange={(e) =>
                               setPlanCell(i, "buyTime", e.target.value)
                             }
-                            placeholder="如：07/10"
-                            className="w-[80px] bg-[var(--bg-primary)] border border-[var(--border-color)] rounded px-1.5 py-1 text-[var(--text-primary)] outline-none focus:border-[#f5a623]/50 text-xs"
+                            className="w-[116px] bg-[var(--bg-primary)] border border-[var(--border-color)] rounded px-1.5 py-1 text-[var(--text-primary)] outline-none focus:border-[#f5a623]/50 text-xs"
                           />
                         </td>
-                        {/* 个股名称 */}
-                        <td className="px-1 py-1">
-                          <input
+                        {/* 个股名称（模糊搜索） */}
+                        <td className="px-1 py-1 relative">
+                          <PlanRowStockSearch
                             value={row.stockName}
-                            onChange={(e) =>
-                              setPlanCell(i, "stockName", e.target.value)
-                            }
-                            placeholder="股票名称"
-                            className="w-[90px] bg-[var(--bg-primary)] border border-[var(--border-color)] rounded px-1.5 py-1 text-[var(--text-primary)] outline-none focus:border-[#f5a623]/50 text-xs"
+                            onSelect={(name, code) => {
+                              setPlanRows((rows) =>
+                                rows.map((r, idx) =>
+                                  idx === i
+                                    ? { ...r, stockName: name, stockCode: code }
+                                    : r,
+                                ),
+                              );
+                            }}
                           />
                         </td>
-                        {/* 外部因素 */}
+                        {/* 操作类型 */}
+                        <td className="px-1 py-1">
+                          <select
+                            value={row.tradeType}
+                            onChange={(e) =>
+                              setPlanCell(i, "tradeType", e.target.value)
+                            }
+                            className="bg-[var(--bg-primary)] border border-[var(--border-color)] rounded px-1.5 py-1 text-xs outline-none focus:border-[#f5a623]/50 text-[var(--text-primary)] w-[64px]"
+                          >
+                            <option value="buy">买入</option>
+                            <option value="sell">卖出</option>
+                          </select>
+                        </td>
+                        {/* 价格 */}
                         <td className="px-1 py-1">
                           <input
-                            value={row.externalFactor}
+                            type="number"
+                            value={row.price}
                             onChange={(e) =>
-                              setPlanCell(i, "externalFactor", e.target.value)
+                              setPlanCell(i, "price", e.target.value)
                             }
-                            placeholder="市场/板块/消息"
-                            className="w-[120px] bg-[var(--bg-primary)] border border-[var(--border-color)] rounded px-1.5 py-1 text-[var(--text-primary)] outline-none focus:border-[#f5a623]/50 text-xs"
+                            placeholder="0.00"
+                            step="0.01"
+                            className="w-[72px] bg-[var(--bg-primary)] border border-[var(--border-color)] rounded px-1.5 py-1 text-[var(--text-primary)] outline-none focus:border-[#f5a623]/50 text-xs"
                           />
                         </td>
-                        {/* 内部因素 */}
+                        {/* 数量 */}
                         <td className="px-1 py-1">
                           <input
-                            value={row.internalFactor}
+                            type="number"
+                            value={row.shares}
                             onChange={(e) =>
-                              setPlanCell(i, "internalFactor", e.target.value)
+                              setPlanCell(i, "shares", e.target.value)
                             }
-                            placeholder="技术/基本面"
-                            className="w-[120px] bg-[var(--bg-primary)] border border-[var(--border-color)] rounded px-1.5 py-1 text-[var(--text-primary)] outline-none focus:border-[#f5a623]/50 text-xs"
+                            placeholder="100"
+                            step="100"
+                            className="w-[72px] bg-[var(--bg-primary)] border border-[var(--border-color)] rounded px-1.5 py-1 text-[var(--text-primary)] outline-none focus:border-[#f5a623]/50 text-xs"
                           />
                         </td>
                         {/* 成功/失败 */}
@@ -3854,7 +4231,7 @@ function MemoPanel() {
                             onChange={(e) =>
                               setPlanCell(i, "result", e.target.value)
                             }
-                            className="bg-[var(--bg-primary)] border border-[var(--border-color)] rounded px-1.5 py-1 text-xs outline-none focus:border-[#f5a623]/50 text-[var(--text-primary)] w-[80px]"
+                            className="bg-[var(--bg-primary)] border border-[var(--border-color)] rounded px-1.5 py-1 text-xs outline-none focus:border-[#f5a623]/50 text-[var(--text-primary)] w-[76px]"
                           >
                             <option value="">—</option>
                             <option>成功</option>
@@ -3870,7 +4247,7 @@ function MemoPanel() {
                               setPlanCell(i, "analysis", e.target.value)
                             }
                             placeholder="复盘原因"
-                            className="w-[120px] bg-[var(--bg-primary)] border border-[var(--border-color)] rounded px-1.5 py-1 text-[var(--text-primary)] outline-none focus:border-[#f5a623]/50 text-xs"
+                            className="w-[110px] bg-[var(--bg-primary)] border border-[var(--border-color)] rounded px-1.5 py-1 text-[var(--text-primary)] outline-none focus:border-[#f5a623]/50 text-xs"
                           />
                         </td>
                         {/* 改进措施 */}
@@ -3881,7 +4258,7 @@ function MemoPanel() {
                               setPlanCell(i, "improvement", e.target.value)
                             }
                             placeholder="下次改进点"
-                            className="w-[120px] bg-[var(--bg-primary)] border border-[var(--border-color)] rounded px-1.5 py-1 text-[var(--text-primary)] outline-none focus:border-[#f5a623]/50 text-xs"
+                            className="w-[110px] bg-[var(--bg-primary)] border border-[var(--border-color)] rounded px-1.5 py-1 text-[var(--text-primary)] outline-none focus:border-[#f5a623]/50 text-xs"
                           />
                         </td>
                         {/* 其他 */}
@@ -3892,7 +4269,7 @@ function MemoPanel() {
                               setPlanCell(i, "other", e.target.value)
                             }
                             placeholder="其他"
-                            className="w-[80px] bg-[var(--bg-primary)] border border-[var(--border-color)] rounded px-1.5 py-1 text-[var(--text-primary)] outline-none focus:border-[#f5a623]/50 text-xs"
+                            className="w-[72px] bg-[var(--bg-primary)] border border-[var(--border-color)] rounded px-1.5 py-1 text-[var(--text-primary)] outline-none focus:border-[#f5a623]/50 text-xs"
                           />
                         </td>
                         {/* 删除 */}
@@ -3994,7 +4371,7 @@ function MemoPanel() {
             const displayTitle =
               m.title ||
               (plan
-                ? `操作预案 ${parsePlan(m.content)?.date}（${parsePlan(m.content)?.rows.length} 行）`
+                ? `操作复盘（${parsePlan(m.content)?.rows.length} 行）`
                 : biasTable
                   ? `思维偏见知识表（${biasTable.rows.length} 条）`
                   : isDailyLog
@@ -4011,7 +4388,10 @@ function MemoPanel() {
                 onDrop={(e) => handleDrop(e, m.id)}
                 onDragEnd={handleDragEnd}
                 className={cn(
-                  "group flex bg-[var(--bg-secondary)] border rounded-xl transition-all",
+                  "group bg-[var(--bg-secondary)] border rounded-xl transition-all",
+                  isExpanded && plan
+                    ? "inline-block align-top w-fit max-w-full"
+                    : "block w-full",
                   m.pinned
                     ? "border-[#f5a623]/40"
                     : "border-[var(--border-color)] hover:border-[var(--border-hover)]",
@@ -4020,542 +4400,815 @@ function MemoPanel() {
                   dragItemId.current === m.id && "opacity-40",
                 )}
               >
-                {/* 左侧控制栏 */}
-                <div className="flex flex-col items-center justify-start gap-0.5 px-1.5 pt-3 pb-3 shrink-0 border-r border-[var(--border-color)]">
-                  <div
-                    className="cursor-grab active:cursor-grabbing p-1 rounded text-[var(--text-tertiary)] opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity"
-                    title="拖拽排序"
-                  >
-                    <GripVertical size={13} />
+                <div className="flex items-stretch">
+                  {/* 左侧控制栏 */}
+                  <div className="flex flex-col items-center justify-start gap-0.5 px-1.5 pt-3 pb-3 shrink-0 border-r border-[var(--border-color)]">
+                    <div
+                      className="cursor-grab active:cursor-grabbing p-1 rounded text-[var(--text-tertiary)] opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity"
+                      title="拖拽排序"
+                    >
+                      <GripVertical size={13} />
+                    </div>
+                    <button
+                      onClick={() =>
+                        isExpanded
+                          ? toggleCollapse(m.id)
+                          : isDailyLog
+                            ? expandMemo(m.id, dailyEntries)
+                            : toggleCollapse(m.id)
+                      }
+                      title={isExpanded ? "折叠" : "展开"}
+                      className="p-1 rounded text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-primary)] transition-all"
+                    >
+                      {isExpanded ? (
+                        <ChevronDown size={13} />
+                      ) : (
+                        <ChevronRight size={13} />
+                      )}
+                    </button>
                   </div>
-                  <button
-                    onClick={() =>
-                      isExpanded
-                        ? toggleCollapse(m.id)
-                        : isDailyLog
-                          ? expandMemo(m.id, dailyEntries)
-                          : toggleCollapse(m.id)
-                    }
-                    title={isExpanded ? "折叠" : "展开"}
-                    className="p-1 rounded text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-primary)] transition-all"
-                  >
-                    {isExpanded ? (
-                      <ChevronDown size={13} />
-                    ) : (
-                      <ChevronRight size={13} />
+
+                  {/* 卡片主体 */}
+                  <div
+                    className={cn(
+                      "p-4",
+                      isExpanded && plan ? "w-fit" : "flex-1 min-w-0",
                     )}
-                  </button>
-                </div>
-
-                {/* 卡片主体 */}
-                <div className="flex-1 min-w-0 p-4">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex-1 min-w-0">
-                      {/* ── 标题行 ── */}
-                      <div
-                        className="flex items-center gap-2 cursor-pointer select-none mb-1"
-                        onClick={() =>
-                          isExpanded
-                            ? toggleCollapse(m.id)
-                            : isDailyLog
-                              ? expandMemo(m.id, dailyEntries)
-                              : toggleCollapse(m.id)
-                        }
-                      >
-                        {m.pinned && (
-                          <Pin size={11} className="text-[#f5a623] shrink-0" />
-                        )}
-                        {/* 类型图标 */}
-                        {plan ? (
-                          <BarChart2
-                            size={12}
-                            className="text-[var(--text-tertiary)] shrink-0"
-                          />
-                        ) : biasTable ? (
-                          <Brain
-                            size={12}
-                            className="text-[#a78bfa] shrink-0"
-                          />
-                        ) : isDailyLog ? (
-                          <CalendarDays
-                            size={12}
-                            className="text-[#60a5fa] shrink-0"
-                          />
-                        ) : (
-                          <FileText
-                            size={12}
-                            className="text-[var(--text-tertiary)] shrink-0"
-                          />
-                        )}
-                        <p className="text-sm font-medium text-[var(--text-primary)] truncate">
-                          {displayTitle}
-                        </p>
-                        {/* 日期范围 badge（复盘日记专属） */}
-                        {isDailyLog && !isExpanded && (
-                          <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-[#60a5fa]/10 text-[#60a5fa]">
-                            {dailyEntries.length} 天
-                          </span>
-                        )}
-                      </div>
-
-                      {/* ── 折叠时：摘要 ── */}
-                      {!isExpanded && (
-                        <div
-                          className="cursor-pointer"
-                          onClick={() =>
-                            isDailyLog
-                              ? expandMemo(m.id, dailyEntries)
-                              : toggleCollapse(m.id)
-                          }
-                        >
-                          {plan ? (
-                            <p className="text-xs text-[var(--text-tertiary)]">
-                              📋 {plan.date} · {plan.rows.length} 条操作计划
-                            </p>
-                          ) : biasTable ? (
-                            <div className="flex flex-wrap gap-1.5 mt-1">
-                              {biasTable.rows.slice(0, 6).map((r, ri) => (
-                                <span
-                                  key={ri}
-                                  className="text-[10px] px-1.5 py-0.5 rounded bg-[#a78bfa]/10 text-[#a78bfa] border border-[#a78bfa]/20"
-                                >
-                                  {r.name}
-                                </span>
-                              ))}
-                              {biasTable.rows.length > 6 && (
-                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--bg-tertiary)] text-[var(--text-tertiary)]">
-                                  +{biasTable.rows.length - 6}
-                                </span>
+                  >
+                    <div
+                      className={cn(
+                        "gap-2",
+                        isExpanded && plan
+                          ? "space-y-2"
+                          : "flex items-start justify-between",
+                      )}
+                    >
+                      {isExpanded && plan && (
+                        <div className="flex justify-end">
+                          <div
+                            className={cn(
+                              "flex items-center gap-1 transition-opacity shrink-0",
+                              "opacity-0 group-hover:opacity-100",
+                            )}
+                          >
+                            <button
+                              onClick={() => togglePin(m)}
+                              title={m.pinned ? "取消置顶" : "置顶"}
+                              className="p-1.5 rounded-md hover:bg-[var(--bg-primary)] text-[var(--text-tertiary)] hover:text-[#f5a623] transition-colors"
+                            >
+                              {m.pinned ? (
+                                <PinOff size={13} />
+                              ) : (
+                                <Pin size={13} />
                               )}
-                            </div>
-                          ) : isDailyLog ? (
-                            <div className="space-y-1">
-                              {/* 日期条目预览 */}
-                              <div className="flex flex-wrap gap-1.5 mt-1">
-                                {dailyEntries.map((e, ei) => (
-                                  <span
-                                    key={`${e.date}-${ei}`}
-                                    className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--bg-tertiary)] text-[var(--text-tertiary)] font-mono"
-                                  >
-                                    {e.label}
-                                  </span>
-                                ))}
-                              </div>
-                              {/* 文本摘要 */}
-                              {summary && (
-                                <p className="text-xs text-[var(--text-tertiary)] leading-relaxed line-clamp-2 mt-1">
-                                  {summary}
-                                </p>
-                              )}
-                            </div>
-                          ) : (
-                            summary && (
-                              <p className="text-xs text-[var(--text-tertiary)] leading-relaxed line-clamp-2">
-                                {summary}
-                              </p>
-                            )
-                          )}
-                          <p className="mt-1.5 text-[11px] text-[var(--text-tertiary)]">
-                            {formatTime(m.updated_at)}
-                          </p>
+                            </button>
+                            <button
+                              onClick={() => openEdit(m)}
+                              title="编辑"
+                              className="p-1.5 rounded-md hover:bg-[var(--bg-primary)] text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors"
+                            >
+                              <Pencil size={13} />
+                            </button>
+                            <button
+                              onClick={() => deleteMemo(m.id)}
+                              title="删除"
+                              className="p-1.5 rounded-md hover:bg-[var(--bg-primary)] text-[var(--text-tertiary)] hover:text-red-400 transition-colors"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
                         </div>
                       )}
 
-                      {/* ── 展开时：完整内容 ── */}
-                      {isExpanded && (
-                        <>
+                      <div
+                        className={cn(
+                          isExpanded && plan ? "w-fit" : "flex-1 min-w-0",
+                        )}
+                      >
+                        {/* ── 标题行 ── */}
+                        <div
+                          className="flex items-center gap-2 cursor-pointer select-none mb-1"
+                          onClick={() =>
+                            isExpanded
+                              ? toggleCollapse(m.id)
+                              : isDailyLog
+                                ? expandMemo(m.id, dailyEntries)
+                                : toggleCollapse(m.id)
+                          }
+                        >
+                          {m.pinned && (
+                            <Pin
+                              size={11}
+                              className="text-[#f5a623] shrink-0"
+                            />
+                          )}
+                          {/* 类型图标 */}
                           {plan ? (
-                            /* 操作预案表格 */
-                            <div className="mt-2 space-y-1.5">
-                              <p className="text-[11px] text-[var(--text-tertiary)]">
-                                📋 {plan.date}
-                              </p>
-                              <div className="overflow-x-auto rounded-lg border border-[var(--border-color)]">
-                                <table className="w-full text-xs border-collapse">
-                                  <thead>
-                                    <tr className="bg-[var(--bg-tertiary)] border-b border-[var(--border-color)]">
-                                      <th
-                                        className="px-3 py-2 text-left font-semibold text-[var(--text-tertiary)] whitespace-nowrap"
-                                        rowSpan={2}
-                                      >
-                                        买入时间
-                                      </th>
-                                      <th
-                                        className="px-3 py-1 text-center font-semibold text-[var(--text-tertiary)] whitespace-nowrap border-b border-[var(--border-color)]"
-                                        colSpan={3}
-                                      >
-                                        买入原因
-                                      </th>
-                                      <th
-                                        className="px-3 py-1 text-center font-semibold text-[var(--text-tertiary)] whitespace-nowrap border-b border-[var(--border-color)]"
-                                        colSpan={3}
-                                      >
-                                        事后回溯
-                                      </th>
-                                      <th
-                                        className="px-3 py-2 text-left font-semibold text-[var(--text-tertiary)] whitespace-nowrap"
-                                        rowSpan={2}
-                                      >
-                                        其他
-                                      </th>
-                                    </tr>
-                                    <tr className="bg-[var(--bg-tertiary)] border-b border-[var(--border-color)]">
-                                      {[
-                                        "个股名称",
-                                        "外部因素",
-                                        "内部因素",
-                                        "成功/失败",
-                                        "原因分析",
-                                        "改进措施",
-                                      ].map((h) => (
+                            <BarChart2
+                              size={12}
+                              className="text-[var(--text-tertiary)] shrink-0"
+                            />
+                          ) : biasTable ? (
+                            <Brain
+                              size={12}
+                              className="text-[#a78bfa] shrink-0"
+                            />
+                          ) : isDailyLog ? (
+                            <CalendarDays
+                              size={12}
+                              className="text-[#60a5fa] shrink-0"
+                            />
+                          ) : (
+                            <FileText
+                              size={12}
+                              className="text-[var(--text-tertiary)] shrink-0"
+                            />
+                          )}
+                          <p className="text-sm font-medium text-[var(--text-primary)] truncate">
+                            {displayTitle}
+                          </p>
+                          {/* 日期范围 badge（复盘日记专属） */}
+                          {isDailyLog && !isExpanded && (
+                            <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-[#60a5fa]/10 text-[#60a5fa]">
+                              {dailyEntries.length} 天
+                            </span>
+                          )}
+                        </div>
+
+                        {/* ── 折叠时：摘要 ── */}
+                        {!isExpanded && (
+                          <div
+                            className="cursor-pointer"
+                            onClick={() =>
+                              isDailyLog
+                                ? expandMemo(m.id, dailyEntries)
+                                : toggleCollapse(m.id)
+                            }
+                          >
+                            {plan ? (
+                              <div>
+                                <p className="text-xs text-[var(--text-tertiary)]">
+                                  📋 {plan.rows.length} 条操作记录
+                                </p>
+                              </div>
+                            ) : biasTable ? (
+                              <div className="flex flex-wrap gap-1.5 mt-1">
+                                {biasTable.rows.slice(0, 6).map((r, ri) => (
+                                  <span
+                                    key={ri}
+                                    className="text-[10px] px-1.5 py-0.5 rounded bg-[#a78bfa]/10 text-[#a78bfa] border border-[#a78bfa]/20"
+                                  >
+                                    {r.name}
+                                  </span>
+                                ))}
+                                {biasTable.rows.length > 6 && (
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--bg-tertiary)] text-[var(--text-tertiary)]">
+                                    +{biasTable.rows.length - 6}
+                                  </span>
+                                )}
+                              </div>
+                            ) : isDailyLog ? (
+                              <div className="space-y-1">
+                                {/* 日期条目预览 */}
+                                <div className="flex flex-wrap gap-1.5 mt-1">
+                                  {dailyEntries.map((e, ei) => (
+                                    <span
+                                      key={`${e.date}-${ei}`}
+                                      className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--bg-tertiary)] text-[var(--text-tertiary)] font-mono"
+                                    >
+                                      {e.label}
+                                    </span>
+                                  ))}
+                                </div>
+                                {/* 文本摘要 */}
+                                {summary && (
+                                  <p className="text-xs text-[var(--text-tertiary)] leading-relaxed line-clamp-2 mt-1">
+                                    {summary}
+                                  </p>
+                                )}
+                              </div>
+                            ) : (
+                              summary && (
+                                <p className="text-xs text-[var(--text-tertiary)] leading-relaxed line-clamp-2">
+                                  {summary}
+                                </p>
+                              )
+                            )}
+                            <p className="mt-1.5 text-[11px] text-[var(--text-tertiary)]">
+                              {formatTime(m.updated_at)}
+                            </p>
+                          </div>
+                        )}
+
+                        {/* ── 展开时：完整内容 ── */}
+                        {isExpanded && (
+                          <>
+                            {plan ? (
+                              /* 操作预案表格 */
+                              <div className="mt-2 space-y-1.5">
+                                <div className="overflow-x-auto rounded-lg border border-[var(--border-color)] w-fit max-w-full">
+                                  <table className="text-xs border-collapse">
+                                    <thead>
+                                      <tr className="bg-[var(--bg-tertiary)] border-b border-[var(--border-color)]">
                                         <th
-                                          key={h}
-                                          className="px-3 py-1.5 text-left font-medium text-[var(--text-tertiary)] whitespace-nowrap text-[11px]"
+                                          className="px-3 py-2 text-left font-semibold text-[var(--text-tertiary)] whitespace-nowrap"
+                                          rowSpan={2}
                                         >
-                                          {h}
+                                          操作时间
                                         </th>
-                                      ))}
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    {plan.rows.map((row, ri) => {
-                                      const RESULT_COLOR: Record<
-                                        string,
-                                        string
-                                      > = {
-                                        成功: "text-[#e84444]",
-                                        失败: "text-[#09d464]",
-                                        持仓中: "text-[var(--text-tertiary)]",
-                                      };
-                                      return (
-                                        <tr
-                                          key={ri}
-                                          className={cn(
-                                            "border-b border-[var(--border-color)] last:border-0",
-                                            ri % 2 === 1 &&
-                                              "bg-[var(--bg-secondary)]/40",
-                                          )}
+                                        <th
+                                          className="px-3 py-1 text-center font-semibold text-[var(--text-tertiary)] whitespace-nowrap border-b border-[var(--border-color)]"
+                                          colSpan={4}
                                         >
-                                          <td className="px-3 py-2 text-[var(--text-secondary)] whitespace-nowrap">
-                                            {row.buyTime || "—"}
-                                          </td>
-                                          <td className="px-3 py-2 text-[var(--text-primary)] font-medium whitespace-nowrap">
-                                            {row.stockName || "—"}
-                                          </td>
-                                          <td className="px-3 py-2 text-[var(--text-secondary)]">
-                                            {row.externalFactor || "—"}
-                                          </td>
-                                          <td className="px-3 py-2 text-[var(--text-secondary)]">
-                                            {row.internalFactor || "—"}
-                                          </td>
-                                          <td
+                                          操作记录
+                                        </th>
+                                        <th
+                                          className="px-3 py-1 text-center font-semibold text-[var(--text-tertiary)] whitespace-nowrap border-b border-[var(--border-color)]"
+                                          colSpan={3}
+                                        >
+                                          事后回溯
+                                        </th>
+                                        <th
+                                          className="px-3 py-2 text-left font-semibold text-[var(--text-tertiary)] whitespace-nowrap"
+                                          rowSpan={2}
+                                        >
+                                          其他
+                                        </th>
+                                      </tr>
+                                      <tr className="bg-[var(--bg-tertiary)] border-b border-[var(--border-color)]">
+                                        {[
+                                          "个股名称",
+                                          "类型",
+                                          "价格",
+                                          "数量",
+                                          "成功/失败",
+                                          "原因分析",
+                                          "改进措施",
+                                        ].map((h) => (
+                                          <th
+                                            key={h}
                                             className={cn(
-                                              "px-3 py-2 font-semibold whitespace-nowrap",
-                                              RESULT_COLOR[row.result] ??
-                                                "text-[var(--text-secondary)]",
+                                              "px-3 py-1.5 text-left font-medium text-[var(--text-tertiary)] whitespace-nowrap text-[11px]",
+                                              (h === "原因分析" ||
+                                                h === "改进措施") &&
+                                                "min-w-[120px]",
                                             )}
                                           >
-                                            {row.result || "—"}
-                                          </td>
-                                          <td className="px-3 py-2 text-[var(--text-secondary)]">
-                                            {row.analysis || "—"}
-                                          </td>
-                                          <td className="px-3 py-2 text-[var(--text-secondary)]">
-                                            {row.improvement || "—"}
-                                          </td>
-                                          <td className="px-3 py-2 text-[var(--text-tertiary)]">
-                                            {row.other || ""}
-                                          </td>
-                                        </tr>
-                                      );
-                                    })}
-                                  </tbody>
-                                </table>
-                              </div>
-                            </div>
-                          ) : biasTable ? (
-                            /* 思维偏见知识表 */
-                            <div className="mt-3 space-y-2">
-                              {biasTable.rows.map((row, ri) => {
-                                const biasKey = `bias-${m.id}-${ri}`;
-                                const isRowExpanded =
-                                  expandedBiasRows.has(biasKey);
-                                const noteKey = `${m.id}-${ri}`;
-                                const isEditingNote =
-                                  editingBiasNote === noteKey;
-
-                                return (
-                                  <div
-                                    key={ri}
-                                    className={cn(
-                                      "rounded-lg border transition-colors",
-                                      isRowExpanded
-                                        ? "border-[#a78bfa]/40 bg-[#a78bfa]/5"
-                                        : "border-[var(--border-color)] hover:border-[#a78bfa]/30",
-                                    )}
-                                  >
-                                    {/* 行标题（可折叠） */}
-                                    <button
-                                      onClick={() => toggleBiasRow(biasKey)}
-                                      className="w-full flex items-center gap-3 px-3 py-2.5 text-left"
-                                    >
-                                      <span className="shrink-0 text-[10px] px-2 py-0.5 rounded-full bg-[#a78bfa]/15 text-[#a78bfa] font-medium border border-[#a78bfa]/20 whitespace-nowrap">
-                                        {row.name}
-                                      </span>
-                                      {!isRowExpanded && (
-                                        <span className="flex-1 text-xs text-[var(--text-tertiary)] truncate leading-relaxed">
-                                          {row.description
-                                            .slice(0, 60)
-                                            .replace(/\n/g, " ")}
-                                          {row.description.length > 60
-                                            ? "…"
-                                            : ""}
-                                        </span>
-                                      )}
-                                      {isRowExpanded && (
-                                        <span className="flex-1" />
-                                      )}
-                                      {isRowExpanded ? (
-                                        <ChevronDown
-                                          size={13}
-                                          className="text-[#a78bfa] shrink-0"
-                                        />
-                                      ) : (
-                                        <ChevronRight
-                                          size={13}
-                                          className="text-[var(--text-tertiary)] shrink-0"
-                                        />
-                                      )}
-                                    </button>
-
-                                    {/* 展开：详细内容 */}
-                                    {isRowExpanded && (
-                                      <div className="px-3 pb-3 space-y-3 border-t border-[var(--border-color)]">
-                                        {/* 概念描述 */}
-                                        <div className="pt-2.5">
-                                          <p className="text-[10px] font-semibold text-[var(--text-tertiary)] uppercase tracking-wider mb-1.5">
-                                            概念描述
-                                          </p>
-                                          <p className="text-xs text-[var(--text-secondary)] leading-relaxed whitespace-pre-line">
-                                            {row.description}
-                                          </p>
-                                        </div>
-
-                                        {/* 解决方案 */}
-                                        <div>
-                                          <p className="text-[10px] font-semibold text-[var(--text-tertiary)] uppercase tracking-wider mb-1.5">
-                                            解决方案
-                                          </p>
-                                          <ul className="space-y-1.5">
-                                            {row.solutions.map((sol, si) => (
-                                              <li
-                                                key={si}
-                                                className="flex gap-2 text-xs text-[var(--text-secondary)] leading-relaxed"
-                                              >
-                                                <span className="shrink-0 w-4 h-4 rounded-full bg-[#a78bfa]/20 text-[#a78bfa] text-[10px] flex items-center justify-center font-medium mt-0.5">
-                                                  {si + 1}
+                                            {h}
+                                          </th>
+                                        ))}
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {plan.rows.map((row, ri) => {
+                                        const RESULT_COLOR: Record<
+                                          string,
+                                          string
+                                        > = {
+                                          成功: "text-[#e84444]",
+                                          失败: "text-[#09d464]",
+                                          持仓中: "text-[var(--text-tertiary)]",
+                                        };
+                                        const isBuy = row.tradeType !== "sell";
+                                        const impKey = `${m.id}-${ri}`;
+                                        const analysisKey = `analysis-${m.id}-${ri}`;
+                                        const isAnalysisExpanded =
+                                          expandedAnalysis.has(analysisKey);
+                                        const isImpExpanded =
+                                          expandedImprovements.has(impKey);
+                                        // 将改进措施文本解析为段落（按空行或 ① ② 等分段）
+                                        const impLines = row.improvement
+                                          ? row.improvement.split(/\n/)
+                                          : [];
+                                        return (
+                                          <React.Fragment key={ri}>
+                                            <tr
+                                              className={cn(
+                                                "border-b border-[var(--border-color)]",
+                                                !isImpExpanded &&
+                                                  "last:border-0",
+                                                ri % 2 === 1 &&
+                                                  "bg-[var(--bg-secondary)]/40",
+                                              )}
+                                            >
+                                              <td className="px-3 py-2 text-[var(--text-secondary)] whitespace-nowrap">
+                                                {row.buyTime || "—"}
+                                              </td>
+                                              <td className="px-3 py-2 text-[var(--text-primary)] font-medium whitespace-nowrap">
+                                                {row.stockName || "—"}
+                                              </td>
+                                              <td className="px-3 py-2 whitespace-nowrap">
+                                                <span
+                                                  className={cn(
+                                                    "px-1.5 py-0.5 rounded text-[11px] font-semibold",
+                                                    isBuy
+                                                      ? "bg-[#e84444]/10 text-[#e84444]"
+                                                      : "bg-[#09d464]/10 text-[#09d464]",
+                                                  )}
+                                                >
+                                                  {isBuy ? "买入" : "卖出"}
                                                 </span>
-                                                <span>{sol}</span>
-                                              </li>
-                                            ))}
-                                          </ul>
-                                        </div>
-
-                                        {/* 个人总结 */}
-                                        <div className="border-t border-[var(--border-color)] pt-2.5">
-                                          <div className="flex items-center justify-between mb-1.5">
-                                            <p className="text-[10px] font-semibold text-[#f5a623] uppercase tracking-wider">
-                                              我的总结
-                                            </p>
-                                            {!isEditingNote && (
-                                              <button
-                                                onClick={() => {
-                                                  setEditingBiasNote(noteKey);
-                                                  setBiasNoteValue(
-                                                    row.userNote ?? "",
-                                                  );
-                                                }}
-                                                className="text-[10px] text-[var(--text-tertiary)] hover:text-[#f5a623] transition-colors flex items-center gap-0.5"
+                                              </td>
+                                              <td className="px-3 py-2 text-[var(--text-primary)] whitespace-nowrap">
+                                                {row.price
+                                                  ? `¥${row.price}`
+                                                  : "—"}
+                                              </td>
+                                              <td className="px-3 py-2 text-[var(--text-secondary)] whitespace-nowrap">
+                                                {row.shares || "—"}
+                                              </td>
+                                              <td
+                                                className={cn(
+                                                  "px-3 py-2 font-semibold whitespace-nowrap",
+                                                  RESULT_COLOR[row.result] ??
+                                                    "text-[var(--text-secondary)]",
+                                                )}
                                               >
-                                                <Pencil size={10} />
-                                                {row.userNote
-                                                  ? "编辑"
-                                                  : "添加总结"}
-                                              </button>
-                                            )}
+                                                {row.result || "—"}
+                                              </td>
+                                              <td className="px-3 py-2 min-w-[160px]">
+                                                {row.analysis ? (
+                                                  <button
+                                                    onClick={() =>
+                                                      toggleAnalysis(
+                                                        analysisKey,
+                                                      )
+                                                    }
+                                                    className={cn(
+                                                      "flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium transition-colors text-left w-full",
+                                                      isAnalysisExpanded
+                                                        ? "bg-[var(--bg-tertiary)] text-[var(--text-primary)]"
+                                                        : "bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]",
+                                                    )}
+                                                  >
+                                                    <span className="flex-1 line-clamp-2 text-left">
+                                                      {row.analysis}
+                                                    </span>
+                                                    {isAnalysisExpanded ? (
+                                                      <ChevronUp
+                                                        size={10}
+                                                        className="shrink-0"
+                                                      />
+                                                    ) : (
+                                                      <ChevronDown
+                                                        size={10}
+                                                        className="shrink-0"
+                                                      />
+                                                    )}
+                                                  </button>
+                                                ) : (
+                                                  <span className="text-[var(--text-tertiary)] text-xs">
+                                                    —
+                                                  </span>
+                                                )}
+                                              </td>
+                                              {/* 改进措施：折叠按钮 */}
+                                              <td className="px-3 py-2 min-w-[100px]">
+                                                {row.improvement ? (
+                                                  <button
+                                                    onClick={() =>
+                                                      toggleImprovement(impKey)
+                                                    }
+                                                    className={cn(
+                                                      "flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium transition-colors",
+                                                      isImpExpanded
+                                                        ? "bg-[#10b981]/15 text-[#10b981]"
+                                                        : "bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:bg-[#10b981]/10 hover:text-[#10b981]",
+                                                    )}
+                                                  >
+                                                    <span>查看</span>
+                                                    {isImpExpanded ? (
+                                                      <ChevronUp size={10} />
+                                                    ) : (
+                                                      <ChevronDown size={10} />
+                                                    )}
+                                                  </button>
+                                                ) : (
+                                                  <span className="text-[var(--text-tertiary)] text-xs">
+                                                    —
+                                                  </span>
+                                                )}
+                                              </td>
+                                              <td className="px-3 py-2 text-[var(--text-tertiary)]">
+                                                {row.other || ""}
+                                              </td>
+                                            </tr>
+                                            {isAnalysisExpanded &&
+                                              row.analysis && (
+                                                <tr className="border-b border-[var(--border-color)] bg-[var(--bg-secondary)]/60">
+                                                  <td
+                                                    colSpan={9}
+                                                    className="px-4 py-0"
+                                                  >
+                                                    <div className="py-3">
+                                                      <div className="flex items-center gap-2 mb-1.5">
+                                                        <span className="text-[11px] font-semibold text-[var(--text-secondary)]">
+                                                          交易原因
+                                                        </span>
+                                                        <span className="text-[10px] text-[var(--text-tertiary)]">
+                                                          {row.stockName}
+                                                          {isBuy
+                                                            ? " 买入"
+                                                            : " 卖出"}
+                                                          {row.price
+                                                            ? ` ¥${row.price}`
+                                                            : ""}
+                                                        </span>
+                                                        <button
+                                                          onClick={() =>
+                                                            toggleAnalysis(
+                                                              analysisKey,
+                                                            )
+                                                          }
+                                                          className="ml-auto flex items-center gap-0.5 text-[10px] text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]"
+                                                        >
+                                                          <ChevronUp
+                                                            size={10}
+                                                          />
+                                                          收起
+                                                        </button>
+                                                      </div>
+                                                      <p className="text-xs text-[var(--text-primary)] leading-relaxed">
+                                                        {row.analysis}
+                                                      </p>
+                                                    </div>
+                                                  </td>
+                                                </tr>
+                                              )}
+                                            {isImpExpanded &&
+                                              row.improvement && (
+                                                <tr className="border-b border-[var(--border-color)] bg-[#10b981]/3">
+                                                  <td
+                                                    colSpan={9}
+                                                    className="px-4 py-0"
+                                                  >
+                                                    <div className="py-3 space-y-1.5">
+                                                      {/* 标题行 */}
+                                                      <div className="flex items-center gap-2 mb-2">
+                                                        <div className="flex items-center gap-1.5">
+                                                          <span className="text-[11px] font-semibold text-[#10b981]">
+                                                            改进措施
+                                                          </span>
+                                                        </div>
+                                                        <span className="text-[10px] text-[var(--text-tertiary)]">
+                                                          {row.stockName}
+                                                          {isBuy
+                                                            ? " 买入"
+                                                            : " 卖出"}
+                                                          {row.price
+                                                            ? ` ¥${row.price}`
+                                                            : ""}
+                                                        </span>
+                                                        <button
+                                                          onClick={() =>
+                                                            toggleImprovement(
+                                                              impKey,
+                                                            )
+                                                          }
+                                                          className="ml-auto flex items-center gap-0.5 text-[10px] text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]"
+                                                        >
+                                                          <ChevronUp
+                                                            size={10}
+                                                          />
+                                                          收起
+                                                        </button>
+                                                      </div>
+                                                      {/* 改进内容：分段展示 */}
+                                                      <div className="text-xs text-[var(--text-secondary)] leading-relaxed space-y-1 pl-1 border-l-2 border-[#10b981]/30">
+                                                        {impLines.map(
+                                                          (line, li) => {
+                                                            if (!line.trim())
+                                                              return null;
+                                                            // 识别段落标题（① ② 等或【】包裹）
+                                                            const isHeader =
+                                                              /^[①②③④⑤⑥⑦⑧⑨]|^【/.test(
+                                                                line.trim(),
+                                                              );
+                                                            return (
+                                                              <p
+                                                                key={li}
+                                                                className={cn(
+                                                                  "leading-relaxed",
+                                                                  isHeader
+                                                                    ? "font-medium text-[var(--text-primary)] mt-2 first:mt-0"
+                                                                    : "text-[var(--text-secondary)]",
+                                                                )}
+                                                              >
+                                                                {line}
+                                                              </p>
+                                                            );
+                                                          },
+                                                        )}
+                                                      </div>
+                                                      {/* 偏见分析区块已移除 */}
+                                                    </div>
+                                                  </td>
+                                                </tr>
+                                              )}
+                                          </React.Fragment>
+                                        );
+                                      })}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </div>
+                            ) : biasTable ? (
+                              /* 思维偏见知识表 */
+                              <div className="mt-3 space-y-2">
+                                {biasTable.rows.map((row, ri) => {
+                                  const biasKey = `bias-${m.id}-${ri}`;
+                                  const isRowExpanded =
+                                    expandedBiasRows.has(biasKey);
+                                  const noteKey = `${m.id}-${ri}`;
+                                  const isEditingNote =
+                                    editingBiasNote === noteKey;
+
+                                  return (
+                                    <div
+                                      key={ri}
+                                      className={cn(
+                                        "rounded-lg border transition-colors",
+                                        isRowExpanded
+                                          ? "border-[#a78bfa]/40 bg-[#a78bfa]/5"
+                                          : "border-[var(--border-color)] hover:border-[#a78bfa]/30",
+                                      )}
+                                    >
+                                      {/* 行标题（可折叠） */}
+                                      <button
+                                        onClick={() => toggleBiasRow(biasKey)}
+                                        className="w-full flex items-center gap-3 px-3 py-2.5 text-left"
+                                      >
+                                        <span className="shrink-0 text-[10px] px-2 py-0.5 rounded-full bg-[#a78bfa]/15 text-[#a78bfa] font-medium border border-[#a78bfa]/20 whitespace-nowrap">
+                                          {row.name}
+                                        </span>
+                                        {!isRowExpanded && (
+                                          <span className="flex-1 text-xs text-[var(--text-tertiary)] truncate leading-relaxed">
+                                            {row.description
+                                              .slice(0, 60)
+                                              .replace(/\n/g, " ")}
+                                            {row.description.length > 60
+                                              ? "…"
+                                              : ""}
+                                          </span>
+                                        )}
+                                        {isRowExpanded && (
+                                          <span className="flex-1" />
+                                        )}
+                                        {isRowExpanded ? (
+                                          <ChevronDown
+                                            size={13}
+                                            className="text-[#a78bfa] shrink-0"
+                                          />
+                                        ) : (
+                                          <ChevronRight
+                                            size={13}
+                                            className="text-[var(--text-tertiary)] shrink-0"
+                                          />
+                                        )}
+                                      </button>
+
+                                      {/* 展开：详细内容 */}
+                                      {isRowExpanded && (
+                                        <div className="px-3 pb-3 space-y-3 border-t border-[var(--border-color)]">
+                                          {/* 概念描述 */}
+                                          <div className="pt-2.5">
+                                            <p className="text-[10px] font-semibold text-[var(--text-tertiary)] uppercase tracking-wider mb-1.5">
+                                              概念描述
+                                            </p>
+                                            <p className="text-xs text-[var(--text-secondary)] leading-relaxed whitespace-pre-line">
+                                              {row.description}
+                                            </p>
                                           </div>
-                                          {isEditingNote ? (
-                                            <div className="space-y-2">
-                                              <textarea
-                                                autoFocus
-                                                value={biasNoteValue}
-                                                onChange={(e) =>
-                                                  setBiasNoteValue(
-                                                    e.target.value,
-                                                  )
-                                                }
-                                                rows={3}
-                                                placeholder="写下你对这个偏见的理解和体会..."
-                                                className="w-full bg-[var(--bg-primary)] border border-[#f5a623]/40 rounded-lg px-2.5 py-2 text-xs text-[var(--text-primary)] placeholder-[var(--text-tertiary)] outline-none resize-none leading-relaxed focus:border-[#f5a623]/70"
-                                              />
-                                              <div className="flex items-center justify-end gap-2">
+
+                                          {/* 解决方案 */}
+                                          <div>
+                                            <p className="text-[10px] font-semibold text-[var(--text-tertiary)] uppercase tracking-wider mb-1.5">
+                                              解决方案
+                                            </p>
+                                            <ul className="space-y-1.5">
+                                              {row.solutions.map((sol, si) => (
+                                                <li
+                                                  key={si}
+                                                  className="flex gap-2 text-xs text-[var(--text-secondary)] leading-relaxed"
+                                                >
+                                                  <span className="shrink-0 w-4 h-4 rounded-full bg-[#a78bfa]/20 text-[#a78bfa] text-[10px] flex items-center justify-center font-medium mt-0.5">
+                                                    {si + 1}
+                                                  </span>
+                                                  <span>{sol}</span>
+                                                </li>
+                                              ))}
+                                            </ul>
+                                          </div>
+
+                                          {/* 个人总结 */}
+                                          <div className="border-t border-[var(--border-color)] pt-2.5">
+                                            <div className="flex items-center justify-between mb-1.5">
+                                              <p className="text-[10px] font-semibold text-[#f5a623] uppercase tracking-wider">
+                                                我的总结
+                                              </p>
+                                              {!isEditingNote && (
                                                 <button
                                                   onClick={() => {
-                                                    setEditingBiasNote(null);
-                                                    setBiasNoteValue("");
+                                                    setEditingBiasNote(noteKey);
+                                                    setBiasNoteValue(
+                                                      row.userNote ?? "",
+                                                    );
                                                   }}
-                                                  className="text-xs text-[var(--text-tertiary)] hover:text-[var(--text-primary)] px-2 py-1 transition-colors"
+                                                  className="text-[10px] text-[var(--text-tertiary)] hover:text-[#f5a623] transition-colors flex items-center gap-0.5"
                                                 >
-                                                  取消
+                                                  <Pencil size={10} />
+                                                  {row.userNote
+                                                    ? "编辑"
+                                                    : "添加总结"}
                                                 </button>
-                                                <button
-                                                  onClick={() =>
-                                                    saveBiasNote(m, ri)
-                                                  }
-                                                  className="flex items-center gap-1 px-2.5 py-1 bg-[#f5a623] text-black rounded text-xs font-medium hover:bg-[#e09510] transition-colors"
-                                                >
-                                                  <Check size={10} />
-                                                  保存
-                                                </button>
-                                              </div>
+                                              )}
                                             </div>
-                                          ) : row.userNote ? (
-                                            <p className="text-xs text-[#f5a623]/80 leading-relaxed whitespace-pre-line bg-[#f5a623]/5 rounded-lg px-2.5 py-2 border border-[#f5a623]/15">
-                                              {row.userNote}
-                                            </p>
-                                          ) : (
-                                            <p className="text-xs text-[var(--text-tertiary)] italic">
-                                              暂无总结，点击"添加总结"记录你的思考
-                                            </p>
-                                          )}
+                                            {isEditingNote ? (
+                                              <div className="space-y-2">
+                                                <textarea
+                                                  autoFocus
+                                                  value={biasNoteValue}
+                                                  onChange={(e) =>
+                                                    setBiasNoteValue(
+                                                      e.target.value,
+                                                    )
+                                                  }
+                                                  rows={3}
+                                                  placeholder="写下你对这个偏见的理解和体会..."
+                                                  className="w-full bg-[var(--bg-primary)] border border-[#f5a623]/40 rounded-lg px-2.5 py-2 text-xs text-[var(--text-primary)] placeholder-[var(--text-tertiary)] outline-none resize-none leading-relaxed focus:border-[#f5a623]/70"
+                                                />
+                                                <div className="flex items-center justify-end gap-2">
+                                                  <button
+                                                    onClick={() => {
+                                                      setEditingBiasNote(null);
+                                                      setBiasNoteValue("");
+                                                    }}
+                                                    className="text-xs text-[var(--text-tertiary)] hover:text-[var(--text-primary)] px-2 py-1 transition-colors"
+                                                  >
+                                                    取消
+                                                  </button>
+                                                  <button
+                                                    onClick={() =>
+                                                      saveBiasNote(m, ri)
+                                                    }
+                                                    className="flex items-center gap-1 px-2.5 py-1 bg-[#f5a623] text-black rounded text-xs font-medium hover:bg-[#e09510] transition-colors"
+                                                  >
+                                                    <Check size={10} />
+                                                    保存
+                                                  </button>
+                                                </div>
+                                              </div>
+                                            ) : row.userNote ? (
+                                              <p className="text-xs text-[#f5a623]/80 leading-relaxed whitespace-pre-line bg-[#f5a623]/5 rounded-lg px-2.5 py-2 border border-[#f5a623]/15">
+                                                {row.userNote}
+                                              </p>
+                                            ) : (
+                                              <p className="text-xs text-[var(--text-tertiary)] italic">
+                                                暂无总结，点击"添加总结"记录你的思考
+                                              </p>
+                                            )}
+                                          </div>
                                         </div>
-                                      </div>
-                                    )}
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          ) : isDailyLog ? (
-                            /* 复盘日记：按日期分块，每块可独立折叠 */
-                            <div className="mt-3 space-y-0">
-                              {dailyEntries.map((entry, ei) => {
-                                const dateKey = `${m.id}-${entry.date}`;
-                                const isDateCollapsed =
-                                  collapsedDates.has(dateKey);
-                                const bodyText = entry.body
-                                  .replace(/^\d+[、,，]\s*\d{8}\s*/, "")
-                                  .replace(/--\s*\d{8}/g, "")
-                                  .trim();
-                                const bodyPreview =
-                                  bodyText.slice(0, 60).replace(/\n/g, " ") +
-                                  (bodyText.length > 60 ? "…" : "");
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            ) : isDailyLog ? (
+                              /* 复盘日记：按日期分块，每块可独立折叠 */
+                              <div className="mt-3 space-y-0">
+                                {dailyEntries.map((entry, ei) => {
+                                  const dateKey = `${m.id}-${entry.date}`;
+                                  const isDateCollapsed =
+                                    collapsedDates.has(dateKey);
+                                  const bodyText = entry.body
+                                    .replace(/^\d+[、,，]\s*\d{8}\s*/, "")
+                                    .replace(/--\s*\d{8}/g, "")
+                                    .trim();
+                                  const bodyPreview =
+                                    bodyText.slice(0, 60).replace(/\n/g, " ") +
+                                    (bodyText.length > 60 ? "…" : "");
 
-                                return (
-                                  <div
-                                    key={`${entry.date}-${ei}`}
-                                    className={cn(
-                                      "relative pl-4",
-                                      ei < dailyEntries.length - 1 && "pb-3",
-                                    )}
-                                  >
-                                    {/* 时间轴线 */}
-                                    {ei < dailyEntries.length - 1 && (
-                                      <div className="absolute left-[5px] top-5 bottom-0 w-px bg-[var(--border-color)]" />
-                                    )}
-                                    {/* 圆点：折叠时实心，展开时空心 */}
+                                  return (
                                     <div
+                                      key={`${entry.date}-${ei}`}
                                       className={cn(
-                                        "absolute left-0 top-[5px] w-2.5 h-2.5 rounded-full border-2 border-[var(--bg-secondary)] transition-colors",
-                                        isDateCollapsed
-                                          ? "bg-[var(--border-color)]"
-                                          : "bg-[#60a5fa]/70",
+                                        "relative pl-4",
+                                        ei < dailyEntries.length - 1 && "pb-3",
                                       )}
-                                    />
-
-                                    {/* 日期标题行（可点击折叠） */}
-                                    <button
-                                      onClick={() => toggleDateEntry(dateKey)}
-                                      className="w-full flex items-center gap-2 mb-1.5 group/date"
                                     >
-                                      <span className="text-[11px] font-semibold text-[#60a5fa] font-mono tracking-wide">
-                                        {entry.label}
-                                      </span>
-                                      <div className="flex-1 h-px bg-[var(--border-color)]" />
-                                      {isDateCollapsed ? (
-                                        <ChevronRight
-                                          size={11}
-                                          className="text-[var(--text-tertiary)] shrink-0"
-                                        />
-                                      ) : (
-                                        <ChevronDown
-                                          size={11}
-                                          className="text-[var(--text-tertiary)] shrink-0"
-                                        />
+                                      {/* 时间轴线 */}
+                                      {ei < dailyEntries.length - 1 && (
+                                        <div className="absolute left-[5px] top-5 bottom-0 w-px bg-[var(--border-color)]" />
                                       )}
-                                    </button>
+                                      {/* 圆点：折叠时实心，展开时空心 */}
+                                      <div
+                                        className={cn(
+                                          "absolute left-0 top-[5px] w-2.5 h-2.5 rounded-full border-2 border-[var(--bg-secondary)] transition-colors",
+                                          isDateCollapsed
+                                            ? "bg-[var(--border-color)]"
+                                            : "bg-[#60a5fa]/70",
+                                        )}
+                                      />
 
-                                    {/* 折叠时：一行摘要 */}
-                                    {isDateCollapsed && (
-                                      <p
-                                        className="text-xs text-[var(--text-tertiary)] leading-relaxed mb-1 cursor-pointer"
+                                      {/* 日期标题行（可点击折叠） */}
+                                      <button
                                         onClick={() => toggleDateEntry(dateKey)}
+                                        className="w-full flex items-center gap-2 mb-1.5 group/date"
                                       >
-                                        {bodyPreview}
-                                      </p>
-                                    )}
+                                        <span className="text-[11px] font-semibold text-[#60a5fa] font-mono tracking-wide">
+                                          {entry.label}
+                                        </span>
+                                        <div className="flex-1 h-px bg-[var(--border-color)]" />
+                                        {isDateCollapsed ? (
+                                          <ChevronRight
+                                            size={11}
+                                            className="text-[var(--text-tertiary)] shrink-0"
+                                          />
+                                        ) : (
+                                          <ChevronDown
+                                            size={11}
+                                            className="text-[var(--text-tertiary)] shrink-0"
+                                          />
+                                        )}
+                                      </button>
 
-                                    {/* 展开时：完整正文 */}
-                                    {!isDateCollapsed && (
-                                      <div className="memo-markdown text-sm text-[var(--text-secondary)] leading-relaxed">
-                                        <ReactMarkdown
-                                          remarkPlugins={[remarkGfm]}
+                                      {/* 折叠时：一行摘要 */}
+                                      {isDateCollapsed && (
+                                        <p
+                                          className="text-xs text-[var(--text-tertiary)] leading-relaxed mb-1 cursor-pointer"
+                                          onClick={() =>
+                                            toggleDateEntry(dateKey)
+                                          }
                                         >
-                                          {bodyText}
-                                        </ReactMarkdown>
-                                      </div>
-                                    )}
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          ) : (
-                            /* 普通 markdown 内容 */
-                            <div className="mt-2 memo-markdown text-sm text-[var(--text-secondary)] leading-relaxed">
-                              <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                                {m.content}
-                              </ReactMarkdown>
-                            </div>
-                          )}
-                          <p className="mt-3 text-[11px] text-[var(--text-tertiary)]">
-                            {formatTime(m.updated_at)}
-                          </p>
-                        </>
-                      )}
-                    </div>
+                                          {bodyPreview}
+                                        </p>
+                                      )}
 
-                    {/* 操作按钮（hover显示） */}
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                      <button
-                        onClick={() => togglePin(m)}
-                        title={m.pinned ? "取消置顶" : "置顶"}
-                        className="p-1.5 rounded-md hover:bg-[var(--bg-primary)] text-[var(--text-tertiary)] hover:text-[#f5a623] transition-colors"
-                      >
-                        {m.pinned ? <PinOff size={13} /> : <Pin size={13} />}
-                      </button>
-                      <button
-                        onClick={() => openEdit(m)}
-                        title="编辑"
-                        className="p-1.5 rounded-md hover:bg-[var(--bg-primary)] text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors"
-                      >
-                        <Pencil size={13} />
-                      </button>
-                      <button
-                        onClick={() => deleteMemo(m.id)}
-                        title="删除"
-                        className="p-1.5 rounded-md hover:bg-[var(--bg-primary)] text-[var(--text-tertiary)] hover:text-red-400 transition-colors"
-                      >
-                        <Trash2 size={13} />
-                      </button>
+                                      {/* 展开时：完整正文 */}
+                                      {!isDateCollapsed && (
+                                        <div className="memo-markdown text-sm text-[var(--text-secondary)] leading-relaxed">
+                                          <ReactMarkdown
+                                            remarkPlugins={[remarkGfm]}
+                                          >
+                                            {bodyText}
+                                          </ReactMarkdown>
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            ) : (
+                              /* 普通 markdown 内容 */
+                              <div className="mt-2 memo-markdown text-sm text-[var(--text-secondary)] leading-relaxed">
+                                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                  {m.content}
+                                </ReactMarkdown>
+                              </div>
+                            )}
+                            <p className="mt-3 text-[11px] text-[var(--text-tertiary)]">
+                              {formatTime(m.updated_at)}
+                            </p>
+                          </>
+                        )}
+                      </div>
+
+                      {/* 操作按钮（hover显示） */}
+                      {!isExpanded || !plan ? (
+                        <div
+                          className={cn(
+                            "flex items-center gap-1 transition-opacity shrink-0",
+                            "opacity-0 group-hover:opacity-100",
+                          )}
+                        >
+                          <button
+                            onClick={() => togglePin(m)}
+                            title={m.pinned ? "取消置顶" : "置顶"}
+                            className="p-1.5 rounded-md hover:bg-[var(--bg-primary)] text-[var(--text-tertiary)] hover:text-[#f5a623] transition-colors"
+                          >
+                            {m.pinned ? (
+                              <PinOff size={13} />
+                            ) : (
+                              <Pin size={13} />
+                            )}
+                          </button>
+                          <button
+                            onClick={() => openEdit(m)}
+                            title="编辑"
+                            className="p-1.5 rounded-md hover:bg-[var(--bg-primary)] text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors"
+                          >
+                            <Pencil size={13} />
+                          </button>
+                          <button
+                            onClick={() => deleteMemo(m.id)}
+                            title="删除"
+                            className="p-1.5 rounded-md hover:bg-[var(--bg-primary)] text-[var(--text-tertiary)] hover:text-red-400 transition-colors"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      ) : null}
                     </div>
                   </div>
                 </div>

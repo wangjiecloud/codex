@@ -38,6 +38,7 @@ interface HoldingStock {
   costPrice: number; // 成本价
   shares: number; // 持仓股数
   currentPrice?: number;
+  closedPnlOverride?: number | null; // 手动覆盖的已清仓盈亏
   trades: TradeRecord[];
 }
 
@@ -82,6 +83,7 @@ async function apiFetchHoldings(): Promise<HoldingStock[]> {
     name: string;
     costPrice: number;
     shares: number;
+    closedPnlOverride?: number | null;
     trades: Array<{
       id: string;
       type: string;
@@ -97,6 +99,7 @@ async function apiFetchHoldings(): Promise<HoldingStock[]> {
     name: h.name,
     costPrice: h.costPrice,
     shares: h.shares,
+    closedPnlOverride: h.closedPnlOverride ?? null,
     trades: h.trades.map((t) => ({
       id: t.id,
       type: t.type as "buy" | "sell",
@@ -118,6 +121,7 @@ async function apiUpsertHolding(s: HoldingStock) {
       name: s.name,
       cost_price: s.costPrice,
       shares: s.shares,
+      closed_pnl_override: s.closedPnlOverride,
     }),
   });
 }
@@ -169,6 +173,40 @@ function calcPnl(stock: HoldingStock): {
   const pnl = marketValue - costValue;
   const pnlPct = costValue > 0 ? (pnl / costValue) * 100 : 0;
   return { pnl, pnlPct, marketValue, costValue };
+}
+
+/** 已清仓个股：根据交易记录计算实际盈亏，支持手动覆盖 */
+function calcClosedPnl(stock: HoldingStock): {
+  pnl: number; // 盈亏金额（元）
+  pnlPct: number; // 收益率（%）
+  totalCost: number; // 买入总成本
+  totalRevenue: number; // 卖出总收入
+  overridden: boolean; // 是否使用了手动覆盖值
+} {
+  if (stock.closedPnlOverride != null) {
+    let totalCost = 0;
+    for (const t of stock.trades) {
+      if (t.type === "buy") totalCost += t.price * t.shares;
+    }
+    const pnl = stock.closedPnlOverride;
+    const pnlPct = totalCost > 0 ? (pnl / totalCost) * 100 : 0;
+    return {
+      pnl,
+      pnlPct,
+      totalCost,
+      totalRevenue: totalCost + pnl,
+      overridden: true,
+    };
+  }
+  let totalCost = 0;
+  let totalRevenue = 0;
+  for (const t of stock.trades) {
+    if (t.type === "buy") totalCost += t.price * t.shares;
+    else if (t.type === "sell") totalRevenue += t.price * t.shares;
+  }
+  const pnl = totalRevenue - totalCost;
+  const pnlPct = totalCost > 0 ? (pnl / totalCost) * 100 : 0;
+  return { pnl, pnlPct, totalCost, totalRevenue, overridden: false };
 }
 
 /* ─────────────────────────────────────────────
@@ -699,6 +737,7 @@ interface HoldingCardProps {
   onEdit: () => void;
   onDelete: () => void;
   onDeleteTrade: (tradeId: string) => void;
+  onEditClosedPnl: (value: number | null) => void;
 }
 
 function HoldingCard({
@@ -708,10 +747,17 @@ function HoldingCard({
   onEdit,
   onDelete,
   onDeleteTrade,
+  onEditClosedPnl,
 }: HoldingCardProps) {
   const [expanded, setExpanded] = useState(false);
+  const [editingClosedPnl, setEditingClosedPnl] = useState(false);
+  const [closedPnlInput, setClosedPnlInput] = useState("");
+  const closedPnlInputRef = useRef<HTMLInputElement>(null);
   const { pnl, pnlPct, marketValue, costValue } = calcPnl(stock);
   const isProfit = pnl >= 0;
+  const isClosed = stock.shares === 0;
+  const closed = isClosed ? calcClosedPnl(stock) : null;
+  const closedIsProfit = closed ? closed.pnl >= 0 : false;
 
   return (
     <div className="border border-[var(--border-color)] rounded-xl overflow-hidden bg-[var(--bg-secondary)] hover:border-[var(--border-secondary)] transition-colors">
@@ -731,6 +777,11 @@ function HoldingCard({
             <span className="text-[10px] text-[var(--text-tertiary)]">
               {stock.code}
             </span>
+            {isClosed && (
+              <span className="px-1.5 py-0.5 rounded text-[9px] font-medium text-[var(--text-tertiary)] bg-[var(--bg-tertiary)] border border-[var(--border-color)]">
+                已清仓
+              </span>
+            )}
           </div>
           <div
             className={cn(
@@ -738,19 +789,21 @@ function HoldingCard({
               blurred && "blur-sm select-none",
             )}
           >
-            <div>
-              <span className="text-[var(--text-tertiary)]">持仓 </span>
-              <span className="text-[var(--text-secondary)] font-mono">
-                {stock.shares.toLocaleString()}股
-              </span>
-            </div>
+            {!isClosed && (
+              <div>
+                <span className="text-[var(--text-tertiary)]">持仓 </span>
+                <span className="text-[var(--text-secondary)] font-mono">
+                  {stock.shares.toLocaleString()}股
+                </span>
+              </div>
+            )}
             <div>
               <span className="text-[var(--text-tertiary)]">成本 </span>
               <span className="text-[var(--text-secondary)] font-mono">
                 ¥{stock.costPrice.toFixed(4)}
               </span>
             </div>
-            {stock.currentPrice && (
+            {!isClosed && stock.currentPrice && (
               <div>
                 <span className="text-[var(--text-tertiary)]">现价 </span>
                 <span className={cn("font-mono", getPriceColor(pnlPct))}>
@@ -761,60 +814,143 @@ function HoldingCard({
           </div>
         </div>
 
-        {/* Right: PnL */}
-        <div
-          className={cn(
-            "text-right transition-all duration-300",
-            blurred && "blur-sm select-none",
-          )}
-        >
+        {/* Right: PnL（持仓中）或 已清仓盈亏 */}
+        {!isClosed ? (
           <div
             className={cn(
-              "text-[14px] font-bold font-mono",
-              isProfit ? "text-[#e84444]" : "text-[#09d464]",
+              "text-right transition-all duration-300",
+              blurred && "blur-sm select-none",
             )}
           >
-            {isProfit ? "+" : ""}
-            {formatMoney(pnl)}
+            <div
+              className={cn(
+                "text-[14px] font-bold font-mono",
+                isProfit ? "text-[#e84444]" : "text-[#09d464]",
+              )}
+            >
+              {isProfit ? "+" : ""}
+              {formatMoney(pnl)}
+            </div>
+            <div
+              className={cn(
+                "text-[11px] font-mono",
+                isProfit ? "text-[#e84444]" : "text-[#09d464]",
+              )}
+            >
+              {isProfit ? "+" : ""}
+              {pnlPct.toFixed(2)}%
+            </div>
+            <div className="text-[10px] text-[var(--text-tertiary)] mt-0.5">
+              市值 {formatMoney(marketValue)}
+            </div>
           </div>
+        ) : closed ? (
           <div
             className={cn(
-              "text-[11px] font-mono",
-              isProfit ? "text-[#e84444]" : "text-[#09d464]",
+              "text-right transition-all duration-300",
+              blurred && "blur-sm select-none",
             )}
           >
-            {isProfit ? "+" : ""}
-            {pnlPct.toFixed(2)}%
+            {editingClosedPnl ? (
+              <div
+                className="flex items-center gap-1 justify-end"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <input
+                  ref={closedPnlInputRef}
+                  className="w-20 px-1.5 py-0.5 rounded bg-[var(--bg-tertiary)] border border-[var(--accent)]/50 text-[13px] font-mono text-right outline-none text-[var(--text-primary)]"
+                  type="number"
+                  step="0.01"
+                  placeholder="盈亏额"
+                  value={closedPnlInput}
+                  onChange={(e) => setClosedPnlInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      const v = parseFloat(closedPnlInput);
+                      onEditClosedPnl(isNaN(v) ? null : v);
+                      setEditingClosedPnl(false);
+                    } else if (e.key === "Escape") {
+                      setEditingClosedPnl(false);
+                    }
+                  }}
+                  autoFocus
+                />
+                <button
+                  onClick={() => {
+                    const v = parseFloat(closedPnlInput);
+                    onEditClosedPnl(isNaN(v) ? null : v);
+                    setEditingClosedPnl(false);
+                  }}
+                  className="text-[10px] text-[var(--accent)] hover:underline"
+                >
+                  OK
+                </button>
+              </div>
+            ) : (
+              <div
+                className="cursor-pointer group/pnl"
+                onClick={() => {
+                  setClosedPnlInput(String(closed.pnl.toFixed(2)));
+                  setEditingClosedPnl(true);
+                }}
+                title="点击编辑收益"
+              >
+                <div
+                  className={cn(
+                    "text-[14px] font-bold font-mono",
+                    closedIsProfit ? "text-[#e84444]" : "text-[#09d464]",
+                  )}
+                >
+                  {closedIsProfit ? "+" : ""}
+                  {formatMoney(closed.pnl)}
+                  <Edit2
+                    size={9}
+                    className="inline ml-1 opacity-0 group-hover/pnl:opacity-50 transition-opacity"
+                  />
+                </div>
+                <div
+                  className={cn(
+                    "text-[11px] font-mono",
+                    closedIsProfit ? "text-[#e84444]" : "text-[#09d464]",
+                  )}
+                >
+                  {closedIsProfit ? "+" : ""}
+                  {closed.pnlPct.toFixed(2)}%
+                </div>
+                <div className="text-[10px] text-[var(--text-tertiary)] mt-0.5">
+                  已清仓收益{closed.overridden ? " ✎" : ""}
+                </div>
+              </div>
+            )}
           </div>
-          <div className="text-[10px] text-[var(--text-tertiary)] mt-0.5">
-            市值 {formatMoney(marketValue)}
-          </div>
-        </div>
+        ) : null}
       </div>
 
-      {/* Cost bar */}
-      <div
-        className={cn(
-          "mx-3 mb-2 transition-all duration-300",
-          blurred && "blur-sm",
-        )}
-      >
-        <div className="flex justify-between text-[10px] text-[var(--text-tertiary)] mb-1">
-          <span>成本 {formatMoney(costValue)}</span>
-          <span>市值 {formatMoney(marketValue)}</span>
+      {/* Cost bar（已清仓不显示） */}
+      {!isClosed && (
+        <div
+          className={cn(
+            "mx-3 mb-2 transition-all duration-300",
+            blurred && "blur-sm",
+          )}
+        >
+          <div className="flex justify-between text-[10px] text-[var(--text-tertiary)] mb-1">
+            <span>成本 {formatMoney(costValue)}</span>
+            <span>市值 {formatMoney(marketValue)}</span>
+          </div>
+          <div className="h-1.5 rounded-full bg-[var(--bg-deep)] overflow-hidden">
+            <div
+              className={cn(
+                "h-full rounded-full transition-all duration-500",
+                isProfit ? "bg-[#e84444]" : "bg-[#09d464]",
+              )}
+              style={{
+                width: `${Math.min(100, Math.max(5, 50 + pnlPct * 2))}%`,
+              }}
+            />
+          </div>
         </div>
-        <div className="h-1.5 rounded-full bg-[var(--bg-deep)] overflow-hidden">
-          <div
-            className={cn(
-              "h-full rounded-full transition-all duration-500",
-              isProfit ? "bg-[#e84444]" : "bg-[#09d464]",
-            )}
-            style={{
-              width: `${Math.min(100, Math.max(5, 50 + pnlPct * 2))}%`,
-            }}
-          />
-        </div>
-      </div>
+      )}
 
       {/* Actions */}
       <div className="flex items-center border-t border-[var(--border-color)] bg-[var(--bg-deep)]">
@@ -1001,8 +1137,99 @@ function SummaryBar({
 }
 
 /* ─────────────────────────────────────────────
+   ClosedSummaryBar：已清仓统计条
+───────────────────────────────────────────── */
+function ClosedSummaryBar({
+  holdings,
+  blurred,
+}: {
+  holdings: HoldingStock[];
+  blurred: boolean;
+}) {
+  if (holdings.length === 0) return null;
+
+  const stats = holdings.map((s) => calcClosedPnl(s));
+  const totalPnl = stats.reduce((sum, s) => sum + s.pnl, 0);
+  const totalCost = stats.reduce((sum, s) => sum + s.totalCost, 0);
+  const totalPnlPct = totalCost > 0 ? (totalPnl / totalCost) * 100 : 0;
+  const winners = stats.filter((s) => s.pnl > 0).length;
+  const winRate = holdings.length > 0 ? (winners / holdings.length) * 100 : 0;
+  const avgPnlPct =
+    stats.length > 0
+      ? stats.reduce((sum, s) => sum + s.pnlPct, 0) / stats.length
+      : 0;
+  const isProfit = totalPnl >= 0;
+
+  return (
+    <div className="flex items-center gap-4 px-4 py-2.5 bg-[var(--bg-secondary)] border-b border-[var(--border-color)]">
+      <div
+        className={cn(
+          "flex-1 transition-all duration-300",
+          blurred && "blur-sm select-none",
+        )}
+      >
+        <div className="flex items-center gap-3 flex-wrap">
+          <div>
+            <div className="text-[10px] text-[var(--text-tertiary)]">
+              累计盈亏
+            </div>
+            <div
+              className={cn(
+                "text-[14px] font-bold font-mono",
+                isProfit ? "text-[#e84444]" : "text-[#09d464]",
+              )}
+            >
+              {isProfit ? "+" : ""}¥{formatMoney(totalPnl)}
+              <span className="text-[11px] ml-1">
+                ({isProfit ? "+" : ""}
+                {totalPnlPct.toFixed(2)}%)
+              </span>
+            </div>
+          </div>
+          <div className="w-px h-8 bg-[var(--border-color)]" />
+          <div>
+            <div className="text-[10px] text-[var(--text-tertiary)]">胜率</div>
+            <div
+              className={cn(
+                "text-[13px] font-bold font-mono",
+                winRate >= 50 ? "text-[#e84444]" : "text-[#09d464]",
+              )}
+            >
+              {winRate.toFixed(0)}%
+            </div>
+            <div className="text-[9px] text-[var(--text-tertiary)]">
+              {winners}/{holdings.length} 盈利
+            </div>
+          </div>
+          <div className="w-px h-8 bg-[var(--border-color)]" />
+          <div>
+            <div className="text-[10px] text-[var(--text-tertiary)]">
+              平均收益率
+            </div>
+            <div
+              className={cn(
+                "text-[13px] font-mono font-semibold",
+                avgPnlPct >= 0 ? "text-[#e84444]" : "text-[#09d464]",
+              )}
+            >
+              {avgPnlPct >= 0 ? "+" : ""}
+              {avgPnlPct.toFixed(2)}%
+            </div>
+          </div>
+        </div>
+      </div>
+      <div className="text-[10px] text-[var(--text-tertiary)]">
+        {holdings.length} 笔
+      </div>
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────
    Main Component
 ───────────────────────────────────────────── */
+type PortfolioTab = "holding" | "closed";
+
 export function PortfolioPanel() {
   const [holdings, setHoldings] = useState<HoldingStock[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1016,6 +1243,7 @@ export function PortfolioPanel() {
   const [addingTradeFor, setAddingTradeFor] = useState<HoldingStock | null>(
     null,
   );
+  const [activeTab, setActiveTab] = useState<PortfolioTab>("holding");
 
   useEffect(() => {
     apiFetchHoldings()
@@ -1162,7 +1390,21 @@ export function PortfolioPanel() {
     }
   };
 
+  const handleEditClosedPnl = async (
+    stock: HoldingStock,
+    value: number | null,
+  ) => {
+    const updated = { ...stock, closedPnlOverride: value };
+    setHoldings((prev) => prev.map((s) => (s.id === stock.id ? updated : s)));
+    await apiUpsertHolding(updated);
+  };
+
   const blurred = !unlocked;
+
+  const activeHoldings = holdings.filter((s) => s.shares > 0);
+  const closedHoldings = holdings.filter((s) => s.shares === 0);
+  const visibleHoldings =
+    activeTab === "holding" ? activeHoldings : closedHoldings;
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -1186,9 +1428,44 @@ export function PortfolioPanel() {
             {unlocked ? <Lock size={9} /> : <Lock size={9} />}
             {unlocked ? "已解锁" : "已锁定"}
           </button>
+          {/* Tab 切换 */}
+          <div className="flex items-center rounded-lg bg-[var(--bg-tertiary)] border border-[var(--border-color)] p-0.5 ml-1">
+            <button
+              onClick={() => setActiveTab("holding")}
+              className={cn(
+                "px-2.5 py-0.5 rounded-md text-[10px] font-medium transition-colors",
+                activeTab === "holding"
+                  ? "bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-sm"
+                  : "text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]",
+              )}
+            >
+              持仓中
+              {activeHoldings.length > 0 && (
+                <span className="ml-1 text-[9px] opacity-60">
+                  {activeHoldings.length}
+                </span>
+              )}
+            </button>
+            <button
+              onClick={() => setActiveTab("closed")}
+              className={cn(
+                "px-2.5 py-0.5 rounded-md text-[10px] font-medium transition-colors",
+                activeTab === "closed"
+                  ? "bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-sm"
+                  : "text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]",
+              )}
+            >
+              已清仓
+              {closedHoldings.length > 0 && (
+                <span className="ml-1 text-[9px] opacity-60">
+                  {closedHoldings.length}
+                </span>
+              )}
+            </button>
+          </div>
         </div>
         <div className="flex items-center gap-2">
-          {unlocked && (
+          {unlocked && activeTab === "holding" && (
             <button
               onClick={() => setShowAddHolding(true)}
               className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[var(--accent)]/10 hover:bg-[var(--accent)]/20 text-[var(--accent)] text-[11px] border border-[var(--accent)]/30 transition-colors"
@@ -1199,9 +1476,12 @@ export function PortfolioPanel() {
         </div>
       </div>
 
-      {/* Summary */}
-      {holdings.length > 0 && (
-        <SummaryBar holdings={holdings} blurred={blurred} />
+      {/* Summary：只统计持仓中的 */}
+      {activeHoldings.length > 0 && activeTab === "holding" && (
+        <SummaryBar holdings={activeHoldings} blurred={blurred} />
+      )}
+      {closedHoldings.length > 0 && activeTab === "closed" && (
+        <ClosedSummaryBar holdings={closedHoldings} blurred={blurred} />
       )}
 
       {/* Holdings list */}
@@ -1211,19 +1491,25 @@ export function PortfolioPanel() {
             <div className="w-5 h-5 border-2 border-[var(--accent)] border-t-transparent rounded-full animate-spin" />
             <span>加载中...</span>
           </div>
-        ) : holdings.length === 0 ? (
+        ) : visibleHoldings.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-40 text-[var(--text-tertiary)] text-[12px] gap-3">
             <DollarSign size={28} className="opacity-30" />
-            <span>暂无持仓，点击"添加持仓"开始记录</span>
-            <button
-              onClick={() => requireAuth(() => setShowAddHolding(true))}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[var(--accent)]/10 hover:bg-[var(--accent)]/20 text-[var(--accent)] text-[12px] border border-[var(--accent)]/30 transition-colors"
-            >
-              <Plus size={13} /> 添加第一条持仓
-            </button>
+            {activeTab === "holding" ? (
+              <>
+                <span>暂无持仓，点击"添加持仓"开始记录</span>
+                <button
+                  onClick={() => requireAuth(() => setShowAddHolding(true))}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[var(--accent)]/10 hover:bg-[var(--accent)]/20 text-[var(--accent)] text-[12px] border border-[var(--accent)]/30 transition-colors"
+                >
+                  <Plus size={13} /> 添加第一条持仓
+                </button>
+              </>
+            ) : (
+              <span>暂无已清仓记录</span>
+            )}
           </div>
         ) : (
-          holdings.map((stock) => (
+          visibleHoldings.map((stock) => (
             <HoldingCard
               key={stock.id}
               stock={stock}
@@ -1233,6 +1519,9 @@ export function PortfolioPanel() {
               onDelete={() => requireAuth(() => handleDeleteHolding(stock.id))}
               onDeleteTrade={(tradeId) =>
                 requireAuth(() => handleDeleteTrade(stock.id, tradeId))
+              }
+              onEditClosedPnl={(value) =>
+                requireAuth(() => handleEditClosedPnl(stock, value))
               }
             />
           ))

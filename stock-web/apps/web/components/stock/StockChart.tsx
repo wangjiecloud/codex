@@ -319,6 +319,34 @@ export function StockChart({
     setMounted(true);
   }, []);
 
+  /* ── zoom: visibleCount 控制显示的 K 线根数（末尾对齐） ── */
+  const [visibleCount, setVisibleCount] = useState<number | null>(null);
+  // 当 data 长度变化时，若 visibleCount 超出则重置
+  const effectiveVisible = Math.min(visibleCount ?? data.length, data.length);
+  // 实际渲染的数据片段（末尾 effectiveVisible 根）
+  const visibleData = useMemo(
+    () => data.slice(data.length - effectiveVisible),
+    [data, effectiveVisible],
+  );
+  // visibleData 在原始 data 中的起始偏移
+  const zoomIn = useCallback(() => {
+    // 放大：减少显示根数（最少 20 根）
+    setVisibleCount((prev) => {
+      const cur = prev ?? data.length;
+      return Math.max(20, Math.round(cur * 0.7));
+    });
+  }, [data.length]);
+
+  const zoomOut = useCallback(() => {
+    // 缩小：增加显示根数（最多 data.length）
+    setVisibleCount((prev) => {
+      const cur = prev ?? data.length;
+      const next = Math.round(cur / 0.7);
+      if (next >= data.length) return null; // null = 全部显示
+      return next;
+    });
+  }, [data.length]);
+
   /* MA visibility — 直接从 prop 转换为 Set，由父组件控制 */
   const activeMAs = useMemo(() => new Set(activeMAsArray), [activeMAsArray]);
 
@@ -329,13 +357,13 @@ export function StockChart({
 
   /* ── computed indicators ── */
   const indicators = useMemo(() => {
-    if (!data.length) return null;
-    const macd = calcMACD(data);
-    const kdj = calcKDJ(data);
-    const boll = calcBOLL(data);
-    const volMa5 = calcVolMA(data, 5);
-    const volMa10 = calcVolMA(data, 10);
-    const mas = MA_PERIODS.map((p) => calcMA(data, p));
+    if (!visibleData.length) return null;
+    const macd = calcMACD(visibleData);
+    const kdj = calcKDJ(visibleData);
+    const boll = calcBOLL(visibleData);
+    const volMa5 = calcVolMA(visibleData, 5);
+    const volMa10 = calcVolMA(visibleData, 10);
+    const mas = MA_PERIODS.map((p) => calcMA(visibleData, p));
     // cross signals
     const macdCross = detectCross(
       macd.map((d) => d.macd),
@@ -346,7 +374,7 @@ export function StockChart({
       kdj.map((d) => d.d),
     );
     return { macd, kdj, boll, volMa5, volMa10, mas, macdCross, kdjCross };
-  }, [data]);
+  }, [visibleData]);
 
   /* ── bar layout ── */
   const PADDING_LEFT = 2;
@@ -356,28 +384,28 @@ export function StockChart({
   const PADDING_BOTTOM_SUB = 4;
 
   const barWidth = useMemo(() => {
-    if (!data.length) return 8;
+    if (!visibleData.length) return 8;
     const plotW = canvasWidth - PADDING_LEFT - PADDING_RIGHT;
-    return Math.max(1, plotW / data.length);
-  }, [data.length, canvasWidth]);
+    return Math.max(1, plotW / visibleData.length);
+  }, [visibleData.length, canvasWidth]);
 
   // 数据始终从左侧铺满，不留右侧空白
   const startX = PADDING_LEFT;
 
   /* ── time labels ── */
   const timeLabels = useMemo((): { idx: number; label: string }[] => {
-    if (!data.length) return [];
+    if (!visibleData.length) return [];
     const result: { idx: number; label: string }[] = [];
     const count = Math.floor((canvasWidth - PADDING_LEFT - PADDING_RIGHT) / 80);
-    const step = Math.max(1, Math.floor(data.length / count));
-    for (let i = 0; i < data.length; i += step) {
-      const t = data[i].time;
+    const step = Math.max(1, Math.floor(visibleData.length / count));
+    for (let i = 0; i < visibleData.length; i += step) {
+      const t = visibleData[i].time;
       const d = new Date(t);
       const label = `${d.getMonth() + 1}/${d.getDate()}`;
       result.push({ idx: i, label });
     }
     return result;
-  }, [data, canvasWidth]);
+  }, [visibleData, canvasWidth]);
 
   /* ── theme colors — use state to avoid SSR/CSR hydration mismatch ── */
   const makeColors = (t: string) => ({
@@ -494,7 +522,7 @@ export function StockChart({
   ──────────────────────────────────────────── */
   const drawMain = useCallback(() => {
     const canvas = mainCanvasRef.current;
-    if (!canvas || !data.length || !indicators) return;
+    if (!canvas || !visibleData.length || !indicators) return;
     const setup = setupCanvas(canvas, canvasWidth, MAIN_H);
     if (!setup) return;
     const { ctx, W, H } = setup;
@@ -514,8 +542,8 @@ export function StockChart({
     const { x0, x1, y0, h } = getPlotArea(dc);
 
     // price range
-    const allHigh = Math.max(...data.map((b) => b.high));
-    const allLow = Math.min(...data.map((b) => b.low));
+    const allHigh = Math.max(...visibleData.map((b) => b.high));
+    const allLow = Math.min(...visibleData.map((b) => b.low));
     const pad = (allHigh - allLow) * 0.05;
     const pMin = allLow - pad;
     const pMax = allHigh + pad;
@@ -578,7 +606,7 @@ export function StockChart({
     // Candlesticks
     const candleW = Math.max(1, barWidth * 0.6);
     const wickW = Math.max(1, barWidth * 0.12);
-    data.forEach((bar, i) => {
+    visibleData.forEach((bar, i) => {
       const isUp = bar.close >= bar.open;
       const color = isUp ? colors.up : colors.down;
       const x = startX + i * barWidth + barWidth / 2;
@@ -620,7 +648,7 @@ export function StockChart({
     // Time axis
     drawTimeAxis(dc, timeLabels, colors.grid, colors.text, barWidth, startX);
   }, [
-    data,
+    visibleData,
     indicators,
     activeIndicators,
     activeMAs,
@@ -636,7 +664,7 @@ export function StockChart({
   ──────────────────────────────────────────── */
   const drawMACD = useCallback(() => {
     const canvas = macdCanvasRef.current;
-    if (!canvas || !data.length || !indicators) return;
+    if (!canvas || !visibleData.length || !indicators) return;
     const setup = setupCanvas(canvas, canvasWidth, SUB_H);
     if (!setup) return;
     const { ctx, W, H } = setup;
@@ -725,14 +753,22 @@ export function StockChart({
       colors.golden,
       colors.death,
     );
-  }, [data, indicators, colors, barWidth, startX, drawCrossAnnotations, SUB_H]);
+  }, [
+    visibleData,
+    indicators,
+    colors,
+    barWidth,
+    startX,
+    drawCrossAnnotations,
+    SUB_H,
+  ]);
 
   /* ────────────────────────────────────────────
      DRAW VOL
   ──────────────────────────────────────────── */
   const drawVol = useCallback(() => {
     const canvas = volCanvasRef.current;
-    if (!canvas || !data.length || !indicators) return;
+    if (!canvas || !visibleData.length || !indicators) return;
     const setup = setupCanvas(canvas, canvasWidth, SUB_H);
     if (!setup) return;
     const { ctx, W, H } = setup;
@@ -751,14 +787,14 @@ export function StockChart({
     };
     const { y0, h } = getPlotArea(dc);
 
-    const maxVol = Math.max(...data.map((b) => b.volume)) * 1.1;
+    const maxVol = Math.max(...visibleData.map((b) => b.volume)) * 1.1;
     const pMin = 0,
       pMax = maxVol;
 
     drawPriceAxis(dc, pMin, pMax, 4, colors.grid, colors.text);
 
     const bw = Math.max(1, barWidth * 0.6);
-    data.forEach((bar, i) => {
+    visibleData.forEach((bar, i) => {
       const isUp = bar.close >= bar.open;
       const x = startX + i * barWidth + barWidth / 2;
       const topY = valToY(bar.volume, pMin, pMax, y0, h);
@@ -802,14 +838,14 @@ export function StockChart({
     });
     ctx.stroke();
     ctx.restore();
-  }, [data, indicators, colors, barWidth, startX, SUB_H]);
+  }, [visibleData, indicators, colors, barWidth, startX, SUB_H]);
 
   /* ────────────────────────────────────────────
      DRAW KDJ
   ──────────────────────────────────────────── */
   const drawKDJ = useCallback(() => {
     const canvas = kdjCanvasRef.current;
-    if (!canvas || !data.length || !indicators) return;
+    if (!canvas || !visibleData.length || !indicators) return;
     const setup = setupCanvas(canvas, canvasWidth, SUB_H);
     if (!setup) return;
     const { ctx, W, H } = setup;
@@ -874,7 +910,15 @@ export function StockChart({
       colors.golden,
       colors.death,
     );
-  }, [data, indicators, colors, barWidth, startX, drawCrossAnnotations, SUB_H]);
+  }, [
+    visibleData,
+    indicators,
+    colors,
+    barWidth,
+    startX,
+    drawCrossAnnotations,
+    SUB_H,
+  ]);
 
   /* ────────────────────────────────────────────
      DRAW CROSSHAIR OVERLAY
@@ -889,7 +933,7 @@ export function StockChart({
       if (!setup) return;
       const { ctx, W, H } = setup;
       ctx.clearRect(0, 0, W, H);
-      if (idx == null || !data[idx]) return;
+      if (idx == null || !visibleData[idx]) return;
 
       const x = startX + idx * barWidth + barWidth / 2;
       ctx.save();
@@ -902,7 +946,7 @@ export function StockChart({
       ctx.stroke();
       ctx.restore();
     },
-    [data, barWidth, startX, colors],
+    [visibleData, barWidth, startX, colors],
   );
 
   /* ────────────────────────────────────────────
@@ -915,10 +959,10 @@ export function StockChart({
       const rect = container.getBoundingClientRect();
       const x = e.clientX - rect.left;
       const idx = Math.round((x - startX) / barWidth - 0.5);
-      const clamped = Math.max(0, Math.min(idx, data.length - 1));
+      const clamped = Math.max(0, Math.min(idx, visibleData.length - 1));
       setHoverIdx(clamped);
     },
-    [startX, barWidth, data.length],
+    [startX, barWidth, visibleData.length],
   );
 
   const handleMouseLeave = useCallback(() => setHoverIdx(null), []);
@@ -934,11 +978,11 @@ export function StockChart({
       const rect = container.getBoundingClientRect();
       const x = e.clientX - rect.left;
       const idx = Math.round((x - startX) / barWidth - 0.5);
-      const clamped = Math.max(0, Math.min(idx, data.length - 1));
-      const bar = data[clamped];
+      const clamped = Math.max(0, Math.min(idx, visibleData.length - 1));
+      const bar = visibleData[clamped];
       if (bar) onBarDoubleClick(bar);
     },
-    [onBarDoubleClick, startX, barWidth, data],
+    [onBarDoubleClick, startX, barWidth, visibleData],
   );
 
   /* ────────────────────────────────────────────
@@ -977,34 +1021,37 @@ export function StockChart({
   /* ────────────────────────────────────────────
      HOVER INFO
   ──────────────────────────────────────────── */
-  const bar = hoverIdx != null ? data[hoverIdx] : data[data.length - 1];
+  const bar =
+    hoverIdx != null
+      ? visibleData[hoverIdx]
+      : visibleData[visibleData.length - 1];
   const macdVal =
     hoverIdx != null && indicators
       ? indicators.macd[hoverIdx]
-      : indicators?.macd[data.length - 1];
+      : indicators?.macd[visibleData.length - 1];
   const kdjVal =
     hoverIdx != null && indicators
       ? indicators.kdj[hoverIdx]
-      : indicators?.kdj[data.length - 1];
+      : indicators?.kdj[visibleData.length - 1];
   const volMa5Val =
     hoverIdx != null && indicators
       ? indicators.volMa5[hoverIdx]
-      : indicators?.volMa5[data.length - 1];
+      : indicators?.volMa5[visibleData.length - 1];
   const volMa10Val =
     hoverIdx != null && indicators
       ? indicators.volMa10[hoverIdx]
-      : indicators?.volMa10[data.length - 1];
+      : indicators?.volMa10[visibleData.length - 1];
   const maVals = MA_PERIODS.map((_, pi) =>
     hoverIdx != null && indicators
       ? indicators.mas[pi][hoverIdx]
-      : indicators?.mas[pi][data.length - 1],
+      : indicators?.mas[pi][visibleData.length - 1],
   );
 
   const prevClose =
-    bar && data.length > 1
+    bar && visibleData.length > 1
       ? hoverIdx != null && hoverIdx > 0
-        ? data[hoverIdx - 1].close
-        : data[0].close
+        ? visibleData[hoverIdx - 1].close
+        : visibleData[0].close
       : 0;
   const changePct = bar
     ? bar.changePct != null
@@ -1079,6 +1126,59 @@ export function StockChart({
             </span>
           </>
         )}
+
+        {/* 缩放按钮 */}
+        <div className="ml-auto flex items-center gap-0.5 shrink-0">
+          <button
+            onClick={zoomIn}
+            title="放大（显示更少K线）"
+            style={{
+              width: 18,
+              height: 18,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              borderRadius: 3,
+              border: `1px solid ${colors.border}`,
+              background: "transparent",
+              color: colors.text,
+              cursor: "pointer",
+              fontSize: 14,
+              lineHeight: 1,
+              userSelect: "none",
+            }}
+          >
+            +
+          </button>
+          <button
+            onClick={zoomOut}
+            title="缩小（显示更多K线）"
+            disabled={visibleCount === null || visibleCount >= data.length}
+            style={{
+              width: 18,
+              height: 18,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              borderRadius: 3,
+              border: `1px solid ${colors.border}`,
+              background: "transparent",
+              color:
+                visibleCount === null || visibleCount >= data.length
+                  ? colors.border
+                  : colors.text,
+              cursor:
+                visibleCount === null || visibleCount >= data.length
+                  ? "default"
+                  : "pointer",
+              fontSize: 14,
+              lineHeight: 1,
+              userSelect: "none",
+            }}
+          >
+            −
+          </button>
+        </div>
       </div>
 
       {/* ── Main K-line canvas ── */}

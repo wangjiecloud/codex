@@ -1,4 +1,5 @@
 from typing import Optional
+
 """
 股吧资讯与公告抓取路由
 数据来源：
@@ -39,16 +40,21 @@ def _fetch_news(code: str) -> list[dict]:
             f"https://gbcdn.dfcfw.com/gbapi/webarticlelist_api_Article_Articlelist.js"
             f"?ps=50&p=1&code={code}&type=1&sort=0&callback=Q"
         )
-        r = cffi_requests.get(url, headers=_HEADERS, timeout=15, impersonate="chrome124")
+        r = cffi_requests.get(
+            url, headers=_HEADERS, timeout=15, impersonate="chrome124"
+        )
         text = r.text
         # JSONP 格式: var webarticlelist_api_Article_Articlelist=Q({...});
         # 用正则更鲁棒地提取 JSON 内容
         import re as _re, json as _json
-        m = _re.search(r'Q\((\{.*\})\)', text, _re.DOTALL)
+
+        m = _re.search(r"Q\((\{.*\})\)", text, _re.DOTALL)
         if not m:
             # 降级：找 Q( 到最后一个 ) 之间
             if "Q(" not in text:
-                raise ValueError(f"unexpected response format, content[:200]={text[:200]}")
+                raise ValueError(
+                    f"unexpected response format, content[:200]={text[:200]}"
+                )
             start = text.index("Q(") + 2
             end = text.rindex(")")
             d = _json.loads(text[start:end])
@@ -64,14 +70,22 @@ def _fetch_news(code: str) -> list[dict]:
             if title and post_id:
                 user_info = p.get("post_user") or {}
                 author = str(user_info.get("topicuser_nickname") or "匿名").strip()
-                result.append({
-                    "title": title,
-                    "url": post_url,
-                    "author": author,
-                    "read_count": int(p.get("post_click_count") or 0),
-                    "reply_count": int(p.get("post_reply_count") or p.get("post_comment_count") or 0),
-                    "pub_time": str(p.get("post_last_time") or p.get("post_publish_time") or ""),
-                })
+                result.append(
+                    {
+                        "title": title,
+                        "url": post_url,
+                        "author": author,
+                        "read_count": int(p.get("post_click_count") or 0),
+                        "reply_count": int(
+                            p.get("post_reply_count")
+                            or p.get("post_comment_count")
+                            or 0
+                        ),
+                        "pub_time": str(
+                            p.get("post_last_time") or p.get("post_publish_time") or ""
+                        ),
+                    }
+                )
         return result
     except Exception as e:
         print(f"[guba] fetch guba posts error code={code}: {e}")
@@ -83,14 +97,16 @@ def _fetch_news(code: str) -> list[dict]:
                 title = str(row.get("新闻标题", "") or "").strip()
                 url = str(row.get("新闻链接", "") or "").strip()
                 if title and url:
-                    result.append({
-                        "title": title,
-                        "url": url,
-                        "author": str(row.get("文章来源", "") or ""),
-                        "read_count": 0,
-                        "reply_count": 0,
-                        "pub_time": str(row.get("发布时间", "") or ""),
-                    })
+                    result.append(
+                        {
+                            "title": title,
+                            "url": url,
+                            "author": str(row.get("文章来源", "") or ""),
+                            "read_count": 0,
+                            "reply_count": 0,
+                            "pub_time": str(row.get("发布时间", "") or ""),
+                        }
+                    )
             return result
         except Exception as e2:
             print(f"[guba] fetch news fallback error: {e2}")
@@ -109,28 +125,36 @@ def _fetch_notice(code: str) -> list[dict]:
             "client_source": "web",
             "stock_list": code,
         }
-        r = cffi_requests.get(url, headers=_HEADERS, params=params, timeout=15, impersonate="chrome")
+        r = cffi_requests.get(
+            url, headers=_HEADERS, params=params, timeout=15, impersonate="chrome"
+        )
         data = r.json()
         items = data.get("data", {}).get("list", [])
         result = []
         for item in items:
             title = str(item.get("title") or "").strip()
             art_code = item.get("art_code", "")
-            notice_url = f"https://data.eastmoney.com/notices/detail/{code}/{art_code}.html"
-            pub_time = str(item.get("display_time", "") or item.get("notice_date", ""))[:19]
+            notice_url = (
+                f"https://data.eastmoney.com/notices/detail/{code}/{art_code}.html"
+            )
+            pub_time = str(item.get("display_time", "") or item.get("notice_date", ""))[
+                :19
+            ]
             ann_type = ""
             cols = item.get("columns", [])
             if cols:
                 ann_type = cols[0].get("column_name", "")
             if title:
-                result.append({
-                    "title": title,
-                    "url": notice_url,
-                    "author": ann_type,
-                    "read_count": 0,
-                    "reply_count": 0,
-                    "pub_time": pub_time,
-                })
+                result.append(
+                    {
+                        "title": title,
+                        "url": notice_url,
+                        "author": ann_type,
+                        "read_count": 0,
+                        "reply_count": 0,
+                        "pub_time": pub_time,
+                    }
+                )
         return result
     except Exception as e:
         print(f"[guba] fetch notice error code={code}: {e}")
@@ -142,14 +166,16 @@ def _fetch_notice(code: str) -> list[dict]:
                 title = str(r.get("公告标题", "") or "").strip()
                 url = str(r.get("网址", "") or "").strip()
                 if title and url:
-                    result.append({
-                        "title": title,
-                        "url": url,
-                        "author": str(r.get("公告类型", "") or ""),
-                        "read_count": 0,
-                        "reply_count": 0,
-                        "pub_time": str(r.get("公告日期", "") or ""),
-                    })
+                    result.append(
+                        {
+                            "title": title,
+                            "url": url,
+                            "author": str(r.get("公告类型", "") or ""),
+                            "read_count": 0,
+                            "reply_count": 0,
+                            "pub_time": str(r.get("公告日期", "") or ""),
+                        }
+                    )
             return result[:100]
         except Exception as e2:
             print(f"[guba] fetch notice fallback error: {e2}")
@@ -237,6 +263,7 @@ def sync_all_guba(codes: Optional[list[str]] = None):
             db = SessionLocal()
             try:
                 from sqlalchemy import text
+
                 rows = db.execute(
                     text(
                         "SELECT code FROM stock_meta "
@@ -255,23 +282,27 @@ def sync_all_guba(codes: Optional[list[str]] = None):
         )
 
         total = len(codes)
+        batch_new = 0  # 当前100条批次新增计数
         for i, code in enumerate(codes):
             _sync_status["current"] = code
             _sync_status["done"] = i
             pct = round((i + 1) / total * 100) if total else 0
             try:
                 saved = sync_guba_stock(code)
-                msg = (
-                    f"[股吧] {i + 1}/{total} ({pct}%) - {code}"
-                    + (f" 新增 {saved} 条" if saved > 0 else "")
-                )
-                sched_log("info", msg, source="scheduler")
+                batch_new += saved
             except Exception as e:
                 sched_log(
                     "error",
                     f"[股吧] {i + 1}/{total} ({pct}%) - {code} 同步失败: {e}",
                     source="scheduler",
                 )
+            # 每100条或最后一条打一次日志
+            if (i + 1) % 100 == 0 or (i + 1) == total:
+                msg = f"[股吧] {i + 1}/{total} ({pct}%)" + (
+                    f" 新增 {batch_new} 条" if batch_new > 0 else ""
+                )
+                sched_log("info", msg, source="scheduler")
+                batch_new = 0
             time.sleep(0.8)
 
         _sync_status["done"] = len(codes)
@@ -286,6 +317,7 @@ def sync_all_guba(codes: Optional[list[str]] = None):
 
 
 # ---------- API 路由（固定路径必须在动态路径之前）----------
+
 
 @router.get("/sync/status")
 async def get_sync_status():
@@ -315,9 +347,7 @@ async def get_guba_stats(db: Session = Depends(get_db)):
         .scalar()
         or 0
     )
-    stock_count = (
-        db.query(func.count(func.distinct(StockGuba.code))).scalar() or 0
-    )
+    stock_count = db.query(func.count(func.distinct(StockGuba.code))).scalar() or 0
     last_sync_row = db.query(func.max(StockGuba.updated_at)).scalar()
     last_sync = last_sync_row.isoformat() if last_sync_row else None
 
@@ -336,6 +366,7 @@ async def sync_stock_guba(code: str):
 
     def _run():
         from routers.system import sched_log
+
         sched_log("info", f"[股吧] 手动同步: {code}")
         try:
             saved = sync_guba_stock(code)
@@ -361,9 +392,7 @@ async def sync_all_guba_endpoint():
 @router.get("/{code}")
 async def get_guba(
     code: str,
-    post_type: str = Query(
-        default="news", description="news=资讯, notice=公告"
-    ),
+    post_type: str = Query(default="news", description="news=资讯, notice=公告"),
     count: int = Query(default=30, ge=5, le=100),
     db: Session = Depends(get_db),
 ):

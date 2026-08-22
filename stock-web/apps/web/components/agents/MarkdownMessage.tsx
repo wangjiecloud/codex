@@ -98,6 +98,98 @@ export function renderMarkdownToHtml(content: string): string {
   return marked.parse(content) as string;
 }
 
+/** 生成用于 iframe print → PDF 的 HTML，样式与页面显示完全一致 */
+export function buildPdfDocument(content: string): string {
+  const html = renderMarkdownToHtml(content);
+  return `<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>报告</title>
+    <style>
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 0;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+        background: #ffffff;
+        color: #1f2937;
+        font-size: 13px;
+        line-height: 1.7;
+      }
+      .wrap {
+        max-width: 860px;
+        margin: 0 auto;
+        padding: 32px 40px;
+      }
+      .md-body { color: #374151; }
+      .md-body .md-p { margin: 0 0 12px; }
+      .md-body .md-h1 { font-size: 22px; font-weight: 700; margin: 28px 0 14px; color: #111827; line-height: 1.3; }
+      .md-body .md-h2 { font-size: 18px; font-weight: 700; margin: 24px 0 12px; color: #111827; line-height: 1.35; }
+      .md-body .md-h3 { font-size: 15px; font-weight: 600; margin: 20px 0 10px; color: #111827; }
+      .md-body .md-h4, .md-body .md-h5, .md-body .md-h6 { font-size: 13px; font-weight: 600; margin: 16px 0 8px; color: #111827; }
+      .md-body .md-list { margin: 0 0 12px 20px; padding: 0; }
+      .md-body .md-li { margin: 5px 0; }
+      .md-body .md-strong { font-weight: 700; color: #111827; }
+      .md-body .md-em { font-style: italic; }
+      .md-body .md-inline-code {
+        padding: 1px 5px;
+        border-radius: 4px;
+        background: #f3f4f6;
+        font-family: ui-monospace, "Courier New", monospace;
+        font-size: 12px;
+        color: #374151;
+      }
+      .md-code-block {
+        margin: 14px 0;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        overflow: hidden;
+        background: #1e293b;
+        page-break-inside: avoid;
+      }
+      .md-code-header {
+        padding: 8px 12px;
+        background: #0f172a;
+        color: #94a3b8;
+        font-size: 11px;
+      }
+      .md-code-pre {
+        margin: 0;
+        padding: 14px;
+        overflow-x: auto;
+        color: #e2e8f0;
+        font-size: 12px;
+      }
+      .md-code { font-family: ui-monospace, "Courier New", monospace; white-space: pre-wrap; }
+      .md-table-wrap { overflow-x: auto; margin: 14px 0; page-break-inside: avoid; }
+      .md-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+      .md-th, .md-td { border: 1px solid #d1d5db; padding: 8px 10px; text-align: left; vertical-align: top; }
+      .md-th { background: #f9fafb; font-weight: 600; color: #111827; }
+      .md-tr:nth-child(even) .md-td { background: #fafafa; }
+      .md-hr { border: 0; border-top: 1px solid #e5e7eb; margin: 20px 0; }
+      details { margin: 10px 0; padding: 8px 12px; border: 1px solid #e5e7eb; border-radius: 8px; }
+      summary { cursor: pointer; font-weight: 600; color: #111827; }
+
+      @media print {
+        @page { margin: 18mm 16mm; size: A4; }
+        body { background: #fff !important; }
+        .wrap { padding: 0; max-width: 100%; }
+        .md-code-block { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        .md-th { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        h1, h2, h3, h4, h5, h6 { page-break-after: avoid; }
+        p, li { orphans: 3; widows: 3; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="md-body">${html}</div>
+    </div>
+  </body>
+</html>`;
+}
+
 export function buildMarkdownPreviewDocument(content: string): string {
   const html = renderMarkdownToHtml(content);
   return `<!DOCTYPE html>
@@ -195,9 +287,39 @@ export function buildMarkdownPreviewDocument(content: string): string {
         font-weight: 600;
         color: #111827;
       }
+      .toolbar {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        display: flex;
+        justify-content: flex-end;
+        padding: 12px 0 8px;
+        margin-bottom: 4px;
+        background: #f5f5f5;
+      }
+      .btn-pdf {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 7px 16px;
+        background: #111827;
+        color: #f9fafb;
+        border: none;
+        border-radius: 8px;
+        font-size: 13px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: background 0.15s;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      .btn-pdf:hover { background: #374151; }
+      .btn-pdf svg { flex-shrink: 0; }
       @media (prefers-color-scheme: dark) {
         body { background: #0f172a; color: #e5e7eb; }
         .wrap { background: #111827; border-color: #374151; box-shadow: none; }
+        .toolbar { background: #0f172a; }
+        .btn-pdf { background: #374151; color: #f9fafb; }
+        .btn-pdf:hover { background: #4b5563; }
         .title { color: #f9fafb; }
         .md-body { color: #d1d5db; }
         .md-body .md-h1, .md-body .md-h2, .md-body .md-h3, .md-body .md-h4, .md-body .md-h5, .md-body .md-h6 { color: #f9fafb; }
@@ -207,11 +329,24 @@ export function buildMarkdownPreviewDocument(content: string): string {
         .md-hr { border-top-color: #374151; }
         summary { color: #f9fafb; }
       }
+      @media print {
+        .toolbar { display: none !important; }
+        body { background: #fff !important; padding: 0 !important; }
+        .wrap { border: none !important; border-radius: 0 !important; box-shadow: none !important; padding: 0 !important; max-width: 100% !important; }
+        @page { margin: 18mm 16mm; size: A4; }
+      }
     </style>
   </head>
   <body>
+    <div class="toolbar">
+      <button class="btn-pdf" onclick="window.print()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+        </svg>
+        下载 PDF
+      </button>
+    </div>
     <main class="wrap">
-      <h1 class="title">消息预览</h1>
       <div class="md-body">${html}</div>
     </main>
   </body>

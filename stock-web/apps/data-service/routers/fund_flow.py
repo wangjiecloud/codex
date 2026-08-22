@@ -399,3 +399,168 @@ def trigger_snapshot_sync():
         "message": f"已更新 {len(ok)} 组数据"
         + (f"，{len(errors)} 组失败" if errors else ""),
     }
+
+
+@router.post("/backfill/history")
+def backfill_fund_flow_history(background_tasks: BackgroundTasks):
+    """
+    回填历史行业+概念板块资金流向数据。
+    通过 akshare stock_sector_fund_flow_hist / stock_concept_fund_flow_hist
+    获取各板块的历史每日净流入数据，补填 fund_flow_snapshot 中缺失的交易日。
+    后台执行，可能耗时较长（需逐板块请求）。
+    """
+    background_tasks.add_task(_do_backfill_history)
+    return {"message": "历史资金回填任务已启动，后台执行中，请稍后查询 /dates 确认进度"}
+
+
+def _do_backfill_history():
+    """后台执行：逐个行业/概念板块拉取历史数据，补填缺失日期"""
+    import time
+
+    print("[fund_flow] 开始历史资金回填...")
+    ok_industry = 0
+    ok_concept = 0
+    err = 0
+
+    # ── 1. 行业板块：从 DB 获取现有名称列表（避免额外 akshare 调用）──
+    db = SessionLocal()
+    try:
+        rows = (
+            db.query(FundFlowSnapshot.name)
+            .filter(FundFlowSnapshot.board_type == "industry")
+            .distinct()
+            .all()
+        )
+        industry_names = [r[0] for r in rows if r[0]]
+    finally:
+        db.close()
+
+    for name in industry_names:
+        try:
+            with _ak_lock:
+                hist_df = ak.stock_sector_fund_flow_hist(symbol=name)
+            if hist_df is None or hist_df.empty:
+                continue
+            for _, row in hist_df.iterrows():
+                trade_date = str(row.get("日期", ""))[:10]
+                if not trade_date or len(trade_date) < 8:
+                    continue
+                netflow_raw = row.get("主力净流入-净额", 0)
+                try:
+                    netflow = float(netflow_raw) if netflow_raw is not None else 0.0
+                except (ValueError, TypeError):
+                    netflow = 0.0
+                _save_hist_row("industry", trade_date, name, netflow)
+            ok_industry += 1
+            time.sleep(0.3)
+        except Exception as e:
+            print(f"[fund_flow] 行业历史 {name} 失败: {e}")
+            err += 1
+        time.sleep(0.1)
+
+    # ── 2. 概念板块 ──
+    db = SessionLocal()
+    try:
+        rows = (
+            db.query(FundFlowSnapshot.name)
+            .filter(FundFlowSnapshot.board_type == "concept")
+            .distinct()
+            .all()
+        )
+        concept_names = [r[0] for r in rows if r[0]]
+    finally:
+        db.close()
+
+    for name in concept_names:
+        try:
+            with _ak_lock:
+                hist_df = ak.stock_concept_fund_flow_hist(symbol=name)
+            if hist_df is None or hist_df.empty:
+                continue
+            for _, row in hist_df.iterrows():
+                trade_date = str(row.get("日期", ""))[:10]
+                if not trade_date or len(trade_date) < 8:
+                    continue
+                netflow_raw = row.get("主力净流入-净额", 0)
+                try:
+                    netflow = float(netflow_raw) if netflow_raw is not None else 0.0
+                except (ValueError, TypeError):
+                    netflow = 0.0
+                _save_hist_row("concept", trade_date, name, netflow)
+            ok_concept += 1
+            time.sleep(0.3)
+        except Exception as e:
+            print(f"[fund_flow] 概念历史 {name} 失败: {e}")
+            err += 1
+        time.sleep(0.1)
+
+    print(
+        f"[fund_flow] 历史回填完成：行业 {ok_industry} 个、概念 {ok_concept} 个、失败 {err} 个"
+    )
+
+    # ── 2. 概念板块（第二轮，使用即时行情接口补充名称列表）──
+    try:
+        with _ak_lock:
+            concept_df = ak.stock_fund_flow_concept(symbol="即时")
+        concept_names = concept_df["行业"].dropna().unique().tolist()
+    except Exception as e:
+        print(f"[fund_flow] 获取概念列表失败: {e}")
+        concept_names = []
+
+    for name in concept_names:
+        try:
+            with _ak_lock:
+                hist_df = ak.stock_concept_fund_flow_hist(symbol=name)
+            if hist_df is None or hist_df.empty:
+                continue
+            for _, row in hist_df.iterrows():
+                trade_date = str(row.get("日期", ""))[:10]
+                if not trade_date:
+                    continue
+                netflow_raw = row.get("主力净流入-净额", 0)
+                try:
+                    netflow = float(netflow_raw) if netflow_raw is not None else 0.0
+                except (ValueError, TypeError):
+                    netflow = 0.0
+                _save_hist_row("concept", trade_date, name, netflow)
+            ok_concept += 1
+            time.sleep(0.2)
+        except Exception as e:
+            print(f"[fund_flow] 概念历史 {name} 失败: {e}")
+            err += 1
+        time.sleep(0.1)
+
+    print(
+        f"[fund_flow] 历史回填完成：行业 {ok_industry} 个、概念 {ok_concept} 个、失败 {err} 个"
+    )
+
+
+def _save_hist_row(board_type: str, trade_date: str, name: str, netflow: float):
+    """将历史一行写入 fund_flow_snapshot，仅写 netflow，其他字段默认0，且仅在不存在时写入"""
+    db = SessionLocal()
+    try:
+        stmt = sqlite_insert(FundFlowSnapshot).values(
+            trade_date=trade_date,
+            board_type=board_type,
+            period="today",
+            name=name,
+            index_val=0.0,
+            change_pct=0.0,
+            inflow=0.0,
+            outflow=0.0,
+            netflow=netflow,
+            comp_count=0,
+            top_stock="",
+            top_stock_change_pct=0.0,
+            top_stock_price=0.0,
+        )
+        # 仅在行不存在时插入（不覆盖已有的完整快照数据）
+        stmt = stmt.on_conflict_do_nothing(
+            index_elements=["trade_date", "board_type", "period", "name"]
+        )
+        db.execute(stmt)
+        db.commit()
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()

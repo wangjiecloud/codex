@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 from pydantic import BaseModel
 from datetime import datetime
 from typing import Optional
@@ -15,6 +16,7 @@ class HoldingIn(BaseModel):
     name: str
     cost_price: float
     shares: int
+    closed_pnl_override: Optional[float] = None
 
 
 class TradeIn(BaseModel):
@@ -34,6 +36,7 @@ def _holding_to_dict(h: PortfolioHolding, trades: list) -> dict:
         "name": h.name,
         "costPrice": h.cost_price,
         "shares": h.shares,
+        "closedPnlOverride": h.closed_pnl_override,
         "trades": trades,
     }
 
@@ -99,6 +102,7 @@ async def upsert_holding(body: HoldingIn, db: Session = Depends(get_db)):
         row.name = body.name
         row.cost_price = round(body.cost_price, 4)
         row.shares = body.shares
+        row.closed_pnl_override = body.closed_pnl_override
         row.updated_at = datetime.utcnow()
     else:
         row = PortfolioHolding(
@@ -107,6 +111,7 @@ async def upsert_holding(body: HoldingIn, db: Session = Depends(get_db)):
             name=body.name,
             cost_price=round(body.cost_price, 4),
             shares=body.shares,
+            closed_pnl_override=body.closed_pnl_override,
         )
         db.add(row)
     db.commit()
@@ -133,6 +138,19 @@ async def add_trade(holding_id: str, body: TradeIn, db: Session = Depends(get_db
     if not holding:
         raise HTTPException(status_code=404, detail="Holding not found")
 
+    # 幂等：trade id 已存在时直接返回成功
+    existing = db.query(PortfolioTrade).filter(PortfolioTrade.id == body.id).first()
+    if existing:
+        return {
+            "ok": True,
+            "skipped": True,
+            "holding": {
+                "id": holding.id,
+                "costPrice": holding.cost_price,
+                "shares": holding.shares,
+            },
+        }
+
     row = PortfolioTrade(
         id=body.id,
         holding_id=holding_id,
@@ -143,7 +161,19 @@ async def add_trade(holding_id: str, body: TradeIn, db: Session = Depends(get_db
         note=body.note or "",
     )
     db.add(row)
-    db.flush()
+    try:
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        return {
+            "ok": True,
+            "skipped": True,
+            "holding": {
+                "id": holding.id,
+                "costPrice": holding.cost_price,
+                "shares": holding.shares,
+            },
+        }
 
     _recalculate_holding(holding, db)
     db.commit()

@@ -256,11 +256,24 @@ def _db_commit_with_retry(db, max_retries=3):
 def sync_all_data():
     """17:30 定时任务入口。复用前端一键刷新的同一套逻辑（_run_full_sync），
     确保行情、申万板块、K线、基本面、快讯全部同步，且有超时保护和 stop 支持。
+    只允许在 15:00-19:00 时段内触发（防止误操作在非收盘时段执行）。
     """
     from routers.system import sched_log
+    from datetime import time as dtime
 
     if not is_trading_day():
         sched_log("info", "非交易日，跳过每日全量同步", source="scheduler")
+        return
+
+    # 时段保护：只允许 15:00-19:00 触发，避免非收盘时段（如早上）误操作
+    now_t = datetime.now().time()
+    if not (dtime(15, 0) <= now_t <= dtime(19, 0)):
+        sched_log(
+            "warning",
+            f"[定时] 当前时间 {now_t.strftime('%H:%M')} 不在允许触发时段（15:00-19:00），已拒绝执行。"
+            "请在收盘后手动触发，或等待 17:30 自动调度。",
+            source="scheduler",
+        )
         return
 
     from routers.sync import _run_full_sync, _status, _lock
@@ -275,7 +288,7 @@ def sync_all_data():
             )
             return
 
-    sched_log("info", "17:30 定时同步启动，复用全量同步流程", source="scheduler")
+    sched_log("info", "[定时] 17:30 定时同步启动，复用全量同步流程", source="scheduler")
     threading.Thread(target=_run_full_sync, daemon=True).start()
 
 
@@ -399,7 +412,11 @@ def _sync_all_quotes():
                     try:
                         rs = fut.result(timeout=20)
                     except FuturesTimeout:
-                        print(f"[sync_quotes] {raw_code} timed out, skipping")
+                        # 等子线程自然结束（最多 3s），避免与 recv() 竞态导致 Bad file descriptor
+                        try:
+                            fut.result(timeout=3)
+                        except Exception:
+                            pass
                         reset_bs()
                         try:
                             bs = get_bs()
@@ -409,7 +426,7 @@ def _sync_all_quotes():
                         continue
 
                 if rs.error_code != "0":
-                    print(f"[sync_quotes] {raw_code} baostock error: {rs.error_msg}")
+                    # 网络抖动导致的瞬态错误，静默重连，不打印噪音日志
                     reset_bs()
                     # 等待重连，最多重试 3 次，每次间隔 5 秒
                     reconnected = False
@@ -433,18 +450,41 @@ def _sync_all_quotes():
                 row_data = []
                 max_rows = 10
                 row_count = 0
-                while rs.next() and row_count < max_rows:
-                    row_data.append(rs.get_row_data())
+                while row_count < max_rows:
+                    try:
+                        has_next = rs.next()
+                    except (IndexError, TypeError, AttributeError) as _ne:
+                        raise RuntimeError(
+                            f"baostock malformed row (next): {_ne}"
+                        ) from _ne
+                    if not has_next:
+                        break
+                    try:
+                        row_data.append(rs.get_row_data())
+                    except (IndexError, TypeError, AttributeError) as _ge:
+                        raise RuntimeError(
+                            f"baostock malformed row (get): {_ge}"
+                        ) from _ge
                     row_count += 1
             except Exception as e:
-                print(f"[sync_quotes] {raw_code} fetch error: {e}")
-                # 若是网络断连错误，重置 session 并等待重连
                 err_str = str(e)
-                if (
-                    "Broken pipe" in err_str
-                    or "login failed" in err_str
-                    or "接收数据异常" in err_str
-                ):
+                _TRANSIENT_KEYWORDS = (
+                    "Broken pipe",
+                    "login failed",
+                    "接收数据异常",
+                    "Bad file descriptor",
+                    "bad file descriptor",
+                    "utf-8",
+                    "codec can't decode",
+                    "decompressing",
+                    "incomplete or truncated",
+                    "用户未登录",
+                    "网络接收错误",
+                    "list index out of range",
+                    "timed out",
+                )
+                if any(kw in err_str for kw in _TRANSIENT_KEYWORDS):
+                    # 网络瞬态错误，静默重连，不打印噪音日志
                     reset_bs()
                     reconnected = False
                     for _retry in range(3):
@@ -462,6 +502,9 @@ def _sync_all_quotes():
                     if not reconnected:
                         print("[sync_quotes] baostock 重连失败，终止本次同步")
                         return
+                else:
+                    # 非瞬态错误才打印，方便排查真正的 bug
+                    print(f"[sync_quotes] {raw_code} fetch error: {e}")
                 continue
 
             if not row_data:

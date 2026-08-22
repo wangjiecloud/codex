@@ -80,28 +80,48 @@ interface GubaStat {
   syncing: boolean;
 }
 
+interface MonitorSummary {
+  stats: SystemStats;
+  flashStats: FlashCatStat[];
+  swIndustry: { count: number; updatedAt: string | null };
+  conceptBoard: { count: number; updatedAt: string | null };
+  fundFlowDates: { "10d": string[] };
+  globalIndices: { count: number; updatedAt: string | null };
+  marginTrading: { dayCount: number; latestDate: string | null };
+  themeNews: { total: number; themes: ThemeNewsStat[] };
+  gubaStats: GubaStat;
+  minuteStats: {
+    industry_total: number;
+    covered_codes: number;
+    latest_date: string;
+    latest_covered: number;
+    distinct_dates: number;
+    total_bars: number;
+    sync_status: {
+      running: boolean;
+      total: number;
+      done: number;
+      ok: number;
+      cached: number;
+      error: number;
+      current: string;
+      trade_date: string;
+      finished_at: string | null;
+    };
+  };
+}
+
 // ── Inline 变体（嵌入分组卡片，无外层边框） ──────────────────────────────
 
 function SwIndustryMonitorInline({
   onTaskClick,
+  data,
 }: {
   onTaskClick?: (taskId: string) => void;
+  data?: { count: number; updatedAt: string | null };
 }) {
-  const [boardCount, setBoardCount] = useState(0);
-  const [lastSync, setLastSync] = useState<string | null>(null);
-  useEffect(() => {
-    const fetch_ = async () => {
-      try {
-        const r = await fetch("http://localhost:8000/api/sw-industry");
-        if (r.ok) {
-          const d = await r.json();
-          setBoardCount(d.length);
-          if (d[0]?.updatedAt) setLastSync(d[0].updatedAt);
-        }
-      } catch {}
-    };
-    fetch_();
-  }, []);
+  const boardCount = data?.count ?? 0;
+  const lastSync = data?.updatedAt ?? null;
   return (
     <div className="bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg px-3 py-2.5">
       <div className="flex items-center gap-1.5 mb-2">
@@ -144,31 +164,13 @@ function SwIndustryMonitorInline({
 
 function ConceptBoardMonitorInline({
   onTaskClick,
+  data,
 }: {
   onTaskClick?: (taskId: string) => void;
+  data?: { count: number; updatedAt: string | null };
 }) {
-  const [count, setCount] = useState(0);
-  const [lastSync, setLastSync] = useState<string | null>(null);
-  useEffect(() => {
-    const fetch_ = async () => {
-      try {
-        const r = await fetch("http://localhost:8000/api/board");
-        if (r.ok) {
-          const d = await r.json();
-          const boards = Array.isArray(d) ? d : d.boards || [];
-          setCount(boards.length);
-          const times = boards
-            .map(
-              (b: { updatedAt?: string; updated_at?: string }) =>
-                b.updatedAt || b.updated_at,
-            )
-            .filter(Boolean) as string[];
-          if (times.length > 0) setLastSync(times.sort().reverse()[0]);
-        }
-      } catch {}
-    };
-    fetch_();
-  }, []);
+  const count = data?.count ?? 0;
+  const lastSync = data?.updatedAt ?? null;
   return (
     <div className="bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg px-3 py-2.5">
       <div className="flex items-center gap-1.5 mb-2">
@@ -211,22 +213,12 @@ function ConceptBoardMonitorInline({
 
 function FundFlowMonitorInline({
   onTaskClick,
+  data,
 }: {
   onTaskClick?: (taskId: string) => void;
+  data?: { "10d": string[] };
 }) {
-  const [dates, setDates] = useState<string[]>([]);
-  useEffect(() => {
-    const fetch_ = async () => {
-      try {
-        const r = await fetch("http://localhost:8000/api/fund-flow/dates");
-        if (r.ok) {
-          const d = await r.json();
-          setDates((d["10d"] || []).slice().sort());
-        }
-      } catch {}
-    };
-    fetch_();
-  }, []);
+  const dates = (data?.["10d"] ?? []).slice().sort();
   const today = new Date().toISOString().slice(0, 10);
   const hasTodaySnapshot = dates.includes(today);
   const latestDate = dates.length > 0 ? dates[dates.length - 1] : null;
@@ -277,32 +269,13 @@ function FundFlowMonitorInline({
 
 function GlobalIndexMonitorInline({
   onTaskClick,
+  data,
 }: {
   onTaskClick?: (taskId: string) => void;
+  data?: { count: number; updatedAt: string | null };
 }) {
-  const [indexCount, setIndexCount] = useState(0);
-  const [lastSync, setLastSync] = useState<string | null>(null);
-  useEffect(() => {
-    const fetch_ = async () => {
-      try {
-        const r = await fetch("http://localhost:8000/api/global/indices");
-        if (r.ok) {
-          const d = await r.json();
-          setIndexCount(Array.isArray(d) ? d.length : 0);
-          // 找出最近更新的时间
-          if (Array.isArray(d) && d.length > 0) {
-            const times = d
-              .map((item: { updatedAt?: string }) => item.updatedAt)
-              .filter(Boolean) as string[];
-            if (times.length > 0) {
-              setLastSync(times.sort().reverse()[0]);
-            }
-          }
-        }
-      } catch {}
-    };
-    fetch_();
-  }, []);
+  const indexCount = data?.count ?? 0;
+  const lastSync = data?.updatedAt ?? null;
   return (
     <div className="bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg px-3 py-2.5">
       <div className="flex items-center gap-1.5 mb-2">
@@ -345,27 +318,15 @@ function GlobalIndexMonitorInline({
 
 function MarginTradingMonitorInline({
   onTaskClick,
+  data,
 }: {
   onTaskClick?: (taskId: string) => void;
+  data?: { dayCount: number; latestDate: string | null };
 }) {
-  const [dayCount, setDayCount] = useState(0);
-  const [latestDate, setLatestDate] = useState<string | null>(null);
-  const [todayDone, setTodayDone] = useState(false);
-  useEffect(() => {
-    const fetch_ = async () => {
-      try {
-        const r = await fetch("http://localhost:8000/api/margin-trading/stats");
-        if (r.ok) {
-          const d = await r.json();
-          setDayCount(d.dayCount || 0);
-          setLatestDate(d.latestDate || null);
-          const today = new Date().toISOString().slice(0, 10);
-          setTodayDone(d.latestDate === today);
-        }
-      } catch {}
-    };
-    fetch_();
-  }, []);
+  const dayCount = data?.dayCount ?? 0;
+  const latestDate = data?.latestDate ?? null;
+  const today = new Date().toISOString().slice(0, 10);
+  const todayDone = latestDate === today;
   return (
     <div className="bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg px-3 py-2.5">
       <div className="flex items-center gap-1.5 mb-2">
@@ -413,31 +374,17 @@ function MarginTradingMonitorInline({
 
 function ThemeNewsMonitorInline({
   onTaskClick,
+  data,
 }: {
   onTaskClick?: (taskId: string) => void;
+  data?: { total: number; themes: ThemeNewsStat[] };
 }) {
-  const [total, setTotal] = useState(0);
-  const [themeCount, setThemeCount] = useState(0);
-  const [lastSync, setLastSync] = useState<string | null>(null);
-  useEffect(() => {
-    const fetch_ = async () => {
-      try {
-        const r = await fetch("http://localhost:8000/api/theme/news-stats");
-        if (r.ok) {
-          const d = await r.json();
-          setTotal(d.total || 0);
-          setThemeCount((d.themes || []).length);
-          const times = (d.themes || [])
-            .map((t: ThemeNewsStat) => t.lastSync)
-            .filter(Boolean);
-          if (times.length > 0) setLastSync(times.sort().reverse()[0]);
-        }
-      } catch {}
-    };
-    fetch_();
-    const t = setInterval(fetch_, 30000);
-    return () => clearInterval(t);
-  }, []);
+  const total = data?.total ?? 0;
+  const themeCount = data?.themes?.length ?? 0;
+  const times = (data?.themes ?? [])
+    .map((t) => t.lastSync)
+    .filter(Boolean) as string[];
+  const lastSync = times.length > 0 ? times.sort().reverse()[0] : null;
   return (
     <div className="bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg px-3 py-2.5">
       <div className="flex items-center gap-1.5 mb-2">
@@ -489,27 +436,18 @@ function ThemeNewsMonitorInline({
 
 function GubaMonitorInline({
   onTaskClick,
+  data,
 }: {
   onTaskClick?: (taskId: string) => void;
+  data?: GubaStat;
 }) {
-  const [stat, setStat] = useState<GubaStat>({
+  const stat: GubaStat = data ?? {
     newsCount: 0,
     noticeCount: 0,
     stockCount: 0,
     lastSync: null,
     syncing: false,
-  });
-  useEffect(() => {
-    const fetch_ = async () => {
-      try {
-        const r = await fetch("http://localhost:8000/api/guba/stats/summary");
-        if (r.ok) setStat(await r.json());
-      } catch {}
-    };
-    fetch_();
-    const t = setInterval(fetch_, 30000);
-    return () => clearInterval(t);
-  }, []);
+  };
   return (
     <div className="bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg px-3 py-2.5">
       <div className="flex items-center gap-1.5 mb-2">
@@ -570,39 +508,12 @@ function GubaMonitorInline({
 
 function MinuteSyncMonitorInline({
   onTaskClick,
+  data,
 }: {
   onTaskClick?: (taskId: string) => void;
+  data?: MonitorSummary["minuteStats"];
 }) {
-  const [stats, setStats] = useState<{
-    industry_total: number;
-    covered_codes: number;
-    latest_date: string;
-    latest_covered: number;
-    distinct_dates: number;
-    total_bars: number;
-    sync_status: {
-      running: boolean;
-      total: number;
-      done: number;
-      ok: number;
-      cached: number;
-      error: number;
-      current: string;
-      trade_date: string;
-      finished_at: string | null;
-    };
-  } | null>(null);
-  useEffect(() => {
-    const fetch_ = async () => {
-      try {
-        const r = await fetch("/api/minute/stats");
-        if (r.ok) setStats(await r.json());
-      } catch {}
-    };
-    fetch_();
-    const t = setInterval(fetch_, 30000);
-    return () => clearInterval(t);
-  }, []);
+  const stats = data ?? null;
   const s = stats?.sync_status;
   return (
     <div className="bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg px-3 py-2.5">
@@ -680,30 +591,16 @@ function MinuteSyncMonitorInline({
 
 function F10MonitorInline({
   onTaskClick,
+  data,
 }: {
   onTaskClick?: (taskId: string) => void;
+  data?: SystemStats;
 }) {
-  const [syncedCount, setSyncedCount] = useState(0);
-  const [totalCount, setTotalCount] = useState(0);
-  const [lastSync, setLastSync] = useState<string | null>(null);
+  const syncedCount = data?.stocksByDataType?.fundamental ?? 0;
+  const totalCount = data?.totalStocks ?? 0;
+  const lastSync = data?.fundamentalLastSync ?? null;
   const isReportingSeason = () =>
     [1, 2, 3, 4, 8, 10, 11].includes(new Date().getMonth() + 1);
-  useEffect(() => {
-    const fetch_ = async () => {
-      try {
-        const r = await fetch("http://localhost:8000/api/system/stats");
-        if (r.ok) {
-          const d = await r.json();
-          setSyncedCount(d.stocksByDataType?.fundamental ?? 0);
-          setTotalCount(d.totalStocks ?? 0);
-          setLastSync(d.fundamentalLastSync ?? null);
-        }
-      } catch {}
-    };
-    fetch_();
-    const t = setInterval(fetch_, 30000);
-    return () => clearInterval(t);
-  }, []);
   const reporting = isReportingSeason();
   const monthName = new Date().getMonth() + 1;
   return (
@@ -861,12 +758,21 @@ function TaskStatusTable({
   // 启动针对 daily_sync 的进度轮询（走 /api/sync/status）
   const startSyncStatusPoll = (taskId: string, label: string) => {
     if (taskPollRefs.current[taskId]) return;
+    // 防竞争：APScheduler 触发到线程真正开始有延迟，需至少见过一次 running=true 才能判定完成
+    let everSawRunning = false;
+    let notRunningCount = 0; // 连续看到 running=false 的次数（用于超时兜底）
     taskPollRefs.current[taskId] = setInterval(async () => {
       try {
         const r = await fetch("http://localhost:8000/api/sync/status");
         if (!r.ok) return;
         const data = await r.json();
         if (!data.running) {
+          if (!everSawRunning) {
+            // 任务还没启动，继续等待（最多等 15 秒 = 7~8 次轮询）
+            notRunningCount++;
+            if (notRunningCount < 8) return;
+            // 超时还没启动，认为任务被拒绝（非交易日/时段限制等）
+          }
           setTaskProgress((prev) => {
             const next = { ...prev };
             delete next[taskId];
@@ -874,15 +780,29 @@ function TaskStatusTable({
           });
           clearInterval(taskPollRefs.current[taskId]);
           delete taskPollRefs.current[taskId];
-          onLog?.(
-            "success",
-            `[完成] ${label} done=${data.done} total=${data.total}`,
-          );
-          setTaskResults((prev) => ({
-            ...prev,
-            [taskId]: { status: "ok", msg: `完成 ${data.done}/${data.total}` },
-          }));
+          if (everSawRunning) {
+            onLog?.(
+              "success",
+              `[完成] ${label} done=${data.done} total=${data.total}`,
+            );
+            setTaskResults((prev) => ({
+              ...prev,
+              [taskId]: {
+                status: "ok",
+                msg: `完成 ${data.done}/${data.total}`,
+              },
+            }));
+          } else {
+            // 任务从未启动（被时段/交易日拒绝），查看日志获取具体原因
+            onLog?.("warning", `[跳过] ${label} 未启动（请查看系统日志）`);
+            setTaskResults((prev) => ({
+              ...prev,
+              [taskId]: { status: "error", msg: "未启动（见系统日志）" },
+            }));
+          }
         } else {
+          everSawRunning = true;
+          notRunningCount = 0;
           setTaskProgress((prev) => ({
             ...prev,
             [taskId]: {
@@ -1346,6 +1266,9 @@ export default function SystemMonitorPage() {
     categories: { announcement: 0, research: 0, news: 0 },
     recentUpdates: [],
   });
+  const [monitorSummary, setMonitorSummary] = useState<MonitorSummary | null>(
+    null,
+  );
   // 日志初始为空，挂载后从 localStorage 恢复（避免 SSR hydration 不匹配）
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [failedStocks, setFailedStocks] = useState<
@@ -1387,10 +1310,28 @@ export default function SystemMonitorPage() {
   const [dismissedFailedKeys, setDismissedFailedKeys] = useState<
     Record<string, boolean>
   >({});
+
+  // ── 全量K线补全状态 ──
+  const [backfillStatus, setBackfillStatus] = useState<{
+    running: boolean;
+    phase: string;
+    total: number;
+    done: number;
+    current: string;
+    started_at: string;
+    finished_at: string;
+    periods_done: string[];
+    has_cursor: boolean;
+    cursor_info?: { period: string; code_idx: number; total_codes: number };
+  } | null>(null);
+  const [isStoppingBackfill, setIsStoppingBackfill] = useState(false);
+  const backfillPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   const logsEndRef = useRef<HTMLDivElement>(null);
   const logsContainerRef = useRef<HTMLDivElement>(null);
   const schedLogSeq = useRef<number>(0);
   const unmountedRef = useRef(false);
+  const monitorFetchingRef = useRef(false); // 防重入锁：避免上一次请求未完成时重叠发起
   const retryBatchRef = useRef<{
     total: number;
     pending: Set<string>;
@@ -1466,6 +1407,27 @@ export default function SystemMonitorPage() {
       }
     } catch (error) {
       if (!unmountedRef.current) addLog("error", `获取统计数据失败: ${error}`);
+    }
+  };
+
+  const fetchMonitorSummary = async () => {
+    if (monitorFetchingRef.current) return; // 防重入
+    monitorFetchingRef.current = true;
+    try {
+      const r = await fetch("http://localhost:8000/api/system/monitor-summary");
+      if (r.ok && !unmountedRef.current) {
+        const data: MonitorSummary = await r.json();
+        setMonitorSummary(data);
+        setStats(data.stats);
+        setFlashStats(data.flashStats);
+        setLastUpdated(
+          new Date().toLocaleTimeString("zh-CN", { hour12: false }),
+        );
+      }
+    } catch (error) {
+      if (!unmountedRef.current) addLog("error", `获取监控数据失败: ${error}`);
+    } finally {
+      monitorFetchingRef.current = false;
     }
   };
 
@@ -2081,8 +2043,8 @@ export default function SystemMonitorPage() {
 
         pollBatchSyncStatus("resume", "恢复的同步任务");
       }
-    } catch (error) {
-      console.error("检查同步状态失败:", error);
+    } catch {
+      // 后端服务未启动时静默忽略，不上报 console error 避免触发 Next.js error overlay
     }
   };
 
@@ -2101,8 +2063,7 @@ export default function SystemMonitorPage() {
   };
 
   useEffect(() => {
-    fetchStats();
-    fetchFlashStats();
+    fetchMonitorSummary();
     fetchSchedulerLogs();
     addLog("info", "系统监控已启动");
     checkAndResumeSyncStatus();
@@ -2111,10 +2072,9 @@ export default function SystemMonitorPage() {
   useEffect(() => {
     if (!autoRefresh && !syncRunning) return;
     const interval = setInterval(() => {
-      fetchStats();
-      fetchFlashStats();
+      fetchMonitorSummary();
       fetchSchedulerLogs();
-    }, 5000);
+    }, 15000);
     return () => clearInterval(interval);
   }, [autoRefresh, syncRunning]);
 
@@ -2131,6 +2091,90 @@ export default function SystemMonitorPage() {
         logsContainerRef.current.scrollHeight;
     }
   }, [logs]);
+
+  // ── 全量K线补全操作函数 ──
+  const fetchBackfillStatus = async () => {
+    try {
+      const res = await fetch(
+        "http://localhost:8000/api/sync/kline-backfill/status",
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setBackfillStatus(data);
+        if (!data.running) {
+          setIsStoppingBackfill(false);
+        }
+      }
+    } catch {
+      // 后端不可达时（进程已退出），自动解除"停止中"状态
+      setIsStoppingBackfill(false);
+      setBackfillStatus((prev) =>
+        prev ? { ...prev, running: false, phase: "stopped" } : prev,
+      );
+    }
+  };
+
+  const startBackfill = async (force = false) => {
+    try {
+      const url = force
+        ? "http://localhost:8000/api/sync/kline-backfill?force=true"
+        : "http://localhost:8000/api/sync/kline-backfill";
+      const res = await fetch(url, { method: "POST" });
+      const data = await res.json();
+      if (data.status === "already_running") {
+        addLog("info", "全量K线补全任务已在运行中");
+      } else {
+        addLog(
+          "info",
+          force ? "已重置游标，开始全量K线补全" : "已启动全量K线补全（续点补）",
+        );
+      }
+      // 启动轮询
+      if (backfillPollRef.current) clearInterval(backfillPollRef.current);
+      backfillPollRef.current = setInterval(fetchBackfillStatus, 2000);
+      fetchBackfillStatus();
+    } catch (e) {
+      addLog("error", `启动全量K线补全失败：${e}`);
+    }
+  };
+
+  const stopBackfill = async () => {
+    try {
+      setIsStoppingBackfill(true);
+      await fetch("http://localhost:8000/api/sync/kline-backfill/stop", {
+        method: "POST",
+      });
+      addLog(
+        "info",
+        "已发送停止信号，全量K线补全将在当前股票完成后停止（游标已保存）",
+      );
+      // 确保轮询继续，等待 running 变为 false
+      if (!backfillPollRef.current) {
+        backfillPollRef.current = setInterval(fetchBackfillStatus, 2000);
+      }
+    } catch (e) {
+      setIsStoppingBackfill(false);
+      addLog("error", `停止失败：${e}`);
+    }
+  };
+
+  // 补全运行时自动轮询状态
+  useEffect(() => {
+    fetchBackfillStatus();
+  }, []);
+
+  useEffect(() => {
+    if (backfillStatus?.running) {
+      if (!backfillPollRef.current) {
+        backfillPollRef.current = setInterval(fetchBackfillStatus, 2000);
+      }
+    } else {
+      if (backfillPollRef.current) {
+        clearInterval(backfillPollRef.current);
+        backfillPollRef.current = null;
+      }
+    }
+  }, [backfillStatus?.running]);
 
   return (
     <div className="h-full flex flex-col bg-[var(--bg-primary)]">
@@ -2185,7 +2229,7 @@ export default function SystemMonitorPage() {
           <div className="flex items-center justify-between text-xs text-[var(--text-tertiary)]">
             <span>数据最后更新时间: {lastUpdated}</span>
             <button
-              onClick={fetchStats}
+              onClick={fetchMonitorSummary}
               className="flex items-center gap-1 px-2 py-1 rounded hover:text-[var(--text-primary)] transition-colors"
             >
               <RefreshCw size={12} />
@@ -2260,11 +2304,26 @@ export default function SystemMonitorPage() {
             行情 · 板块 · 指数
           </div>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            <SwIndustryMonitorInline onTaskClick={scrollToTask} />
-            <ConceptBoardMonitorInline onTaskClick={scrollToTask} />
-            <FundFlowMonitorInline onTaskClick={scrollToTask} />
-            <GlobalIndexMonitorInline onTaskClick={scrollToTask} />
-            <MarginTradingMonitorInline onTaskClick={scrollToTask} />
+            <SwIndustryMonitorInline
+              onTaskClick={scrollToTask}
+              data={monitorSummary?.swIndustry}
+            />
+            <ConceptBoardMonitorInline
+              onTaskClick={scrollToTask}
+              data={monitorSummary?.conceptBoard}
+            />
+            <FundFlowMonitorInline
+              onTaskClick={scrollToTask}
+              data={monitorSummary?.fundFlowDates}
+            />
+            <GlobalIndexMonitorInline
+              onTaskClick={scrollToTask}
+              data={monitorSummary?.globalIndices}
+            />
+            <MarginTradingMonitorInline
+              onTaskClick={scrollToTask}
+              data={monitorSummary?.marginTrading}
+            />
           </div>
         </div>
 
@@ -2274,8 +2333,14 @@ export default function SystemMonitorPage() {
             新闻 · 资讯
           </div>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-            <ThemeNewsMonitorInline onTaskClick={scrollToTask} />
-            <GubaMonitorInline onTaskClick={scrollToTask} />
+            <ThemeNewsMonitorInline
+              onTaskClick={scrollToTask}
+              data={monitorSummary?.themeNews}
+            />
+            <GubaMonitorInline
+              onTaskClick={scrollToTask}
+              data={monitorSummary?.gubaStats}
+            />
           </div>
         </div>
 
@@ -2285,9 +2350,217 @@ export default function SystemMonitorPage() {
             量化数据
           </div>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-            <MinuteSyncMonitorInline onTaskClick={scrollToTask} />
-            <F10MonitorInline onTaskClick={scrollToTask} />
+            <MinuteSyncMonitorInline
+              onTaskClick={scrollToTask}
+              data={monitorSummary?.minuteStats}
+            />
+            <F10MonitorInline
+              onTaskClick={scrollToTask}
+              data={monitorSummary?.stats}
+            />
           </div>
+        </div>
+
+        {/* ── 全量K线补全 ── */}
+        <div className="bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-xl p-4">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <div className="text-[11px] font-semibold text-[var(--text-tertiary)] uppercase tracking-wider">
+                全量K线补全
+              </div>
+              {backfillStatus?.running && (
+                <span className="flex items-center gap-1 px-2 py-0.5 text-[10px] rounded-full bg-blue-500/15 text-blue-400 border border-blue-500/25">
+                  <Loader2 size={10} className="animate-spin" />
+                  运行中
+                </span>
+              )}
+              {backfillStatus?.phase === "stopped" && (
+                <span className="px-2 py-0.5 text-[10px] rounded-full bg-yellow-500/15 text-yellow-400 border border-yellow-500/25">
+                  已暂停（可续传）
+                </span>
+              )}
+              {backfillStatus?.phase === "done" && (
+                <span className="px-2 py-0.5 text-[10px] rounded-full bg-green-500/15 text-green-400 border border-green-500/25">
+                  已完成
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              {backfillStatus?.running ? (
+                <button
+                  onClick={stopBackfill}
+                  disabled={isStoppingBackfill}
+                  className={cn(
+                    "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors",
+                    isStoppingBackfill
+                      ? "bg-[var(--bg-tertiary)] text-[var(--text-tertiary)] border-[var(--border-color)] cursor-not-allowed"
+                      : "bg-red-500/15 text-red-400 border-red-500/25 hover:bg-red-500/25",
+                  )}
+                >
+                  {isStoppingBackfill ? (
+                    <>
+                      <Loader2 size={13} className="animate-spin" />
+                      停止中...
+                    </>
+                  ) : (
+                    <>
+                      <StopCircle size={13} />
+                      暂停并保存进度
+                    </>
+                  )}
+                </button>
+              ) : (
+                <>
+                  <button
+                    onClick={() => startBackfill(false)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-[var(--accent)]/15 text-[var(--accent)] border border-[var(--accent)]/25 hover:bg-[var(--accent)]/25 transition-colors"
+                  >
+                    <Play size={13} />
+                    {backfillStatus?.has_cursor ? "续点补" : "开始补全"}
+                  </button>
+                  {backfillStatus?.has_cursor && (
+                    <button
+                      onClick={() => startBackfill(true)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-orange-500/15 text-orange-400 border border-orange-500/25 hover:bg-orange-500/25 transition-colors"
+                    >
+                      <RefreshCw size={13} />
+                      重新开始
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+
+          <p className="text-[11px] text-[var(--text-tertiary)] mb-4">
+            对 A 股全市场（含主板、创业板、科创板、北交所）及 ETF
+            补全完整历史K线（日K / 周K /
+            月K），从各标的上市日起至今，数据库外的个股与 ETF
+            也会一并补全。支持随时暂停并续点补。5,000+ 只标的预计需要数小时。
+          </p>
+
+          {/* 进度区域 */}
+          {backfillStatus &&
+            (backfillStatus.running ||
+              backfillStatus.phase === "stopped" ||
+              backfillStatus.phase === "done") && (
+              <div className="space-y-3">
+                {/* 周期标签 */}
+                <div className="flex items-center gap-2">
+                  {["daily", "weekly", "monthly"].map((p) => {
+                    const isDone = backfillStatus.periods_done?.includes(p);
+                    const isCurrent = backfillStatus.phase === p;
+                    return (
+                      <span
+                        key={p}
+                        className={cn(
+                          "px-2 py-0.5 text-[10px] rounded border",
+                          isDone
+                            ? "bg-green-500/15 text-green-400 border-green-500/25"
+                            : isCurrent
+                              ? "bg-blue-500/15 text-blue-400 border-blue-500/25"
+                              : "bg-[var(--bg-tertiary)] text-[var(--text-tertiary)] border-[var(--border-color)]",
+                        )}
+                      >
+                        {isDone ? "✓ " : isCurrent ? "▶ " : ""}
+                        {p === "daily" ? "日K" : p === "weekly" ? "周K" : "月K"}
+                      </span>
+                    );
+                  })}
+                </div>
+
+                {/* 进度条 */}
+                {backfillStatus.total > 0 && (
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="text-[var(--text-secondary)]">
+                        {backfillStatus.current
+                          ? `当前：${backfillStatus.current}`
+                          : backfillStatus.phase === "done"
+                            ? "已全部完成"
+                            : "等待开始"}
+                      </span>
+                      <span className="text-[var(--text-tertiary)]">
+                        {backfillStatus.done.toLocaleString()} /{" "}
+                        {backfillStatus.total.toLocaleString()}
+                      </span>
+                    </div>
+                    <div className="h-2 bg-[var(--bg-tertiary)] rounded-full overflow-hidden">
+                      <div
+                        className={cn(
+                          "h-full rounded-full transition-all duration-500",
+                          backfillStatus.phase === "done"
+                            ? "bg-green-500"
+                            : backfillStatus.phase === "stopped"
+                              ? "bg-yellow-500"
+                              : "bg-blue-500",
+                        )}
+                        style={{
+                          width: `${Math.min(100, Math.round((backfillStatus.done / backfillStatus.total) * 100))}%`,
+                        }}
+                      />
+                    </div>
+                    <div className="text-[10px] text-[var(--text-tertiary)] text-right">
+                      {Math.min(
+                        100,
+                        Math.round(
+                          (backfillStatus.done / backfillStatus.total) * 100,
+                        ),
+                      )}
+                      %
+                    </div>
+                  </div>
+                )}
+
+                {/* 游标信息 */}
+                {backfillStatus.has_cursor &&
+                  backfillStatus.cursor_info &&
+                  !backfillStatus.running && (
+                    <div className="text-[11px] text-yellow-400/80 bg-yellow-500/8 border border-yellow-500/20 rounded-lg px-3 py-2">
+                      游标已保存：
+                      {backfillStatus.cursor_info.period === "daily"
+                        ? "日K"
+                        : backfillStatus.cursor_info.period === "weekly"
+                          ? "周K"
+                          : "月K"}
+                      第 {backfillStatus.cursor_info.code_idx.toLocaleString()}{" "}
+                      /{" "}
+                      {backfillStatus.cursor_info.total_codes.toLocaleString()}{" "}
+                      只 — 点击「续点补」可从此处继续
+                    </div>
+                  )}
+
+                {/* 时间信息 */}
+                {backfillStatus.started_at && (
+                  <div className="text-[10px] text-[var(--text-tertiary)]">
+                    开始时间：
+                    {new Date(backfillStatus.started_at + "Z").toLocaleString(
+                      "zh-CN",
+                      { hour12: false },
+                    )}
+                    {backfillStatus.finished_at && (
+                      <span className="ml-3">
+                        结束时间：
+                        {new Date(
+                          backfillStatus.finished_at + "Z",
+                        ).toLocaleString("zh-CN", { hour12: false })}
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+          {/* 未开始时的说明 */}
+          {(!backfillStatus ||
+            (!backfillStatus.running &&
+              backfillStatus.phase !== "stopped" &&
+              backfillStatus.phase !== "done" &&
+              !backfillStatus.has_cursor)) && (
+            <div className="text-[11px] text-[var(--text-tertiary)] bg-[var(--bg-tertiary)] rounded-lg px-3 py-2">
+              尚未启动，点击「开始补全」启动任务
+            </div>
+          )}
         </div>
 
         {/* Task Status Table */}

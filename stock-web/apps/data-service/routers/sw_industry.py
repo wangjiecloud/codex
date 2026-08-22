@@ -12,6 +12,7 @@ from db import (
     SessionLocal,
     SwIndustry,
     SwIndustryConstituent,
+    SwIndustryDaily,
     StockMeta,
     StockQuote,
     StockKline,
@@ -146,11 +147,42 @@ def sync_sw_industries() -> int:
                     db.execute(stmt)
                     count += 1
                 db.commit()
+
+                # ── 同时写入每日历史快照表 ──────────────────────────────
+                today_str = date.today().isoformat()
+                daily_count = 0
+                for item in rows_to_write:
+                    daily_stmt = sqlite_insert(SwIndustryDaily).values(
+                        trade_date=today_str,
+                        code=item["code"],
+                        name=item["name"],
+                        change_pct=item["change_pct"],
+                        close=item["price"],
+                        volume=item["volume"],
+                        turnover=item["turnover"],
+                        updated_at=datetime.utcnow(),
+                    )
+                    daily_stmt = daily_stmt.on_conflict_do_update(
+                        index_elements=["trade_date", "code"],
+                        set_={
+                            "name": daily_stmt.excluded.name,
+                            "change_pct": daily_stmt.excluded.change_pct,
+                            "close": daily_stmt.excluded.close,
+                            "volume": daily_stmt.excluded.volume,
+                            "turnover": daily_stmt.excluded.turnover,
+                            "updated_at": daily_stmt.excluded.updated_at,
+                        },
+                    )
+                    db.execute(daily_stmt)
+                    daily_count += 1
+                db.commit()
+                # ────────────────────────────────────────────────────────
+
                 from routers.system import sched_log
 
                 sched_log(
                     "success",
-                    f"申万行业同步完成，共 {count} 个板块",
+                    f"申万行业同步完成，共 {count} 个板块，日历史 {daily_count} 条",
                     source="scheduler",
                 )
                 return count
@@ -353,6 +385,7 @@ def _fetch_realtime_quotes(codes: list[str]) -> dict:
     f17=今开 f18=昨收 f20=总市值 f23=市净率 f9=动态PE"""
     if not codes:
         return {}
+
     # 东方财富 secid: 0.开头(深) 或 1.开头(沪)
     def _secid(c: str) -> str:
         return f"0.{c}" if c[0] in ("0", "3") else f"1.{c}"
@@ -375,19 +408,19 @@ def _fetch_realtime_quotes(codes: list[str]) -> dict:
         if not code:
             continue
         result[code] = {
-            "price":      _safe_float(item.get("f2")),
-            "change":     _safe_float(item.get("f3")),     # 涨跌幅%
+            "price": _safe_float(item.get("f2")),
+            "change": _safe_float(item.get("f3")),  # 涨跌幅%
             "change_amt": _safe_float(item.get("f4")),
-            "volume":     _safe_float(item.get("f5")),
-            "turnover":   _safe_float(item.get("f6")),
-            "high":       _safe_float(item.get("f15")),
-            "low":        _safe_float(item.get("f16")),
-            "open":       _safe_float(item.get("f17")),
+            "volume": _safe_float(item.get("f5")),
+            "turnover": _safe_float(item.get("f6")),
+            "high": _safe_float(item.get("f15")),
+            "low": _safe_float(item.get("f16")),
+            "open": _safe_float(item.get("f17")),
             "prev_close": _safe_float(item.get("f18")),
             "market_cap": _safe_float(item.get("f20")),
-            "pb":         _safe_float(item.get("f23")),
-            "pe":         _safe_float(item.get("f9")),
-            "name":       str(item.get("f14", "")).strip(),
+            "pb": _safe_float(item.get("f23")),
+            "pe": _safe_float(item.get("f9")),
+            "name": str(item.get("f14", "")).strip(),
         }
     return result
 
@@ -396,6 +429,7 @@ def _is_quote_stale(quotes: list) -> bool:
     """判断行情数据是否是今天之前的旧数据（以 updated_at 判断）。
     updated_at 存的是 UTC 时间，折算为北京时间（+8h）后与今天比较。"""
     from datetime import timezone, timedelta as _td
+
     cst = timezone(_td(hours=8))
     today_cst = datetime.now(tz=cst).date().isoformat()
     for q in quotes:
@@ -437,18 +471,18 @@ def _refresh_quotes_for_codes(codes: list[str]):
             stmt = stmt.on_conflict_do_update(
                 index_elements=["code"],
                 set_={
-                    "price":      stmt.excluded.price,
-                    "change":     stmt.excluded.change,
+                    "price": stmt.excluded.price,
+                    "change": stmt.excluded.change,
                     "change_amt": stmt.excluded.change_amt,
-                    "open":       stmt.excluded.open,
+                    "open": stmt.excluded.open,
                     "prev_close": stmt.excluded.prev_close,
-                    "high":       stmt.excluded.high,
-                    "low":        stmt.excluded.low,
-                    "volume":     stmt.excluded.volume,
-                    "turnover":   stmt.excluded.turnover,
+                    "high": stmt.excluded.high,
+                    "low": stmt.excluded.low,
+                    "volume": stmt.excluded.volume,
+                    "turnover": stmt.excluded.turnover,
                     "market_cap": stmt.excluded.market_cap,
-                    "pe":         stmt.excluded.pe,
-                    "pb":         stmt.excluded.pb,
+                    "pe": stmt.excluded.pe,
+                    "pb": stmt.excluded.pb,
                     "updated_at": stmt.excluded.updated_at,
                 },
             )
@@ -645,13 +679,16 @@ def _dedup_period_bars(bars: list, period: str) -> list:
         return bars
     # 按周/月分组 key
     if period == "weekly":
+
         def _group_key(bar):
             d = bar["time"]  # "YYYY-MM-DD"
             from datetime import date as _date
+
             dt = _date.fromisoformat(d)
             # ISO 周号（周一为第一天）
             return dt.isocalendar()[:2]  # (year, week)
     else:
+
         def _group_key(bar):
             return bar["time"][:7]  # "YYYY-MM"
 
@@ -881,6 +918,7 @@ async def get_sw_rotation(days: int = Query(default=14, ge=5, le=60)):
         if not dates:
             return True
         from datetime import date as date_type
+
         try:
             latest = date_type.fromisoformat(dates[-1])
             return (date_type.today() - latest).days > 3
@@ -927,10 +965,13 @@ def _sync_rotation_klines(force: bool = False):
     try:
         all_boards = db.query(SwIndustry).order_by(SwIndustry.change_pct.desc()).all()
         all_sw_codes = [b.code for b in all_boards]
-        board_name_map = {b.code: b.name for b in all_boards}  # 构建板块代码->名称的映射
+        board_name_map = {
+            b.code: b.name for b in all_boards
+        }  # 构建板块代码->名称的映射
         if force:
             # force 模式：找出日K数据落后的板块单独补，速度更快
             from sqlalchemy import text as _text
+
             rows = db.execute(
                 _text(
                     "SELECT code, MAX(trade_date) as latest FROM stock_kline "
@@ -940,11 +981,17 @@ def _sync_rotation_klines(force: bool = False):
             latest_map = {r[0]: r[1] for r in rows}
             # 取全量最新日期，只同步落后的板块
             global_latest = max(latest_map.values()) if latest_map else "1970-01-01"
-            codes_to_sync = [c for c in all_sw_codes if latest_map.get(c, "1970-01-01") < global_latest]
+            codes_to_sync = [
+                c
+                for c in all_sw_codes
+                if latest_map.get(c, "1970-01-01") < global_latest
+            ]
             # 没有或极少落后时同步全部（首次 force）
             if not codes_to_sync:
                 codes_to_sync = all_sw_codes
-            print(f"[sync_rotation_klines] force mode: {len(codes_to_sync)} stale codes to sync")
+            print(
+                f"[sync_rotation_klines] force mode: {len(codes_to_sync)} stale codes to sync"
+            )
         else:
             top20 = [b.code for b in all_boards[:20]]
             extra = list(set(_INDUSTRY_SW_MAP.values()))
@@ -953,11 +1000,15 @@ def _sync_rotation_klines(force: bool = False):
         db.close()
 
     # force 模式只补日K（快）；常规模式补全三周期
-    period_counts = [("daily", 10)] if force else [
-        ("daily",   60),
-        ("weekly",  104),
-        ("monthly", 100),
-    ]
+    period_counts = (
+        [("daily", 10)]
+        if force
+        else [
+            ("daily", 60),
+            ("weekly", 104),
+            ("monthly", 100),
+        ]
+    )
 
     for code in codes_to_sync:
         board_name = board_name_map.get(code, code)  # 获取板块名称，没有则使用代码
@@ -1004,9 +1055,11 @@ def _sync_rotation_klines(force: bool = False):
                         code=code,
                         name=f"{board_name}({period}K)",
                         reason=f"数据库写入失败: {str(db_err)[:100]}",
-                        sync_type="sw_kline"
+                        sync_type="sw_kline",
                     )
-                    print(f"[sync_rotation_klines] DB error for {code} {period}: {db_err}")
+                    print(
+                        f"[sync_rotation_klines] DB error for {code} {period}: {db_err}"
+                    )
                 finally:
                     db2.close()
             except Exception as fetch_err:
@@ -1015,9 +1068,11 @@ def _sync_rotation_klines(force: bool = False):
                     code=code,
                     name=f"{board_name}({period}K)",
                     reason=f"K线获取失败: {str(fetch_err)[:100]}",
-                    sync_type="sw_kline"
+                    sync_type="sw_kline",
                 )
-                print(f"[sync_rotation_klines] Fetch error for {code} {period}: {fetch_err}")
+                print(
+                    f"[sync_rotation_klines] Fetch error for {code} {period}: {fetch_err}"
+                )
                 continue
 
 

@@ -20,6 +20,8 @@ import {
   Sparkles,
   CheckCircle2,
   CircleDot,
+  Wand2,
+  ArrowRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -1112,34 +1114,61 @@ function TechnicalPanel({ tech }: { tech: TechnicalData }) {
 
 // ── AI 综合研判 ───────────────────────────────────────────────────────────────
 
-function AIJudgment({ data }: { data: DiagnosisResult }) {
+interface StrategyRecommend {
+  strategy_id: string;
+  strategy_label: string;
+  reason: string;
+  stop_profit: number;
+  stop_loss: number;
+  max_hold_days: number;
+  confidence: "高" | "中" | "低";
+}
+
+function AIJudgment({
+  data,
+  onApplyStrategy,
+}: {
+  data: DiagnosisResult;
+  onApplyStrategy?: (
+    strategyId: string,
+    stopProfit: number,
+    stopLoss: number,
+    maxHoldDays: number,
+  ) => void;
+}) {
   const [loading, setLoading] = useState(false);
   const [judgment, setJudgment] = useState<string>("");
+  const [recommend, setRecommend] = useState<StrategyRecommend | null>(null);
+  const [applied, setApplied] = useState(false);
   const [error, setError] = useState("");
 
   const generate = useCallback(async () => {
     setLoading(true);
     setError("");
     setJudgment("");
+    setRecommend(null);
+    setApplied(false);
 
     const best = data.best_strategy;
     const tech = data.technical;
     const hasSignal = data.current_signals.length > 0;
 
-    const prompt = `你是专业股票技术分析师，请对以下股票给出简洁的综合研判（约200字，中文，使用Markdown格式）：
+    // 所有可用策略 ID 列表（供 AI 选择）
+    const strategyIdList = data.strategy_ranking
+      .map(
+        (s) =>
+          `${s.id}（${s.label}，胜率${s.win_rate.toFixed(1)}%，均收益${fmtPct(s.avg_return)}，得分${s.score}）`,
+      )
+      .join("\n");
+
+    const prompt = `你是专业股票技术分析师，请对以下股票给出综合研判（中文，使用Markdown格式）：
 
 股票：${data.name}（${data.code}）
 当前价：${tech.current_price}元
 回测周期：${data.backtest_period.start} ~ ${data.backtest_period.end}
 
-【策略回测排名（前3名）】
-${data.strategy_ranking
-  .slice(0, 3)
-  .map(
-    (s) =>
-      `- ${s.rank}. ${s.label}：交易${s.trade_count}次，胜率${s.win_rate.toFixed(1)}%，均收益${fmtPct(s.avg_return)}，得分${s.score}`,
-  )
-  .join("\n")}
+【策略回测排名（全部）】
+${strategyIdList}
 
 【当前触发信号策略】：${hasSignal ? data.current_signals.map((id) => data.strategy_ranking.find((s) => s.id === id)?.label ?? id).join("、") : "无"}
 
@@ -1149,12 +1178,26 @@ ${data.strategy_ranking
 - 量比：${tech.vol_ratio?.toFixed(2) ?? "—"}
 - 支撑位：${tech.support_levels.map((v) => v.toFixed(2)).join("、") || "—"}
 - 压力位：${tech.resistance_levels.map((v) => v.toFixed(2)).join("、") || "—"}
-${best ? `\n最佳策略：${best.label}（止盈+${best.stop_profit}%/止损-${best.stop_loss}%/最长${best.max_hold_days}天）` : ""}
+${best ? `最佳策略：${best.label}（止盈+${best.stop_profit}%/止损-${best.stop_loss}%/最长${best.max_hold_days}天）` : ""}
 
-请输出三个维度：
-1. 当前技术面形态研判（多/空/震荡）
+请输出以下内容：
+1. 当前技术面形态研判（多/空/震荡，约100字）
 2. 关键价格区间（买入参考/压力/止盈）
-3. 操作建议（结合最佳策略）`;
+3. 操作建议（结合该股历史回测数据）
+
+然后，在 Markdown 输出结尾，**必须**附上如下格式的策略推荐 JSON 块（严格 JSON，字段不可缺失）：
+
+<STRATEGY_RECOMMEND>
+{
+  "strategy_id": "从上面策略列表中选最适合该股的 id，如 macd_kdj",
+  "strategy_label": "对应策略名称",
+  "reason": "20字内说明为何该策略最适合此股",
+  "stop_profit": 数字（根据该股波动率微调，如12），
+  "stop_loss": 数字（如6），
+  "max_hold_days": 数字（如12），
+  "confidence": "高或中或低"
+}
+</STRATEGY_RECOMMEND>`;
 
     try {
       const res = await fetch("/api/llm/chat", {
@@ -1162,7 +1205,7 @@ ${best ? `\n最佳策略：${best.label}（止盈+${best.stop_profit}%/止损-${
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           system:
-            "你是专业股票技术分析师，请给出简洁、客观的操作研判，使用Markdown格式输出，不构成投资建议。",
+            "你是专业股票技术分析师，请给出简洁、客观的操作研判，使用Markdown格式输出，不构成投资建议。严格按照用户要求的格式输出，包括结尾的 <STRATEGY_RECOMMEND> JSON 块。",
           prompt,
         }),
       });
@@ -1171,7 +1214,26 @@ ${best ? `\n最佳策略：${best.label}（止盈+${best.stop_profit}%/止损-${
         throw new Error(d.error ?? "AI 服务异常");
       }
       const d = (await res.json()) as { result?: string };
-      setJudgment(d.result ?? "AI 未返回内容");
+      const raw = d.result ?? "AI 未返回内容";
+
+      // 解析 <STRATEGY_RECOMMEND> 块
+      const recommMatch = raw.match(
+        /<STRATEGY_RECOMMEND>\s*([\s\S]*?)\s*<\/STRATEGY_RECOMMEND>/,
+      );
+      if (recommMatch) {
+        try {
+          const parsed = JSON.parse(recommMatch[1]) as StrategyRecommend;
+          setRecommend(parsed);
+        } catch {
+          // 解析失败静默忽略
+        }
+      }
+
+      // 从展示文本中移除 JSON 块
+      const cleanText = raw
+        .replace(/<STRATEGY_RECOMMEND>[\s\S]*?<\/STRATEGY_RECOMMEND>/g, "")
+        .trim();
+      setJudgment(cleanText || "AI 未返回内容");
     } catch (e) {
       setError(e instanceof Error ? e.message : "AI 分析失败");
     } finally {
@@ -1212,7 +1274,7 @@ ${best ? `\n最佳策略：${best.label}（止盈+${best.stop_profit}%/止损-${
       {loading && (
         <div className="flex items-center gap-2 text-xs text-[var(--text-tertiary)] py-4 justify-center">
           <Loader2 size={13} className="animate-spin text-purple-400" />
-          AI 正在分析中...
+          AI 正在分析，推导最优策略...
         </div>
       )}
 
@@ -1243,9 +1305,105 @@ ${best ? `\n最佳策略：${best.label}（止盈+${best.stop_profit}%/止损-${
         </div>
       )}
 
+      {/* ── 智定策略推荐卡片 */}
+      {recommend && !loading && (
+        <div className="mt-3 rounded-xl border border-[#f5a623]/40 bg-[#f5a623]/5 p-3">
+          <div className="flex items-center gap-2 mb-2.5">
+            <div className="w-5 h-5 rounded-md bg-[#f5a623]/20 flex items-center justify-center shrink-0">
+              <Wand2 size={11} className="text-[#f5a623]" />
+            </div>
+            <span className="text-xs font-semibold text-[var(--text-primary)]">
+              AI 智定策略
+            </span>
+            <span
+              className={cn(
+                "text-[9px] px-1.5 py-0.5 rounded-full font-medium",
+                recommend.confidence === "高"
+                  ? "bg-[#e84444]/15 text-[#e84444]"
+                  : recommend.confidence === "中"
+                    ? "bg-[#f5a623]/15 text-[#f5a623]"
+                    : "bg-[var(--bg-tertiary)] text-[var(--text-tertiary)]",
+              )}
+            >
+              置信度 {recommend.confidence}
+            </span>
+          </div>
+
+          {/* 策略名 + 理由 */}
+          <div className="mb-2.5">
+            <div className="flex items-center gap-1.5 mb-1">
+              <span className="text-xs font-medium text-[#f5a623]">
+                {recommend.strategy_label}
+              </span>
+            </div>
+            <p className="text-[11px] text-[var(--text-secondary)] leading-relaxed">
+              {recommend.reason}
+            </p>
+          </div>
+
+          {/* 参数行 */}
+          <div className="flex items-center gap-3 mb-3 text-[11px]">
+            <div className="flex items-center gap-1">
+              <span className="text-[var(--text-tertiary)]">止盈</span>
+              <span className="font-mono font-semibold text-[#09d464]">
+                +{recommend.stop_profit}%
+              </span>
+            </div>
+            <div className="flex items-center gap-1">
+              <span className="text-[var(--text-tertiary)]">止损</span>
+              <span className="font-mono font-semibold text-[#e84444]">
+                -{recommend.stop_loss}%
+              </span>
+            </div>
+            <div className="flex items-center gap-1">
+              <span className="text-[var(--text-tertiary)]">最长持仓</span>
+              <span className="font-mono font-semibold text-[var(--text-primary)]">
+                {recommend.max_hold_days} 天
+              </span>
+            </div>
+          </div>
+
+          {/* 应用按钮 */}
+          {onApplyStrategy && (
+            <button
+              onClick={() => {
+                if (!applied) {
+                  onApplyStrategy(
+                    recommend.strategy_id,
+                    recommend.stop_profit,
+                    recommend.stop_loss,
+                    recommend.max_hold_days,
+                  );
+                  setApplied(true);
+                }
+              }}
+              disabled={applied}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all",
+                applied
+                  ? "bg-[var(--bg-tertiary)] text-[var(--text-tertiary)] cursor-default border border-[var(--border-color)]"
+                  : "bg-[#f5a623] text-black hover:bg-[#e8961a] shadow-sm",
+              )}
+            >
+              {applied ? (
+                <>
+                  <CheckCircle2 size={11} />
+                  已应用到回测
+                </>
+              ) : (
+                <>
+                  <ArrowRight size={11} />
+                  一键应用到回测
+                </>
+              )}
+            </button>
+          )}
+        </div>
+      )}
+
       {!judgment && !loading && !error && (
         <div className="text-[11px] text-[var(--text-tertiary)] text-center py-3">
-          点击「生成分析」，AI 将综合策略回测与技术指标给出操作建议
+          点击「生成分析」，AI 将综合策略回测数据为该股智定最优策略
         </div>
       )}
     </div>
@@ -1257,11 +1415,18 @@ ${best ? `\n最佳策略：${best.label}（止盈+${best.stop_profit}%/止损-${
 interface StockDiagnosisProps {
   stock: { code: string; name: string };
   onClose?: () => void;
+  onApplyStrategy?: (
+    strategyId: string,
+    stopProfit: number,
+    stopLoss: number,
+    maxHoldDays: number,
+  ) => void;
 }
 
 export default function StockDiagnosis({
   stock,
   onClose,
+  onApplyStrategy,
 }: StockDiagnosisProps) {
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<DiagnosisResult | null>(null);
@@ -1671,7 +1836,7 @@ export default function StockDiagnosis({
           {tech && <TechnicalPanel tech={tech} />}
 
           {/* AI 综合研判 */}
-          <AIJudgment data={data} />
+          <AIJudgment data={data} onApplyStrategy={onApplyStrategy} />
         </>
       )}
     </div>

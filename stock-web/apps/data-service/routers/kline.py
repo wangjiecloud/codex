@@ -111,13 +111,15 @@ def _fetch_and_cache_klines(code: str, period: str, count: int) -> list:
         start = (date.today() - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
         end = date.today().strftime("%Y-%m-%d")
         fields = "date,code,open,high,low,close,volume,amount,turn,pctChg"
+        # 指数不做复权（adjustflag=3），普通股票用前复权（adjustflag=2）
+        adjust = "3" if code in _CN_INDEX_BS_MAP else "2"
         rs = bsapi.query_history_k_data_plus(
             bs_code,
             fields,
             start_date=start,
             end_date=end,
             frequency=bs_period,
-            adjustflag="2",
+            adjustflag=adjust,
         )
         bars = []
         while rs.error_code == "0":
@@ -344,6 +346,12 @@ async def get_kline(
                 daemon=True,
             ).start()
             return _bars_from_rows(rows)
-        raise HTTPException(status_code=404, detail=f"No cached kline data for {code}")
+        # 首次请求（缓存为空），同步抓取后返回
+        bars = await run_in_threadpool(_fetch_and_cache_klines, code, period, count)
+        if not bars:
+            raise HTTPException(
+                status_code=404, detail=f"No cached kline data for {code}"
+            )
+        return bars
 
     return _bars_from_rows(rows)

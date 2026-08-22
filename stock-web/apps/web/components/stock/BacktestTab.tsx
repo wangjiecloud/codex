@@ -19,15 +19,18 @@ import {
   BookOpen,
   Zap,
   Activity,
+  Wand2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import StockDiagnosis from "@/components/stock/StockDiagnosis";
+import AutoStrategyPanel from "@/components/stock/AutoStrategyPanel";
 
 const API = "http://localhost:8000";
 
 // ── 高质量策略模板 ──────────────────────────────────────────────────────────
 
 interface StrategyTemplate {
+  id: string; // 与后端 STRATEGY_CATALOG 保持一致的唯一标识
   label: string;
   tag: string; // 短标签（技术/价值/动量）
   desc: string; // 一句话简介
@@ -47,6 +50,7 @@ interface StrategyTemplate {
 
 const STRATEGY_TEMPLATES: StrategyTemplate[] = [
   {
+    id: "macd_kdj",
     label: "MACD+KDJ 双金叉",
     tag: "技术共振",
     desc: "MACD 与 KDJ 同时出现金叉，量能配合放大，信号强度高",
@@ -99,6 +103,7 @@ WHERE s.dif > s.dif_prev            -- MACD DIF 向上
 ORDER BY s.volume / s.vol_avg5 DESC`,
   },
   {
+    id: "ma_breakout",
     label: "均线多头排列+放量突破",
     tag: "趋势追踪",
     desc: "MA5>MA10>MA20>MA60 多头排列，当日突破 MA20 且量能放大",
@@ -139,6 +144,7 @@ WHERE k.ma5 > k.ma10
 ORDER BY k.close / k.ma20 DESC`,
   },
   {
+    id: "boll_breakout",
     label: "布林带收口突破",
     tag: "波动率突破",
     desc: "布林带收窄蓄力后，股价放量向上突破上轨，历史胜率约 65%",
@@ -156,19 +162,18 @@ ORDER BY k.close / k.ma20 DESC`,
     stopLoss: 5,
     maxHoldDays: 12,
     stockCompatible: true,
-    sql: `WITH boll AS (
-  SELECT code, trade_date, close, volume, high, low,
+    sql: `WITH boll_prep AS (
+  SELECT code, trade_date, close, volume,
     AVG(close) OVER (PARTITION BY code ORDER BY trade_date ROWS BETWEEN 19 PRECEDING AND CURRENT ROW) AS ma20,
     AVG(volume) OVER (PARTITION BY code ORDER BY trade_date ROWS BETWEEN  9 PRECEDING AND CURRENT ROW) AS vol_avg10,
-    -- 布林带上下轨（用 AVG/近似标准差）
-    AVG(close) OVER (PARTITION BY code ORDER BY trade_date ROWS BETWEEN 19 PRECEDING AND CURRENT ROW)
-      + 2 * AVG(ABS(close - AVG(close) OVER (PARTITION BY code ORDER BY trade_date ROWS BETWEEN 19 PRECEDING AND CURRENT ROW)))
-        OVER (PARTITION BY code ORDER BY trade_date ROWS BETWEEN 19 PRECEDING AND CURRENT ROW) AS boll_upper,
-    AVG(close) OVER (PARTITION BY code ORDER BY trade_date ROWS BETWEEN 19 PRECEDING AND CURRENT ROW)
-      - 2 * AVG(ABS(close - AVG(close) OVER (PARTITION BY code ORDER BY trade_date ROWS BETWEEN 19 PRECEDING AND CURRENT ROW)))
-        OVER (PARTITION BY code ORDER BY trade_date ROWS BETWEEN 19 PRECEDING AND CURRENT ROW) AS boll_lower,
     ROW_NUMBER() OVER (PARTITION BY code ORDER BY trade_date DESC) AS rn
   FROM stock_kline WHERE period = 'daily'
+),
+boll AS (
+  SELECT code, trade_date, close, volume, ma20, vol_avg10, rn,
+    ma20 + 2 * AVG(ABS(close - ma20)) OVER (PARTITION BY code ORDER BY trade_date ROWS BETWEEN 19 PRECEDING AND CURRENT ROW) AS boll_upper,
+    ma20 - 2 * AVG(ABS(close - ma20)) OVER (PARTITION BY code ORDER BY trade_date ROWS BETWEEN 19 PRECEDING AND CURRENT ROW) AS boll_lower
+  FROM boll_prep
 ),
 boll_width AS (
   SELECT code,
@@ -180,13 +185,14 @@ boll_width AS (
 SELECT q.code, q.name, ROUND(q.price, 2) AS price, ROUND(q.change, 2) AS change
 FROM stock_quote q
 JOIN boll_width b ON b.code = q.code AND b.rn = 1
-WHERE b.width <= b.min_width_15d * 1.05    -- 带宽处于近15日收口状态
-  AND b.close > b.boll_upper                -- 突破上轨
-  AND b.volume > b.vol_avg10 * 1.5          -- 放量
+WHERE b.width <= b.min_width_15d * 1.05
+  AND b.close > b.boll_upper
+  AND b.volume > b.vol_avg10 * 1.5
   AND q.name NOT LIKE '%ST%'
 ORDER BY b.volume / b.vol_avg10 DESC`,
   },
   {
+    id: "rsi_oversold",
     label: "RSI 低位超卖反弹",
     tag: "超卖反转",
     desc: "RSI 进入超卖区（<30）后反转向上，配合缩量触底特征",
@@ -240,6 +246,7 @@ WHERE r.rsi14_prev <= 30
 ORDER BY r.rsi14_prev ASC`,
   },
   {
+    id: "kdj_double_cross",
     label: "KDJ 超卖区二次金叉",
     tag: "低位共振",
     desc: "KDJ 在20以下低位出现二次金叉，配合均线支撑，反弹确定性高",
@@ -286,6 +293,7 @@ WHERE r.rsv < 20                          -- K 处于超卖
   AND q.name NOT LIKE '%ST%'`,
   },
   {
+    id: "pullback_ma5",
     label: "缩量回踩 5 日线",
     tag: "回调买点",
     desc: "强势股调整回踩5日线后缩量止跌，是趋势延续的黄金买点",
@@ -323,6 +331,7 @@ WHERE k.max_close_20d > k.min_close_20d * 1.15   -- 近20日曾有15%涨幅（�
 ORDER BY k.volume / k.vol_avg5 ASC`,
   },
   {
+    id: "value_low",
     label: "价值低位+基本面优质",
     tag: "价值投资",
     desc: "ROE>15% + PE低于20 + 距3月低位不超过20%，价值+低位双重保护",
@@ -364,6 +373,7 @@ WHERE f.roe > 0.15
 ORDER BY f.roe DESC`,
   },
   {
+    id: "vol_breakout",
     label: "成交量异动+突破平台",
     tag: "量能异动",
     desc: "成交量突然放大3倍以上，同时股价突破近20日平台整理区间",
@@ -400,6 +410,7 @@ WHERE k.volume > k.vol_avg20 * 3.0     -- 巨量
 ORDER BY k.volume / k.vol_avg20 DESC`,
   },
   {
+    id: "momentum_accel",
     label: "动量加速（强者恒强）",
     tag: "动量策略",
     desc: "近10日累计涨幅居前，且持续5日成交量放大，趋势动量强劲",
@@ -441,6 +452,7 @@ WHERE k.close > k.close_10d_ago * 1.10     -- 近10日涨幅>10%
 ORDER BY (k.close - k.close_10d_ago) / k.close_10d_ago DESC`,
   },
   {
+    id: "ground_vol_reversal",
     label: "地量地价反转",
     tag: "极值反转",
     desc: "成交量创近月新低，股价同时处于3月低位，量价齐低的反转买点",
@@ -481,6 +493,7 @@ WHERE k.volume <= k.vol_min30 * 1.05     -- 接近近30日地量
 ORDER BY k.close / k.low_3m ASC`,
   },
   {
+    id: "high_roe_growth",
     label: "高ROE+净利润高增长",
     tag: "成长价值",
     desc: "ROE>20% 且净利润同比增速>30%，兼具质量与成长性的优质标的",
@@ -521,6 +534,7 @@ WHERE f.roe > 0.20
 ORDER BY f.roe * f.net_profit_yoy DESC`,
   },
   {
+    id: "zt_reversal",
     label: "涨停次日低开买入",
     tag: "打板反转",
     desc: "前日涨停，次日低开（跌幅>2%）买入，博弈短线反抽行情",
@@ -557,6 +571,7 @@ WHERE k.prev_change >= 9.9                     -- 昨日涨停
   AND q.name NOT LIKE '%ST%'`,
   },
   {
+    id: "right_breakout",
     label: "右侧突破确认买入",
     tag: "右侧交易",
     desc: "价格有效突破近20日高点，低点持续抬高，MACD零轴以上，量能放大验证",
@@ -603,6 +618,7 @@ WHERE k.close > k.high20_prev                          -- 突破近20日前高�
 ORDER BY k.close / k.high20_prev DESC`,
   },
   {
+    id: "ma_golden_cross",
     label: "均线金叉右侧趋势启动",
     tag: "右侧交易",
     desc: "MA20 上穿 MA60 中期金叉，叠加 KDJ+MACD 三重共振，右侧趋势启动信号",
@@ -1014,6 +1030,16 @@ export default function BacktestTab() {
   const [error, setError] = useState("");
   const [activeTemplate, setActiveTemplate] = useState(0);
   const [showDetailPanel, setShowDetailPanel] = useState(true);
+  // AI 智定策略推荐的参数（覆盖模板默认值）
+  const [aiRecommendedParams, setAiRecommendedParams] = useState<{
+    stopProfit: number;
+    stopLoss: number;
+    maxHoldDays: number;
+  } | null>(null);
+  // 自定义策略名称（来自 AutoStrategyPanel，显示在策略区）
+  const [customStrategyLabel, setCustomStrategyLabel] = useState<string | null>(
+    null,
+  );
 
   // ── 个股回测模式 ──────────────────────────────────────────────────────────
   const [stockMode, setStockMode] = useState<"market" | "single">("market");
@@ -1024,6 +1050,8 @@ export default function BacktestTab() {
   } | null>(null);
   // 诊断模式（单股模式下，展开诊断面板）
   const [showDiagnosis, setShowDiagnosis] = useState(false);
+  // AI 策略定制面板
+  const [showAutoStrategy, setShowAutoStrategy] = useState(false);
   // 搜索框
   const [stockQuery, setStockQuery] = useState("");
   const [stockSuggestions, setStockSuggestions] = useState<
@@ -1126,21 +1154,41 @@ export default function BacktestTab() {
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
-    // 个股模式：在 SQL 末尾追加 code 过滤（注入到最外层 WHERE 子句）
+    // 个股模式：在 SQL WHERE 子句注入 code 过滤
     let finalSql = sql.trim();
     if (stockMode === "single" && selectedStock) {
-      // 在 SQL 末尾的 WHERE 子句中追加条件，或添加新的 WHERE
-      // 策略：在最后一个 SELECT...FROM stock_quote q 的 WHERE 中追加
-      // 简单做法：用字符串替换 "AND q.name NOT LIKE '%ST%'" -> 追加 code 条件
       const codeFilter = `AND q.code = '${selectedStock.code}'`;
       if (finalSql.includes("AND q.name NOT LIKE '%ST%'")) {
+        // 锚点替换：插入到 ST 过滤条件前面（安全，不受 ORDER BY 影响）
         finalSql = finalSql.replace(
           /AND q\.name NOT LIKE '%ST%'/,
           `${codeFilter}\n  AND q.name NOT LIKE '%ST%'`,
         );
       } else {
-        // fallback：直接在末尾追加
-        finalSql = `${finalSql}\n  ${codeFilter}`;
+        // fallback：找最外层的 ORDER BY（不在括号内），在其前面插入；否则追加到末尾
+        const upper = finalSql.toUpperCase();
+        let depth = 0;
+        let outerOrderByIdx = -1;
+        for (let i = upper.length - 1; i >= 0; i--) {
+          if (upper[i] === ")") depth++;
+          else if (upper[i] === "(") depth--;
+          else if (
+            depth === 0 &&
+            upper.startsWith("ORDER BY", i) &&
+            (i === 0 || /\s/.test(upper[i - 1]))
+          ) {
+            outerOrderByIdx = i;
+            break;
+          }
+        }
+        if (outerOrderByIdx !== -1) {
+          finalSql =
+            finalSql.slice(0, outerOrderByIdx) +
+            `  ${codeFilter}\n` +
+            finalSql.slice(outerOrderByIdx);
+        } else {
+          finalSql = `${finalSql}\n  ${codeFilter}`;
+        }
       }
     }
 
@@ -1153,9 +1201,15 @@ export default function BacktestTab() {
           sql: finalSql,
           start_date: startDate,
           end_date: endDate,
-          max_hold_days: STRATEGY_TEMPLATES[activeTemplate].maxHoldDays,
-          stop_profit: STRATEGY_TEMPLATES[activeTemplate].stopProfit,
-          stop_loss: STRATEGY_TEMPLATES[activeTemplate].stopLoss,
+          max_hold_days:
+            aiRecommendedParams?.maxHoldDays ??
+            STRATEGY_TEMPLATES[activeTemplate].maxHoldDays,
+          stop_profit:
+            aiRecommendedParams?.stopProfit ??
+            STRATEGY_TEMPLATES[activeTemplate].stopProfit,
+          stop_loss:
+            aiRecommendedParams?.stopLoss ??
+            STRATEGY_TEMPLATES[activeTemplate].stopLoss,
           benchmark,
           job_id: jobId,
         }),
@@ -1193,6 +1247,7 @@ export default function BacktestTab() {
     loading,
     stockMode,
     selectedStock,
+    aiRecommendedParams,
   ]);
 
   const selectTemplate = (idx: number) => {
@@ -1201,7 +1256,56 @@ export default function BacktestTab() {
     setResult(null);
     setError("");
     setShowDetailPanel(true);
+    // 手动切换策略时清除 AI 智定参数
+    setAiRecommendedParams(null);
+    setCustomStrategyLabel(null);
   };
+
+  // 诊断面板「AI智定策略」回调：按策略 ID 找到对应模板并切换
+  const applyStrategyFromDiagnosis = useCallback(
+    (
+      strategyId: string,
+      stopProfit: number,
+      stopLoss: number,
+      maxHoldDays: number,
+    ) => {
+      const idx = STRATEGY_TEMPLATES.findIndex((t) => t.id === strategyId);
+      if (idx === -1) return;
+      // 切换策略（SQL 用模板原始 SQL，参数用 AI 推荐的微调值）
+      setActiveTemplate(idx);
+      setSql(STRATEGY_TEMPLATES[idx].sql);
+      // 将 AI 推荐的止盈止损参数覆盖到回测请求中
+      // 通过隐藏的临时 state 传递（在 runBacktest 里读取）
+      setAiRecommendedParams({ stopProfit, stopLoss, maxHoldDays });
+      setResult(null);
+      setError("");
+      setShowDetailPanel(true);
+      // 收起诊断面板，滚动到策略区
+      setShowDiagnosis(false);
+    },
+    [],
+  );
+
+  // AutoStrategyPanel 回调：应用任意 SQL 策略（不依赖模板 index）
+  const applyCustomStrategy = useCallback(
+    (
+      customSql: string,
+      stopProfit: number,
+      stopLoss: number,
+      maxHoldDays: number,
+      label: string,
+    ) => {
+      // 不切换 activeTemplate，直接覆盖 SQL 和参数
+      setSql(customSql);
+      setAiRecommendedParams({ stopProfit, stopLoss, maxHoldDays });
+      setCustomStrategyLabel(label);
+      setResult(null);
+      setError("");
+      setShowDetailPanel(false);
+      setShowAutoStrategy(false);
+    },
+    [],
+  );
 
   const sortedTrades = result
     ? [...result.trades].sort((a, b) => {
@@ -1371,6 +1475,20 @@ export default function BacktestTab() {
                   <Activity size={11} />
                   {showDiagnosis ? "收起诊断" : "股票诊断"}
                 </button>
+
+                {/* AI 策略定制按钮 */}
+                <button
+                  onClick={() => setShowAutoStrategy((v) => !v)}
+                  className={cn(
+                    "flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-medium transition-all border",
+                    showAutoStrategy
+                      ? "bg-[#f5a623]/15 border-[#f5a623]/50 text-[#f5a623]"
+                      : "bg-[var(--bg-secondary)] border-[var(--border-color)] text-[var(--text-secondary)] hover:border-[#f5a623]/40 hover:text-[#f5a623]",
+                  )}
+                >
+                  <Wand2 size={11} />
+                  {showAutoStrategy ? "收起定制" : "AI 策略定制"}
+                </button>
               </div>
             )}
 
@@ -1390,11 +1508,28 @@ export default function BacktestTab() {
 
         {/* 策略模板区 */}
         <div className="mb-4">
-          <div className="flex items-center gap-1.5 mb-2.5">
+          <div className="flex items-center gap-1.5 mb-2.5 flex-wrap">
             <BookOpen size={11} className="text-[var(--text-tertiary)]" />
             <span className="text-[11px] text-[var(--text-tertiary)] font-medium">
               内置策略模板（{STRATEGY_TEMPLATES.length} 个）
             </span>
+            {/* 自定义策略已应用时的提示 */}
+            {customStrategyLabel && (
+              <div className="flex items-center gap-1 ml-1 px-2 py-0.5 rounded-md bg-[#f5a623]/15 border border-[#f5a623]/40 text-[9px] text-[#f5a623] font-medium">
+                <Wand2 size={9} />
+                已应用自定义：{customStrategyLabel}
+                <button
+                  onClick={() => {
+                    setCustomStrategyLabel(null);
+                    setAiRecommendedParams(null);
+                    setSql(STRATEGY_TEMPLATES[activeTemplate].sql);
+                  }}
+                  className="ml-0.5 opacity-70 hover:opacity-100"
+                >
+                  ×
+                </button>
+              </div>
+            )}
           </div>
 
           {/* 模板滚动列表 */}
@@ -1524,18 +1659,32 @@ export default function BacktestTab() {
           <div className="flex flex-col gap-1">
             <label className="text-[10px] text-[var(--text-tertiary)]">
               退出规则
+              {aiRecommendedParams && (
+                <span className="ml-1.5 text-[9px] px-1 py-0.5 rounded bg-[#f5a623]/15 text-[#f5a623] font-medium">
+                  AI智定
+                </span>
+              )}
             </label>
             <div className="flex items-center gap-2 h-[30px] px-2 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded text-xs">
               <span className="text-[#09d464] font-medium">
-                止盈 +{STRATEGY_TEMPLATES[activeTemplate].stopProfit}%
+                止盈 +
+                {aiRecommendedParams?.stopProfit ??
+                  STRATEGY_TEMPLATES[activeTemplate].stopProfit}
+                %
               </span>
               <span className="text-[var(--text-tertiary)]">/</span>
               <span className="text-[#e84444] font-medium">
-                止损 -{STRATEGY_TEMPLATES[activeTemplate].stopLoss}%
+                止损 -
+                {aiRecommendedParams?.stopLoss ??
+                  STRATEGY_TEMPLATES[activeTemplate].stopLoss}
+                %
               </span>
               <span className="text-[var(--text-tertiary)]">/</span>
               <span className="text-[var(--text-secondary)]">
-                最长 {STRATEGY_TEMPLATES[activeTemplate].maxHoldDays}天
+                最长{" "}
+                {aiRecommendedParams?.maxHoldDays ??
+                  STRATEGY_TEMPLATES[activeTemplate].maxHoldDays}
+                天
               </span>
             </div>
           </div>
@@ -1616,6 +1765,16 @@ export default function BacktestTab() {
         <StockDiagnosis
           stock={selectedStock}
           onClose={() => setShowDiagnosis(false)}
+          onApplyStrategy={applyStrategyFromDiagnosis}
+        />
+      )}
+
+      {/* ── AI 策略定制面板（单个股模式选中股票后可展开） */}
+      {stockMode === "single" && selectedStock && showAutoStrategy && (
+        <AutoStrategyPanel
+          stock={selectedStock}
+          onApplyStrategy={applyCustomStrategy}
+          onClose={() => setShowAutoStrategy(false)}
         />
       )}
 

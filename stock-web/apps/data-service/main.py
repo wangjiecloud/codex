@@ -268,7 +268,7 @@ def startup():
         replace_existing=True,
     )
 
-    # 每个工作日15:32收盘后自动同步产业链股票当日5分钟K线数据入库（baostock，支持任意历史日期）
+    # 每个工作日19:05收盘后自动同步产业链股票当日分时数据入库（新浪1分钟K线）
     def _auto_sync_minute():
         """收盘后批量同步产业链全部A股 + A股宽基指数当日分时数据，持续积累历史"""
         from db import SessionLocal
@@ -390,7 +390,17 @@ def startup():
         replace_existing=True,
     )
 
-    # 每天20:00增量同步K线（推迟到20:00，等17:30全量同步跑完，避免并发争抢baostock连接）
+    # 每天18:30同步申万行业成分股（在17:30全量同步更新sw_industry表之后运行）
+    _scheduler.add_job(
+        sw_industry.sync_all_sw_constituents,
+        trigger="cron",
+        hour=18,
+        minute=30,
+        id="sw_constituents_sync",
+        replace_existing=True,
+    )
+
+    # 每天20:00增量同步K线（推迟到20:00，等17:30全量同步跑完，避免并发争抢新浪连接）
     def _daily_klines_incremental():
         """K线增量同步：查今日未更新的股票，依次同步，内部已有today跳过逻辑。
         启动前检测全量同步是否仍在运行，若在运行则等待最多30分钟后放弃。"""
@@ -858,6 +868,13 @@ def startup():
             desc="概念板块行情",
         ),
         dict(
+            task_id="sw_constituents_sync",
+            max_gap_days=7,
+            trading_day_only=False,
+            fn=lambda: sw_industry.sync_all_sw_constituents(),
+            desc="申万成分股同步",
+        ),
+        dict(
             task_id="margin_trading_daily_sync",
             max_gap_days=3,
             trading_day_only=True,
@@ -986,13 +1003,14 @@ async def search(
 
         db = SessionLocal()
         try:
-            # 拉取足够多候选，再在 Python 层排序
+            # StockMeta.name 可能为空，用 LEFT JOIN StockQuote 补全名称
             rows = (
-                db.query(StockMeta.code, StockMeta.name)
+                db.query(StockMeta.code, StockQuote.name.label("name"))
+                .outerjoin(StockQuote, StockQuote.code == StockMeta.code)
                 .filter(
                     or_(
                         StockMeta.code.contains(kw),
-                        StockMeta.name.contains(kw),
+                        StockQuote.name.contains(kw),
                     )
                 )
                 .limit(200)
@@ -1003,7 +1021,7 @@ async def search(
 
             def _rank(r):
                 code_lower = r.code.lower()
-                name = r.name
+                name = r.name or ""
                 # 0: 代码完全匹配
                 if code_lower == kw_lower:
                     return 0
@@ -1030,7 +1048,9 @@ async def search(
                 "results": [
                     {
                         "code": r.code,
-                        "name": r.name,
+                        "name": r.name or quotes[r.code].name
+                        if r.code in quotes
+                        else "",
                         "price": quotes[r.code].price if r.code in quotes else 0,
                         "change": quotes[r.code].change if r.code in quotes else 0,
                     }

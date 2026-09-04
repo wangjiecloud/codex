@@ -21,84 +21,18 @@ from db import (
     IndustryMeta,
     IndustryList,
 )
-from bs_session import get_bs, reset_bs
 from compute_indicators import compute_for_code
 
 router = APIRouter()
 
 
 def is_trading_day(d: Optional[date] = None) -> bool:
-    """判断指定日期（默认今天）是否为 A 股交易日（周一至周五，排除节假日）。
-    使用 baostock 查询准确结果；若 baostock 不可用则降级为仅判断周末。
+    """判断指定日期（默认今天）是否为 A 股交易日。
+    仅判断周末（周六日不交易）。
     """
-    from routers.system import sched_log
-
     if d is None:
         d = date.today()
-    # 周末直接排除
-    if d.weekday() >= 5:
-        return False
-
-    target_date = d.strftime("%Y-%m-%d")
-    last_error = None
-    for attempt in range(2):
-        try:
-            if attempt == 1:
-                reset_bs()
-
-            bs = get_bs()
-            rs = bs.query_trade_dates(
-                start_date=target_date,
-                end_date=target_date,
-            )
-            error_code = getattr(rs, "error_code", "")
-            error_msg = getattr(rs, "error_msg", "")
-            row = None
-            has_row = error_code == "0" and rs.next()
-            if has_row:
-                row = rs.get_row_data()
-
-            if has_row and len(row) >= 2 and row[1] in ("0", "1"):
-                is_trade = row[1] == "1"
-                if is_trade:
-                    return True
-
-                if attempt == 0:
-                    sched_log(
-                        "warning",
-                        f"[trading-day] baostock 返回非交易日，准备重试: date={target_date}, row={row}",
-                        source="scheduler",
-                    )
-                    continue
-
-                sched_log(
-                    "warning",
-                    f"[trading-day] baostock 确认为非交易日: date={target_date}, row={row}",
-                    source="scheduler",
-                )
-                return False
-
-            last_error = f"attempt={attempt + 1}, error_code={error_code}, error_msg={error_msg}, row={row}"
-            sched_log(
-                "warning",
-                f"[trading-day] baostock 返回异常，按工作日兜底: date={target_date}, {last_error}",
-                source="scheduler",
-            )
-            break
-        except Exception as e:
-            last_error = f"attempt={attempt + 1}, error={e}"
-            sched_log(
-                "warning",
-                f"[trading-day] baostock 查询失败，按工作日兜底: date={target_date}, {last_error}",
-                source="scheduler",
-            )
-            if attempt == 0:
-                reset_bs()
-                continue
-            break
-
-    # 降级：仅排除周末
-    return True
+    return d.weekday() < 5
 
 
 def _latest_kline_date(code: str) -> Optional[str]:
@@ -350,339 +284,143 @@ def _sync_all_quotes():
     _kline_repair_triggered: set = set()
 
     try:
-        bs = get_bs()
-        today = date.today().strftime("%Y-%m-%d")
-        yesterday = (date.today() - timedelta(days=5)).strftime("%Y-%m-%d")
-        fields = "date,code,open,high,low,close,preclose,volume,amount,turn,pctChg,peTTM,pbMRQ"
-        batch_statements = []
-        BATCH_SIZE = 50
+        # 直接走新浪批量实时行情
+        print(f"[sync_quotes] 使用新浪批量实时行情同步 {total_codes} 只股票")
 
-        # 预加载 kline 最新交易日和收盘价，用于合理性校验
-        _kline_latest: dict[str, tuple[str, float]] = {}  # code -> (trade_date, close)
-        db_kline = SessionLocal()
-        try:
-            from sqlalchemy import text as _text
+        import requests as _req
 
-            rows_kline = db_kline.execute(
-                _text(
-                    "SELECT k.code, k.trade_date, k.close FROM stock_kline k "
-                    "INNER JOIN (SELECT code, MAX(trade_date) AS max_date FROM stock_kline "
-                    "WHERE period='daily' GROUP BY code) m ON k.code=m.code AND k.trade_date=m.max_date "
-                    "WHERE k.period='daily'"
-                )
-            ).fetchall()
-            for row_k in rows_kline:
-                _kline_latest[row_k[0]] = (row_k[1], float(row_k[2]))
-        finally:
-            db_kline.close()
+        def _sina_realtime_quotes(codes_list, batch_size=80):
+            def _to_sina(c):
+                return f"sh{c}" if c[0] in ("5", "6") else f"sz{c}"
 
-        # 最新交易日（kline 中最大日期）
-        _latest_trade_date = max((v[0] for v in _kline_latest.values()), default="")
+            res = {}
+            headers = {"Referer": "https://finance.sina.com.cn"}
+            for j in range(0, len(codes_list), batch_size):
+                batch = codes_list[j : j + batch_size]
+                sina_codes = ",".join(_to_sina(c) for c in batch)
+                url = f"https://hq.sinajs.cn/list={sina_codes}"
+                try:
+                    r = _req.get(url, headers=headers, timeout=10)
+                    for line in r.text.strip().split("\n"):
+                        if "=" not in line:
+                            continue
+                        var_part, data_part = line.split("=", 1)
+                        sina_code = var_part.split("_")[-1].strip('"')
+                        code = sina_code[2:]
+                        fields = data_part.strip('" \n').split(",")
+                        if len(fields) < 32:
+                            continue
+                        name = fields[0]
+                        open_ = _safe_float(fields[1])
+                        prev_close = _safe_float(fields[2])
+                        price = _safe_float(fields[3])
+                        high = _safe_float(fields[4])
+                        low = _safe_float(fields[5])
+                        volume = _safe_float(fields[8])
+                        turnover = _safe_float(fields[9])
+                        change_pct = (
+                            round((price - prev_close) / prev_close * 100, 4)
+                            if prev_close > 0
+                            else 0
+                        )
+                        change_amt = (
+                            round(price - prev_close, 4) if prev_close > 0 else 0
+                        )
+                        amplitude = (
+                            round((high - low) / prev_close * 100, 4)
+                            if prev_close > 0
+                            else 0
+                        )
+                        res[code] = {
+                            "name": name,
+                            "price": price,
+                            "open": open_,
+                            "prev_close": prev_close,
+                            "high": high,
+                            "low": low,
+                            "volume": volume,
+                            "turnover": turnover,
+                            "change": change_pct,
+                            "change_amt": change_amt,
+                            "amplitude": amplitude,
+                        }
+                except Exception as e:
+                    print(f"[sync_quotes] sina batch {j} error: {e}")
+            return res
 
-        for idx, raw_code in enumerate(all_codes):
+        BATCH = 80
+        total_saved = 0
+        for i in range(0, len(all_codes_raw), BATCH):
             from routers.sync import _stop_requested
 
             if _stop_requested.is_set():
-                sched_log("warning", "行情同步已被用户停止")
+                sched_log("warning", "行情同步已被用户停止", source="scheduler")
                 break
 
-            with _lock:
-                _status["current"] = raw_code
-                _status["done"] = idx
-
-            bs_code = _to_bs_code(raw_code)
-            try:
-                from concurrent.futures import (
-                    ThreadPoolExecutor,
-                    TimeoutError as FuturesTimeout,
-                )
-
-                def _fetch_quote():
-                    return bs.query_history_k_data_plus(
-                        bs_code,
-                        fields,
-                        start_date=yesterday,
-                        end_date=today,
-                        frequency="d",
-                        adjustflag="2",
-                    )
-
-                with ThreadPoolExecutor(max_workers=1) as ex:
-                    fut = ex.submit(_fetch_quote)
-                    try:
-                        rs = fut.result(timeout=20)
-                    except FuturesTimeout:
-                        # 等子线程自然结束（最多 3s），避免与 recv() 竞态导致 Bad file descriptor
-                        try:
-                            fut.result(timeout=3)
-                        except Exception:
-                            pass
-                        reset_bs()
-                        try:
-                            bs = get_bs()
-                        except Exception as _re:
-                            print(f"[sync_quotes] 超时后重连失败: {_re}，终止本次同步")
-                            return
-                        continue
-
-                if rs.error_code != "0":
-                    # 网络抖动导致的瞬态错误，静默重连，不打印噪音日志
-                    reset_bs()
-                    # 等待重连，最多重试 3 次，每次间隔 5 秒
-                    reconnected = False
-                    for _retry in range(3):
-                        import time as _t
-
-                        _t.sleep(5)
-                        try:
-                            bs = get_bs()
-                            reconnected = True
-                            break
-                        except Exception as _re:
-                            print(
-                                f"[sync_quotes] baostock 重连第{_retry + 1}次失败: {_re}"
-                            )
-                    if not reconnected:
-                        print("[sync_quotes] baostock 重连失败，终止本次同步")
-                        return
-                    continue
-
-                row_data = []
-                max_rows = 10
-                row_count = 0
-                while row_count < max_rows:
-                    try:
-                        has_next = rs.next()
-                    except (IndexError, TypeError, AttributeError) as _ne:
-                        raise RuntimeError(
-                            f"baostock malformed row (next): {_ne}"
-                        ) from _ne
-                    if not has_next:
-                        break
-                    try:
-                        row_data.append(rs.get_row_data())
-                    except (IndexError, TypeError, AttributeError) as _ge:
-                        raise RuntimeError(
-                            f"baostock malformed row (get): {_ge}"
-                        ) from _ge
-                    row_count += 1
-            except Exception as e:
-                err_str = str(e)
-                _TRANSIENT_KEYWORDS = (
-                    "Broken pipe",
-                    "login failed",
-                    "接收数据异常",
-                    "Bad file descriptor",
-                    "bad file descriptor",
-                    "utf-8",
-                    "codec can't decode",
-                    "decompressing",
-                    "incomplete or truncated",
-                    "用户未登录",
-                    "网络接收错误",
-                    "list index out of range",
-                    "timed out",
-                )
-                if any(kw in err_str for kw in _TRANSIENT_KEYWORDS):
-                    # 网络瞬态错误，静默重连，不打印噪音日志
-                    reset_bs()
-                    reconnected = False
-                    for _retry in range(3):
-                        import time as _t
-
-                        _t.sleep(5)
-                        try:
-                            bs = get_bs()
-                            reconnected = True
-                            break
-                        except Exception as _re:
-                            print(
-                                f"[sync_quotes] baostock 重连第{_retry + 1}次失败: {_re}"
-                            )
-                    if not reconnected:
-                        print("[sync_quotes] baostock 重连失败，终止本次同步")
-                        return
-                else:
-                    # 非瞬态错误才打印，方便排查真正的 bug
-                    print(f"[sync_quotes] {raw_code} fetch error: {e}")
+            batch_codes = all_codes_raw[i : i + BATCH]
+            live = _sina_realtime_quotes(batch_codes)
+            if not live:
                 continue
-
-            if not row_data:
-                continue
-
-            # 过滤掉列数不足的行（baostock 偶发返回空行或残缺行，防止 list index out of range）
-            expected_cols = len(fields.split(","))
-            row_data = [r for r in row_data if len(r) >= expected_cols]
-            if not row_data:
-                print(f"[sync_quotes] {raw_code} 所有行列数不足 {expected_cols}，跳过")
-                continue
-
-            r = row_data[-1]
-
-            # 校验 baostock 返回的 code 字段（index=1）是否与请求的 code 一致，防止串码
-            returned_bs_code = str(r[1]).strip().lower()  # e.g. "sh.688012"
-            if returned_bs_code != bs_code.lower():
-                print(
-                    f"[sync_quotes] {raw_code} 串码：请求 {bs_code}，返回 {returned_bs_code}，重置session跳过"
-                )
-                reset_bs()
-                try:
-                    bs = get_bs()
-                except Exception as _re:
-                    print(f"[sync_quotes] 串码后重连失败: {_re}，终止本次同步")
-                    return
-                continue
-
-            row_trade_date = r[0]  # baostock 返回的行情日期
-
-            # 跳过逻辑：判断行情日期而非 updated_at，确保拿到的是最新交易日数据
-            if _latest_trade_date and row_trade_date < _latest_trade_date:
-                # baostock 返回的不是最新交易日，说明数据还未更新，跳过
-                skipped_count += 1
-                with _lock:
-                    _status["done"] = idx + 1
-                continue
-
-            q = quotes.get(raw_code)
-            if q and q.updated_at and row_trade_date:
-                # 若当前 stock_quote 已经记录了该行情日期的数据，跳过
-                existing_kline = _kline_latest.get(raw_code)
-                if existing_kline and existing_kline[0] == row_trade_date:
-                    # 还需检查价格是否合理，不合理则不跳过（强制覆盖修正）
-                    if abs(q.price - existing_kline[1]) / existing_kline[1] < 0.01:
-                        skipped_count += 1
-                        with _lock:
-                            _status["done"] = idx + 1
-                        continue
-
-            close = round(_safe_float(r[5]), 4)
-            preclose = round(_safe_float(r[6]), 4)
-
-            # 价格合理性校验：仅拦截 baostock 串码（偏差通常 >100%）
-            # 除权场景下价格跳变可达 30-50%，不应拦截，直接信任 baostock 数据
-            kline_ref = _kline_latest.get(raw_code)
-            if kline_ref and kline_ref[1] > 0 and close > 0:
-                diff_pct = abs(close - kline_ref[1]) / kline_ref[1] * 100
-                if diff_pct > 60:
-                    print(
-                        f"[sync_quotes] {raw_code} 价格异常：baostock={close}, kline={kline_ref[1]}, 偏差={diff_pct:.1f}%，跳过写入"
-                    )
-                    sched_log(
-                        "warning",
-                        f"[行情同步] {raw_code} 价格异常（baostock={close}, kline={kline_ref[1]}, 偏差={diff_pct:.1f}%），已跳过",
-                        source="scheduler",
-                    )
-                    # kline 数据陈旧或错误导致偏差过大，后台异步重新拉取全量 kline 修复
-                    if raw_code not in _kline_repair_triggered:
-                        _kline_repair_triggered.add(raw_code)
-                        import threading as _threading
-
-                        def _repair_kline(_code=raw_code):
-                            try:
-                                print(f"[sync_quotes] 触发 kline 修复：{_code}")
-                                sched_log(
-                                    "info",
-                                    f"[行情同步] 触发 kline 修复：{_code}（价格偏差过大，重新拉取全量K线）",
-                                    source="scheduler",
-                                )
-                                _sync_klines(_code, "daily", force=True)
-                                print(f"[sync_quotes] kline 修复完成：{_code}")
-                            except Exception as _e:
-                                print(f"[sync_quotes] kline 修复失败：{_code}: {_e}")
-
-                        _threading.Thread(target=_repair_kline, daemon=True).start()
-                    continue
-            high = round(_safe_float(r[3]), 4)
-            low = round(_safe_float(r[4]), 4)
-            change_amt = round(close - preclose, 4)
-            amplitude = round((high - low) / preclose * 100, 4) if preclose > 0 else 0.0
-
-            stmt = sqlite_insert(StockQuote).values(
-                code=raw_code,
-                name=get_stock_name(raw_code),
-                price=close,
-                change=round(_safe_float(r[10]), 4),
-                change_amt=change_amt,
-                open=round(_safe_float(r[2]), 4),
-                prev_close=preclose,
-                high=high,
-                low=low,
-                volume=_safe_float(r[7]),
-                turnover=_safe_float(r[8]),
-                market_cap=0.0,
-                pe=round(_safe_float(r[11]), 4),
-                pb=round(_safe_float(r[12]), 4),
-                turnover_rate=round(_safe_float(r[9]), 4),
-                amplitude=amplitude,
-                updated_at=datetime.utcnow(),
-            )
-            stmt = stmt.on_conflict_do_update(
-                index_elements=["code"],
-                set_={
-                    "name": stmt.excluded.name,
-                    "price": stmt.excluded.price,
-                    "change": stmt.excluded.change,
-                    "change_amt": stmt.excluded.change_amt,
-                    "open": stmt.excluded.open,
-                    "prev_close": stmt.excluded.prev_close,
-                    "high": stmt.excluded.high,
-                    "low": stmt.excluded.low,
-                    "volume": stmt.excluded.volume,
-                    "turnover": stmt.excluded.turnover,
-                    "pe": stmt.excluded.pe,
-                    "pb": stmt.excluded.pb,
-                    "turnover_rate": stmt.excluded.turnover_rate,
-                    "amplitude": stmt.excluded.amplitude,
-                    "updated_at": stmt.excluded.updated_at,
-                },
-            )
-
-            batch_statements.append(stmt)
-            count += 1
-
-            if len(batch_statements) >= BATCH_SIZE:
-                db_batch = SessionLocal()
-                try:
-                    for s in batch_statements:
-                        _db_execute_with_retry(db_batch, s)
-                    _db_commit_with_retry(db_batch)
-                    print(
-                        f"[sync_quotes] progress: {idx + 1}/{total_codes} ({count} saved)"
-                    )
-                except Exception as e:
-                    print(f"[sync_quotes] batch commit error: {e}")
-                    try:
-                        db_batch.rollback()
-                    except Exception:
-                        pass
-                finally:
-                    db_batch.close()
-                batch_statements = []
-
-        if batch_statements:
             db_batch = SessionLocal()
             try:
-                for s in batch_statements:
-                    _db_execute_with_retry(db_batch, s)
-                _db_commit_with_retry(db_batch)
+                for code, d in live.items():
+                    stmt = sqlite_insert(StockQuote).values(
+                        code=code,
+                        name=d.get("name") or get_stock_name(code),
+                        price=d.get("price", 0.0),
+                        change=d.get("change", 0.0),
+                        change_amt=d.get("change_amt", 0.0),
+                        open=d.get("open", 0.0),
+                        prev_close=d.get("prev_close", 0.0),
+                        high=d.get("high", 0.0),
+                        low=d.get("low", 0.0),
+                        volume=d.get("volume", 0.0),
+                        turnover=d.get("turnover", 0.0),
+                        market_cap=0.0,
+                        pe=0.0,
+                        pb=0.0,
+                        turnover_rate=0.0,
+                        amplitude=d.get("amplitude", 0.0),
+                        updated_at=datetime.utcnow(),
+                    )
+                    stmt = stmt.on_conflict_do_update(
+                        index_elements=["code"],
+                        set_={
+                            "name": stmt.excluded.name,
+                            "price": stmt.excluded.price,
+                            "change": stmt.excluded.change,
+                            "change_amt": stmt.excluded.change_amt,
+                            "open": stmt.excluded.open,
+                            "prev_close": stmt.excluded.prev_close,
+                            "high": stmt.excluded.high,
+                            "low": stmt.excluded.low,
+                            "volume": stmt.excluded.volume,
+                            "turnover": stmt.excluded.turnover,
+                            "amplitude": stmt.excluded.amplitude,
+                            "updated_at": stmt.excluded.updated_at,
+                        },
+                    )
+                    db_batch.execute(stmt)
+                db_batch.commit()
+                total_saved += len(live)
             except Exception as e:
-                print(f"[sync_quotes] final batch error: {e}")
-                try:
-                    db_batch.rollback()
-                except Exception:
-                    pass
+                print(f"[sync_quotes] sina batch commit error: {e}")
+                db_batch.rollback()
             finally:
                 db_batch.close()
-
-        with _lock:
-            _status["done"] = total_codes
-
-        from routers.system import sched_log
+            with _lock:
+                _status["done"] = min(i + BATCH, total_codes)
+            if (i // BATCH + 1) % 10 == 0:
+                print(
+                    f"[sync_quotes] sina progress: {i + BATCH}/{total_codes} ({total_saved} saved)"
+                )
 
         sched_log(
             "success",
-            f"实时行情同步完成，更新 {count}/{total_codes} 只股票（跳过 {skipped_count} 只已同步）",
+            f"新浪行情同步完成，更新 {total_saved}/{total_codes} 只股票",
+            source="scheduler",
         )
+        return
     except Exception as e:
         from routers.system import sched_log
 
@@ -690,7 +428,6 @@ def _sync_all_quotes():
         import traceback
 
         traceback.print_exc()
-        reset_bs()
     finally:
         _sync_running = False
         _quotes_lock.release()
@@ -705,280 +442,102 @@ def _sync_klines(code: str, period: str = "daily", force: bool = False):
         if latest and latest >= today_str:
             return
 
-    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
-
-    # 需要触发 reset_bs 的瞬态网络错误关键词
-    _TRANSIENT_ERRORS = (
-        "bad file descriptor",
-        "utf-8",
-        "utf8",
-        "decompression",
-        "codec",
-        "connection",
-        "broken pipe",
-        "reset by peer",
-        "timed out",
-        "接收数据异常",
-        "list index out of range",
-        "malformed row",
-    )
-
-    def _is_transient(e: Exception) -> bool:
-        msg = str(e).lower()
-        return any(kw in msg for kw in _TRANSIENT_ERRORS)
-
-    def _fetch_rows():
-        bs_period = "d" if period == "daily" else ("w" if period == "weekly" else "m")
-        bs = get_bs()
-        bs_code = _to_bs_code(code)
-        fields = "date,code,open,high,low,close,volume,amount,turn,pctChg"
-        start = (date.today() - timedelta(days=400)).strftime("%Y-%m-%d")
-        end = date.today().strftime("%Y-%m-%d")
-
-        rs = bs.query_history_k_data_plus(
-            bs_code,
-            fields,
-            start_date=start,
-            end_date=end,
-            frequency=bs_period,
-            adjustflag="2",
-        )
-        if rs.error_code != "0":
-            reset_bs()
-            return None
-
-        rows = []
-        while len(rows) < 1000:
-            try:
-                has_next = rs.next()
-            except IndexError as e:
-                raise RuntimeError(f"baostock malformed row: {e}") from e
-            if not has_next:
-                break
-            try:
-                r = rs.get_row_data()
-            except IndexError as e:
-                raise RuntimeError(f"baostock malformed row: {e}") from e
-            if r and len(r) >= 10:
-                rows.append(r)
-        return rows
-
-    rows = None
-    fetch_attempts = 3
-    for fetch_attempt in range(fetch_attempts):
-        with ThreadPoolExecutor(max_workers=1) as ex:
-            fut = ex.submit(_fetch_rows)
-            try:
-                rows = fut.result(timeout=30)
-                break  # 成功则退出重试
-            except FuturesTimeout:
-                print(
-                    f"[sync_klines] {code} timed out (attempt {fetch_attempt + 1}/{fetch_attempts})"
-                )
-                reset_bs()
-                if fetch_attempt < fetch_attempts - 1:
-                    time.sleep(2 * (fetch_attempt + 1))
-                    continue
-                from routers.system import record_failed_stock
-
-                record_failed_stock(code, get_stock_name(code), "超时", "kline")
-                return
-            except Exception as e:
-                if _is_transient(e) and fetch_attempt < fetch_attempts - 1:
-                    print(
-                        f"[sync_klines] {code} transient error (attempt {fetch_attempt + 1}/{fetch_attempts}): {e}, retrying..."
-                    )
-                    reset_bs()
-                    time.sleep(2 * (fetch_attempt + 1))
-                    continue
-                print(f"[sync_klines] {code} fetch error: {e}")
-                reset_bs()
-                from routers.system import record_failed_stock
-
-                record_failed_stock(code, get_stock_name(code), str(e), "kline")
-                return
-
-    if not rows:
-        return
-
-    db = SessionLocal()
-    retry_count = 3
-    saved = False
     try:
-        for db_attempt in range(retry_count):
-            try:
-                for r in rows:
-                    stmt = sqlite_insert(StockKline).values(
-                        code=code,
-                        period=period,
-                        trade_date=r[0],
-                        open=round(_safe_float(r[2]), 4),
-                        high=round(_safe_float(r[3]), 4),
-                        low=round(_safe_float(r[4]), 4),
-                        close=round(_safe_float(r[5]), 4),
-                        volume=int(_safe_float(r[6])),
-                        turnover=_safe_float(r[7]),
-                        change_pct=round(_safe_float(r[9]), 4),
-                        updated_at=datetime.utcnow(),
-                    )
-                    stmt = stmt.on_conflict_do_update(
-                        index_elements=["code", "period", "trade_date"],
-                        set_={
-                            "open": stmt.excluded.open,
-                            "high": stmt.excluded.high,
-                            "low": stmt.excluded.low,
-                            "close": stmt.excluded.close,
-                            "volume": stmt.excluded.volume,
-                            "turnover": stmt.excluded.turnover,
-                            "change_pct": stmt.excluded.change_pct,
-                            "updated_at": stmt.excluded.updated_at,
-                        },
-                    )
-                    db.execute(stmt)
-                db.commit()
-                saved = True
-                print(f"[sync_klines] {code} done, {len(rows)} bars saved")
-                break
-            except Exception as e:
-                db.rollback()
-                if (
-                    db_attempt < retry_count - 1
-                    and "database is locked" in str(e).lower()
-                ):
-                    time.sleep(1 + db_attempt * 0.5)
-                    continue
-                print(f"[sync_klines] {code} db error: {e}")
-    finally:
-        db.close()
+        from routers.kline import _fetch_and_cache_klines_sina
 
-    if saved and period == "daily":
-        try:
-            count = compute_for_code(code, period)
-            print(f"[sync_klines] {code} indicators refreshed, {count} rows")
-        except Exception as e:
-            print(f"[sync_klines] {code} indicator refresh error: {e}")
+        sina_bars = _fetch_and_cache_klines_sina(code, period, 400)
+        if sina_bars:
+            try:
+                count = compute_for_code(code, period)
+                print(
+                    f"[sync_klines] {code} done ({len(sina_bars)} bars), indicators refreshed"
+                )
+            except Exception as e:
+                print(f"[sync_klines] {code} indicator refresh error: {e}")
+        else:
+            print(f"[sync_klines] {code} sina returned 0 bars")
+            from routers.system import record_failed_stock
+
+            record_failed_stock(code, get_stock_name(code), "新浪返回0条", "kline")
+    except Exception as e:
+        print(f"[sync_klines] {code} fetch error: {e}")
+        from routers.system import record_failed_stock
+
+        record_failed_stock(code, get_stock_name(code), str(e), "kline")
 
 
 def _sync_fundamental(code: str):
+    """用 akshare 拉取财务指标，写入 stock_fundamental 表。"""
     db = SessionLocal()
-    retry_count = 3
-    for db_attempt in range(retry_count):
-        try:
-            bs = get_bs()
-            bs_code = _to_bs_code(code)
-            rs_profit = bs.query_profit_data(code=bs_code, year=2024, quarter=4)
-            profit_row = None
-            while rs_profit.error_code == "0" and rs_profit.next():
-                profit_row = rs_profit.get_row_data()
+    try:
+        import akshare as ak
 
-            rs_growth = bs.query_growth_data(code=bs_code, year=2024, quarter=4)
-            growth_row = None
-            while rs_growth.error_code == "0" and rs_growth.next():
-                growth_row = rs_growth.get_row_data()
+        symbol = code.lstrip("0") if not code.startswith("6") else code
+        df = ak.stock_financial_analysis_indicator(symbol=symbol, start_year="2023")
+        if df is None or df.empty:
+            print(f"[sync_fundamental] {code} akshare 返回空")
+            return
 
-            rs_balance = bs.query_balance_data(code=bs_code, year=2024, quarter=4)
-            balance_row = None
-            while rs_balance.error_code == "0" and rs_balance.next():
-                balance_row = rs_balance.get_row_data()
+        latest = df.iloc[-1].to_dict()
+        report_date = str(latest.get("日期", ""))
 
-            if not profit_row:
-                return
+        eps = _safe_float(latest.get("摊薄每股收益(元)"))
+        roe = _safe_float(latest.get("净资产收益率(%)"))
+        gross_margin = _safe_float(latest.get("销售毛利率(%)"))
+        revenue_yoy = _safe_float(latest.get("主营业务收入增长率(%)"))
+        net_profit_yoy = _safe_float(latest.get("净利润增长率(%)"))
+        debt_ratio = _safe_float(latest.get("资产负债率(%)"))
 
-            raw = json.dumps(
-                {
-                    "profit": profit_row,
-                    "growth": growth_row,
-                    "balance": balance_row,
-                },
-                ensure_ascii=False,
-            )
+        raw = json.dumps(
+            {
+                "report_date": report_date,
+                "eps": eps,
+                "roe": roe,
+                "gross_margin": gross_margin,
+            },
+            ensure_ascii=False,
+        )
 
-            # profit_data fields: [0]code [1]pubDate [2]statDate [3]roeAvg
-            #   [4]npMargin [5]gpMargin [6]netProfit [7]epsTTM [8]MBRevenue
-            #   [9]totalShare [10]liqaShare
-            # growth_data fields: [0]code [1]pubDate [2]statDate [3]YOYEquity
-            #   [4]YOYAsset [5]YOYNI [6]YOYEPSBasic [7]YOYPNI
-            # balance_data fields: [0]code [1]pubDate [2]statDate [3]currentRatio
-            #   [4]quickRatio [5]cashRatio [6]YOYLiability [7]liabilityToAsset
-            #   [8]assetToEquity
-            eps = _safe_float(profit_row[7]) if len(profit_row) > 7 else None  # epsTTM
-            roe = _safe_float(profit_row[3]) if len(profit_row) > 3 else None  # roeAvg
-            gross_margin = (
-                _safe_float(profit_row[4]) if len(profit_row) > 4 else None
-            )  # npMargin（净利润率）
-            net_profit = (
-                _safe_float(profit_row[6]) if len(profit_row) > 6 else None
-            )  # netProfit
-            revenue = (
-                _safe_float(profit_row[8]) if len(profit_row) > 8 else None
-            )  # MBRevenue（营业收入）
-            revenue_yoy = (
-                _safe_float(growth_row[5])  # YOYNI（净利润同比，近似营收同比）
-                if growth_row and len(growth_row) > 5
-                else None
-            )
-            net_profit_yoy = (
-                _safe_float(growth_row[7])  # YOYPNI（扣非净利润同比）
-                if growth_row and len(growth_row) > 7
-                else None
-            )
-            debt_ratio = (
-                _safe_float(balance_row[7])  # liabilityToAsset（资产负债率）
-                if balance_row and len(balance_row) > 7
-                else None
-            )
-            report_date = profit_row[2] if profit_row else ""  # statDate（报告期）
-
-            stmt = sqlite_insert(StockFundamental).values(
-                code=code,
-                report_date=report_date,
-                eps=eps,
-                roe=roe,
-                revenue=revenue,
-                revenue_yoy=revenue_yoy,
-                net_profit=net_profit,
-                net_profit_yoy=net_profit_yoy,
-                gross_margin=gross_margin,
-                debt_ratio=debt_ratio,
-                raw_json=raw,
-                updated_at=datetime.utcnow(),
-            )
-            stmt = stmt.on_conflict_do_update(
-                index_elements=["code"],
-                set_={
-                    "report_date": stmt.excluded.report_date,
-                    "eps": stmt.excluded.eps,
-                    "roe": stmt.excluded.roe,
-                    "revenue": stmt.excluded.revenue,
-                    "revenue_yoy": stmt.excluded.revenue_yoy,
-                    "net_profit": stmt.excluded.net_profit,
-                    "net_profit_yoy": stmt.excluded.net_profit_yoy,
-                    "gross_margin": stmt.excluded.gross_margin,
-                    "debt_ratio": stmt.excluded.debt_ratio,
-                    "raw_json": stmt.excluded.raw_json,
-                    "updated_at": stmt.excluded.updated_at,
-                },
-            )
-            db.execute(stmt)
-            db.commit()
-            print(f"[sync_fundamental] {code} done")
-            break
-        except Exception as e:
-            db.rollback()
-            if db_attempt < retry_count - 1 and "database is locked" in str(e).lower():
-                import time
-
-                time.sleep(1 + db_attempt * 0.5)
-                continue
-            print(f"[sync_fundamental] {code} error: {e}")
-            reset_bs()
-        finally:
-            if db_attempt == retry_count - 1:
-                db.close()
+        stmt = sqlite_insert(StockFundamental).values(
+            code=code,
+            report_date=report_date,
+            eps=eps,
+            roe=roe,
+            revenue=None,
+            revenue_yoy=revenue_yoy,
+            net_profit=None,
+            net_profit_yoy=net_profit_yoy,
+            gross_margin=gross_margin,
+            debt_ratio=debt_ratio,
+            raw_json=raw,
+            updated_at=datetime.utcnow(),
+        )
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["code"],
+            set_={
+                "report_date": stmt.excluded.report_date,
+                "eps": stmt.excluded.eps,
+                "roe": stmt.excluded.roe,
+                "revenue_yoy": stmt.excluded.revenue_yoy,
+                "net_profit_yoy": stmt.excluded.net_profit_yoy,
+                "gross_margin": stmt.excluded.gross_margin,
+                "debt_ratio": stmt.excluded.debt_ratio,
+                "raw_json": stmt.excluded.raw_json,
+                "updated_at": stmt.excluded.updated_at,
+            },
+        )
+        db.execute(stmt)
+        db.commit()
+        print(f"[sync_fundamental] {code} done")
+    except Exception as e:
+        db.rollback()
+        print(f"[sync_fundamental] {code} error: {e}")
+    finally:
+        db.close()
 
 
 def _sync_news(code: str):
-    print(f"[sync_news] {code}: baostock has no news API, skipping")
+    print(f"[sync_news] {code}: no news API available, skipping")
 
 
 def _fetch_industry_quotes(codes: str) -> dict:

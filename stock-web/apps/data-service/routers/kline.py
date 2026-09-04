@@ -2,9 +2,11 @@ from fastapi import APIRouter, HTTPException, Query, Response
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from datetime import datetime, date, timedelta
+import requests
+import json
+import time
 
 from db import SessionLocal, StockKline, GlobalIndexKline
-from bs_session import get_bs, reset_bs
 
 router = APIRouter()
 
@@ -39,43 +41,13 @@ _GLOBAL_INDEX_CODES = {
     "UDI",
 }
 
-# A 股大盘指数的正确 baostock 前缀映射
-# 上交所指数：000xxx / 000001/000016/000300/000905/000688 等
-# 深交所指数：399xxx
-_CN_INDEX_BS_MAP: dict[str, str] = {
-    "000001": "sh.000001",  # 上证指数
-    "000002": "sh.000002",  # 上证A股指数
-    "000016": "sh.000016",  # 上证50
-    "000300": "sh.000300",  # 沪深300
-    "000905": "sh.000905",  # 中证500
-    "000852": "sh.000852",  # 中证1000
-    "000985": "sh.000985",  # 中证全指
-    "000047": "sh.000047",  # 上证全指
-    "399001": "sz.399001",  # 深证成指
-    "399006": "sz.399006",  # 创业板指
-    "399005": "sz.399005",  # 中小板指
-    "399300": "sz.399300",  # 深版沪深300
-    "399673": "sz.399673",  # 创业板50
-}
-
-# 不支持 baostock 的指数，走 GlobalIndexKline / 新浪日K 接口
-# 000680 科创综指：baostock 不支持 sh.000680，走新浪日K
+# 不支持的指数，走 GlobalIndexKline / 新浪日K 接口
 _CN_INDEX_EM_CODES = {"000688", "880351", "000680"}
 
 
 def _is_global_index(code: str) -> bool:
     """走 GlobalIndexKline / EM 接口"""
     return code in _GLOBAL_INDEX_CODES or code in _CN_INDEX_EM_CODES
-
-
-def _to_bs_code(code: str) -> str:
-    """转换为 baostock 代码，优先查精确映射表"""
-    if code in _CN_INDEX_BS_MAP:
-        return _CN_INDEX_BS_MAP[code]
-    # 普通股票：6/5 开头上交所，其余深交所
-    if code.startswith("6") or code.startswith("5"):
-        return f"sh.{code}"
-    return f"sz.{code}"
 
 
 def _safe_float(val, default=0.0) -> float:
@@ -95,66 +67,61 @@ def _latest_trade_date() -> str:
     return (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
 
 
-def _fetch_and_cache_klines(code: str, period: str, count: int) -> list:
+_SINA_SCALE_MAP = {"daily": 240, "weekly": 1200, "monthly": 7200}
+
+
+def _to_sina_symbol(code: str) -> str:
+    if code.startswith("6") or code.startswith("5"):
+        return f"sh{code}"
+    return f"sz{code}"
+
+
+def _fetch_and_cache_klines_sina(code: str, period: str, count: int) -> list:
     db = SessionLocal()
-    bs_period = "d" if period == "daily" else ("w" if period == "weekly" else "m")
     try:
-        bsapi = get_bs()
-        bs_code = _to_bs_code(code)
-        # 按周期决定回溯窗口：日K 400天，周K 3年，月K 10年
-        if period == "weekly":
-            lookback_days = max(count * 7 + 30, 3 * 365)
-        elif period == "monthly":
-            lookback_days = max(count * 31 + 60, 10 * 365)
-        else:
-            lookback_days = max(count * 2, 400)
-        start = (date.today() - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
-        end = date.today().strftime("%Y-%m-%d")
-        fields = "date,code,open,high,low,close,volume,amount,turn,pctChg"
-        # 指数不做复权（adjustflag=3），普通股票用前复权（adjustflag=2）
-        adjust = "3" if code in _CN_INDEX_BS_MAP else "2"
-        rs = bsapi.query_history_k_data_plus(
-            bs_code,
-            fields,
-            start_date=start,
-            end_date=end,
-            frequency=bs_period,
-            adjustflag=adjust,
-        )
+        sina_symbol = _to_sina_symbol(code)
+        scale = _SINA_SCALE_MAP.get(period, 240)
+        fetch_count = max(count * 2, 400)
+        url = f"https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData"
+        params = {
+            "symbol": sina_symbol,
+            "scale": str(scale),
+            "ma": "no",
+            "datalen": str(fetch_count),
+        }
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+        }
+        r = requests.get(url, params=params, headers=headers, timeout=15)
+        r.raise_for_status()
+        rows = json.loads(r.text)
+        if not rows:
+            return []
         bars = []
-        while rs.error_code == "0":
-            try:
-                has_next = rs.next()
-            except IndexError as e:
-                reset_bs()
-                raise HTTPException(
-                    status_code=503,
-                    detail=f"baostock returned malformed kline rows for {code}: {e}",
-                ) from e
-            if not has_next:
-                break
-            try:
-                r = rs.get_row_data()
-            except IndexError as e:
-                reset_bs()
-                raise HTTPException(
-                    status_code=503,
-                    detail=f"baostock returned malformed kline rows for {code}: {e}",
-                ) from e
-            if not r or len(r) < 10:
-                continue
+        prev_close = 0.0
+        for row in rows:
+            trade_date = row.get("day", "")[:10]
+            o = _safe_float(row.get("open"))
+            h = _safe_float(row.get("high"))
+            lo = _safe_float(row.get("low"))
+            c = _safe_float(row.get("close"))
+            vol = int(_safe_float(row.get("volume")))
+            change_pct = 0.0
+            if prev_close > 0:
+                change_pct = round((c - prev_close) / prev_close * 100, 4)
+            prev_close = c
             stmt = sqlite_insert(StockKline).values(
                 code=code,
                 period=period,
-                trade_date=r[0],
-                open=_safe_float(r[2]),
-                high=_safe_float(r[3]),
-                low=_safe_float(r[4]),
-                close=_safe_float(r[5]),
-                volume=int(_safe_float(r[6])),
-                turnover=_safe_float(r[7]),
-                turn_rate=_safe_float(r[8]),
-                change_pct=_safe_float(r[9]),
+                trade_date=trade_date,
+                open=o,
+                high=h,
+                low=lo,
+                close=c,
+                volume=vol,
+                turnover=0.0,
+                turn_rate=0.0,
+                change_pct=change_pct,
                 updated_at=datetime.utcnow(),
             )
             stmt = stmt.on_conflict_do_update(
@@ -165,8 +132,6 @@ def _fetch_and_cache_klines(code: str, period: str, count: int) -> list:
                     "low": stmt.excluded.low,
                     "close": stmt.excluded.close,
                     "volume": stmt.excluded.volume,
-                    "turnover": stmt.excluded.turnover,
-                    "turn_rate": stmt.excluded.turn_rate,
                     "change_pct": stmt.excluded.change_pct,
                     "updated_at": stmt.excluded.updated_at,
                 },
@@ -174,24 +139,33 @@ def _fetch_and_cache_klines(code: str, period: str, count: int) -> list:
             db.execute(stmt)
             bars.append(
                 {
-                    "time": r[0],
-                    "open": _safe_float(r[2]),
-                    "high": _safe_float(r[3]),
-                    "low": _safe_float(r[4]),
-                    "close": _safe_float(r[5]),
-                    "volume": int(_safe_float(r[6])),
-                    "turnRate": _safe_float(r[8]),
-                    "changePct": _safe_float(r[9]),
+                    "time": trade_date,
+                    "open": o,
+                    "high": h,
+                    "low": lo,
+                    "close": c,
+                    "volume": vol,
+                    "turnRate": 0.0,
+                    "changePct": change_pct,
                 }
             )
         db.commit()
         return bars[-count:]
     except Exception as e:
         db.rollback()
-        reset_bs()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise e
     finally:
         db.close()
+
+
+def _fetch_and_cache_klines(code: str, period: str, count: int) -> list:
+    try:
+        return _fetch_and_cache_klines_sina(code, period, count)
+    except Exception as sina_err:
+        raise HTTPException(
+            status_code=503,
+            detail=f"K线数据源不可用(sina: {sina_err})",
+        )
 
 
 def _read_global_index_kline(code: str, period: str, count: int) -> list:
@@ -287,19 +261,6 @@ async def get_kline(
                 _fetch_and_cache_global_index_kline, code, period, count
             )
         return rows
-
-    def _read_cached():
-        db = SessionLocal()
-        try:
-            return (
-                db.query(StockKline)
-                .filter(StockKline.code == code, StockKline.period == period)
-                .order_by(StockKline.trade_date.desc())
-                .limit(count)
-                .all()
-            )
-        finally:
-            db.close()
 
     def _read_cached():
         db = SessionLocal()

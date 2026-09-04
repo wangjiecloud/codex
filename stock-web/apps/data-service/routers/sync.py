@@ -263,9 +263,6 @@ def _run_full_sync():
                     f"[full_sync] kline {code} outer timeout ({consecutive_timeouts})"
                 )
                 if consecutive_timeouts >= 5:
-                    from bs_session import reset_bs
-
-                    reset_bs()
                     _time.sleep(3)
                     consecutive_timeouts = 0
 
@@ -874,26 +871,8 @@ def _clear_backfill_cursor():
 
 
 def _get_ipo_date(code: str) -> str:
-    """通过 baostock 查询上市日期，失败则返回 '1990-01-01'"""
-    from bs_session import get_bs, reset_bs
-
-    _DEFAULT = "1990-01-01"
-    try:
-        bs = get_bs()
-        bs_code = f"sh.{code}" if code.startswith(("6", "5")) else f"sz.{code}"
-        rs = bs.query_stock_basic(code=bs_code)
-        if rs.error_code != "0":
-            return _DEFAULT
-        if rs.next():
-            row = rs.get_row_data()
-            # fields: code,code_name,ipoDate,outDate,type,status
-            if row and len(row) >= 3 and row[2]:
-                ipo = row[2].strip()
-                if len(ipo) == 10:
-                    return ipo
-    except Exception as e:
-        print(f"[backfill] get_ipo_date {code} error: {e}")
-    return _DEFAULT
+    """返回默认上市日期（不再调用 baostock）。"""
+    return "1990-01-01"
 
 
 def _has_kline_data(code: str, period: str) -> bool:
@@ -918,200 +897,60 @@ def _has_kline_data(code: str, period: str) -> bool:
 def _fetch_full_klines(code: str, period: str, start_date: str):
     """
     从 start_date 到今日，全量抓取指定周期K线并写入 stock_kline 表。
-    使用 baostock，每次最多拉 5000 条（baostock 实际无上限但网络较慢时分段）。
+    直接使用新浪数据源。
     """
-    from bs_session import get_bs, reset_bs
-    from db import SessionLocal, StockKline
-    from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-    from datetime import datetime, date
+    from routers.kline import _fetch_and_cache_klines_sina
+    from datetime import date as _date, datetime as _dt, timedelta as _timedelta
 
-    bs_period = "d" if period == "daily" else ("w" if period == "weekly" else "m")
-    bs_code = f"sh.{code}" if code.startswith(("6", "5")) else f"sz.{code}"
-    end_date = date.today().strftime("%Y-%m-%d")
-    fields = "date,code,open,high,low,close,volume,amount,turn,pctChg"
+    try:
+        start_dt = _dt.strptime(start_date, "%Y-%m-%d").date()
+    except Exception:
+        start_dt = _date.today() - _timedelta(days=400)
+    delta_days = (_date.today() - start_dt).days
+    if period == "weekly":
+        need_count = max(delta_days // 7 + 30, 200)
+    elif period == "monthly":
+        need_count = max(delta_days // 30 + 12, 120)
+    else:
+        need_count = max(delta_days + 10, 400)
 
-    def _safe_float(val, default=0.0):
-        try:
-            v = float(str(val).strip())
-            return v if v == v else default
-        except Exception:
-            return default
-
-    max_attempts = 3
-    for attempt in range(max_attempts):
-        try:
-            bs = get_bs()
-            rs = bs.query_history_k_data_plus(
-                bs_code,
-                fields,
-                start_date=start_date,
-                end_date=end_date,
-                frequency=bs_period,
-                adjustflag="2",
-            )
-            if rs.error_code != "0":
-                reset_bs()
-                if attempt < max_attempts - 1:
-                    _time.sleep(2)
-                    continue
-                return 0
-
-            rows = []
-            while True:
-                try:
-                    has_next = rs.next()
-                except IndexError:
-                    reset_bs()
-                    break
-                if not has_next:
-                    break
-                try:
-                    r = rs.get_row_data()
-                except IndexError:
-                    reset_bs()
-                    break
-                if r and len(r) >= 10:
-                    rows.append(r)
-
-            if not rows:
-                return 0
-
-            db = SessionLocal()
-            try:
-                for r in rows:
-                    stmt = sqlite_insert(StockKline).values(
-                        code=code,
-                        period=period,
-                        trade_date=r[0],
-                        open=round(_safe_float(r[2]), 4),
-                        high=round(_safe_float(r[3]), 4),
-                        low=round(_safe_float(r[4]), 4),
-                        close=round(_safe_float(r[5]), 4),
-                        volume=int(_safe_float(r[6])),
-                        turnover=_safe_float(r[7]),
-                        turn_rate=_safe_float(r[8]),
-                        change_pct=round(_safe_float(r[9]), 4),
-                        updated_at=datetime.utcnow(),
-                    )
-                    stmt = stmt.on_conflict_do_update(
-                        index_elements=["code", "period", "trade_date"],
-                        set_={
-                            "open": stmt.excluded.open,
-                            "high": stmt.excluded.high,
-                            "low": stmt.excluded.low,
-                            "close": stmt.excluded.close,
-                            "volume": stmt.excluded.volume,
-                            "turnover": stmt.excluded.turnover,
-                            "turn_rate": stmt.excluded.turn_rate,
-                            "change_pct": stmt.excluded.change_pct,
-                            "updated_at": stmt.excluded.updated_at,
-                        },
-                    )
-                    db.execute(stmt)
-                db.commit()
-                return len(rows)
-            except Exception as e:
-                db.rollback()
-                print(f"[backfill] db error {code}/{period}: {e}")
-                return 0
-            finally:
-                db.close()
-
-        except Exception as e:
-            print(f"[backfill] fetch error {code}/{period} attempt {attempt + 1}: {e}")
-            reset_bs()
-            if attempt < max_attempts - 1:
-                _time.sleep(2 * (attempt + 1))
-            continue
-
-    return 0
+    try:
+        rows = _fetch_and_cache_klines_sina(code, period, need_count)
+        return len(rows) if rows else 0
+    except Exception as e:
+        print(f"[backfill] sina fetch failed for {code}/{period}: {e}")
+        return 0
 
 
 def _fetch_all_market_codes() -> tuple:
     """
-    从 baostock 拉取全市场 A 股 + ETF 股票代码列表，
+    用 akshare 拉取全市场 A 股代码列表，
     并与 stock_meta 表中的代码合并去重，返回 (排序后的代码列表, 代码信息字典)。
-    type=1 股票（含主板/创业板/科创板），type=2 指数，type=3 其他，type=5 ETF
-    返回值：
-      codes: list[str] - 排序后的全部代码
-      bs_info: dict[str, dict] - baostock 拉到的信息 {code: {name, market, stock_type}}
     """
-    from bs_session import get_bs, reset_bs
+    import akshare as ak
 
     market_codes: set = set()
-    # 缓存 baostock 拉到的完整信息，供后续补写 stock_meta/stock_quote 使用
-    bs_info: dict = {}  # code -> {name, market, stock_type}
+    bs_info: dict = {}
 
-    # 最多重试3次，应对 baostock 编码错误/网络抖动
-    for attempt in range(3):
-        try:
-            bs_inst = get_bs()
-            # 不传 code 参数，拉全市场所有证券（sh. + sz.），只取股票(type=1)和ETF(type=5)
-            # 注意：query_stock_basic(code="sh.") 会报错"股票代码应为9位"，必须不传 code
-            rs = bs_inst.query_stock_basic()
-            if rs.error_code != "0":
-                reset_bs()
-                _time.sleep(2)
-                continue
-            # 逐行读取，捕获编码异常后继续而非中断
-            while True:
-                try:
-                    has_next = rs.next()
-                except Exception as e:
-                    print(f"[backfill] query_stock_basic rs.next() error: {e}, 跳过")
-                    break
-                if not has_next:
-                    break
-                try:
-                    row = rs.get_row_data()
-                    # fields: code,code_name,ipoDate,outDate,type,status
-                    if not row or len(row) < 6:
-                        continue
-                    bs_code_full = row[0]  # e.g. "sh.600036" or "sz.000001"
-                    code_name = row[1].strip() if len(row) > 1 else ""
-                    stock_type = row[4].strip() if len(row) > 4 else ""
-                    # type=1: 股票, type=5: ETF
-                    if stock_type not in ("1", "5"):
-                        continue
-                    # 从 sh./sz. 前缀推断市场
-                    if "." in bs_code_full:
-                        mkt_prefix, pure_code = bs_code_full.split(".", 1)
-                        market_label = "SH" if mkt_prefix == "sh" else "SZ"
-                    else:
-                        pure_code = bs_code_full
-                        market_label = (
-                            "SH" if pure_code.startswith(("6", "5")) else "SZ"
-                        )
-                    if len(pure_code) == 6 and pure_code.isdigit():
-                        market_codes.add(pure_code)
-                        bs_info[pure_code] = {
-                            "name": code_name,
-                            "market": market_label,
-                            "stock_type": stock_type,  # "1"=股票, "5"=ETF
-                        }
-                except Exception:
-                    continue
-            # 如果拿到了足够的代码就退出重试
-            if len(market_codes) > 1000:
-                break
-            print(
-                f"[backfill] query_stock_basic 拿到 {len(market_codes)} 只，不足，重试 {attempt + 1}/3"
-            )
-            reset_bs()
-            _time.sleep(2)
-        except Exception as e:
-            print(
-                f"[backfill] _fetch_all_market_codes attempt {attempt + 1} error: {e}"
-            )
-            reset_bs()
-            _time.sleep(2)
+    try:
+        df = ak.stock_zh_a_spot_em()
+        if df is not None and not df.empty:
+            for _, row in df.iterrows():
+                code = str(row.get("代码", "")).strip()
+                name = str(row.get("名称", "")).strip()
+                if len(code) == 6 and code.isdigit() and not code.startswith("8"):
+                    market_codes.add(code)
+                    bs_info[code] = {
+                        "name": name,
+                        "market": "SH" if code.startswith(("6", "5")) else "SZ",
+                        "stock_type": "1",
+                    }
+    except Exception as e:
+        print(f"[backfill] akshare stock_zh_a_spot_em error: {e}")
 
-    # 合并 stock_meta 中已有的代码（只取真实 A 股 / ETF，过滤 801xxx 申万指数等非股票代码）
     def _is_valid_stock_code(code: str) -> bool:
-        """只保留 A 股主板/创业板/科创板/北交所/ETF 的6位数字代码，排除申万指数(801xxx)等"""
         if not (len(code) == 6 and code.isdigit()):
             return False
-        # 申万行业指数：801xxx，排除
         if code.startswith("8"):
             return False
         return True
@@ -1126,10 +965,9 @@ def _fetch_all_market_codes() -> tuple:
     finally:
         db.close()
 
-    # market_codes 来自 baostock，已经是合法股票/ETF，直接合并
     all_codes = sorted(market_codes | db_codes)
     print(
-        f"[backfill] 全市场代码：baostock={len(market_codes)}，"
+        f"[backfill] 全市场代码：akshare={len(market_codes)}，"
         f"stock_meta有效={len(db_codes)}，合并去重后={len(all_codes)}"
     )
     return all_codes, bs_info
@@ -1220,7 +1058,7 @@ def _run_kline_backfill():
                 f"第 {start_code_idx + 1}/{len(codes)} 只继续",
             )
         else:
-            sched_log("info", "全量K线补全：正在从 baostock 拉取全市场股票列表…")
+            sched_log("info", "全量K线补全：正在从 akshare 拉取全市场股票列表…")
             codes, bs_info = _fetch_all_market_codes()
             start_period_idx = 0
             start_code_idx = 0

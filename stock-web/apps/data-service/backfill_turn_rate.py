@@ -4,10 +4,18 @@ Only updates rows where turn_rate IS NULL or turn_rate = 0.
 """
 
 import sqlite3
+import random
+import string
+import time
 import baostock as bs
 from datetime import date, timedelta
 
 DB_PATH = "stock_data.db"
+
+
+def _random_user_id():
+    chars = string.ascii_lowercase + string.digits
+    return "".join(random.choices(chars, k=8))
 
 
 def _to_bs_code(code: str) -> str:
@@ -34,7 +42,7 @@ def backfill_turn_rate():
     codes = [r[0] for r in cur.fetchall()]
     print(f"Codes needing backfill: {len(codes)}")
 
-    lg = bs.login()
+    lg = bs.login(user_id=_random_user_id(), password="123456")
     if lg.error_code != "0":
         print(f"baostock login failed: {lg.error_msg}")
         conn.close()
@@ -48,6 +56,7 @@ def backfill_turn_rate():
     for i, code in enumerate(codes):
         bs_code = _to_bs_code(code)
         for period_key, freq in [("daily", "d"), ("weekly", "w"), ("monthly", "m")]:
+            time.sleep(0.3)
             rs = bs.query_history_k_data_plus(
                 bs_code,
                 fields,

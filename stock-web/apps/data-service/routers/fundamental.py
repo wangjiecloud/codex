@@ -28,6 +28,7 @@ F10 覆盖的所有标签页（完整版）：
   jgpj  机构评级
   zndp  智能点评
 """
+
 import json
 import re
 import asyncio
@@ -61,11 +62,19 @@ router = APIRouter()
 # 工具函数
 # ──────────────────────────────────────────────
 
+
 def _to_float(val) -> Optional[float]:
     """把各种格式的数值字符串转成 float，失败返回 None"""
     if val is None:
         return None
-    s = str(val).strip().replace(",", "").replace("%", "").replace("亿", "e8").replace("万", "e4")
+    s = (
+        str(val)
+        .strip()
+        .replace(",", "")
+        .replace("%", "")
+        .replace("亿", "e8")
+        .replace("万", "e4")
+    )
     s = re.sub(r"[^\d.\-+eE]", "", s)
     try:
         return float(s)
@@ -98,6 +107,7 @@ def _get_content(page, skip_lines: int = 80) -> str:
 # Playwright 全量抓取核心逻辑
 # ──────────────────────────────────────────────
 
+
 def _scrape_f10_full(code: str) -> dict:
     """
     使用 Playwright 全量抓取东方财富 F10 所有标签页数据。
@@ -107,7 +117,9 @@ def _scrape_f10_full(code: str) -> dict:
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
-        raise RuntimeError("playwright 未安装，请运行: pip install playwright && playwright install chromium")
+        raise RuntimeError(
+            "playwright 未安装，请运行: pip install playwright && playwright install chromium"
+        )
 
     base = _f10_url(code)
     result: dict = {
@@ -116,12 +128,16 @@ def _scrape_f10_full(code: str) -> dict:
         "scraped_at": datetime.utcnow().isoformat(),
     }
 
-    ua = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-          "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+    ua = (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    )
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        ctx = browser.new_context(viewport={"width": 1600, "height": 1000}, user_agent=ua)
+        ctx = browser.new_context(
+            viewport={"width": 1600, "height": 1000}, user_agent=ua
+        )
         page = ctx.new_page()
 
         # ─────────────────────────────────
@@ -137,31 +153,45 @@ def _scrape_f10_full(code: str) -> dict:
             m = re.search(pattern, txt, re.S)
             return m.group(group).strip() if m else None
 
-        result["eps_basic"]           = _ex(r"基本每股收益.*?(\-?\d+\.?\d*)", zyzb_text)
-        result["eps_diluted"]         = _ex(r"稀释每股收益.*?(\-?\d+\.?\d*)", zyzb_text)
-        result["nav_per_share"]       = _ex(r"每股净资产.*?(\-?\d+\.?\d*)", zyzb_text)
-        result["reserve_per_share"]   = _ex(r"每股公积金.*?(\-?\d+\.?\d*)", zyzb_text)
-        result["retained_per_share"]  = _ex(r"每股未分配利润.*?(\-?\d+\.?\d*)", zyzb_text)
-        result["cfps"]                = _ex(r"每股经营现金流.*?(\-?\d+\.?\d*)", zyzb_text)
-        result["pe_ttm"]              = _ex(r"市盈率TTM.*?(\-?\d+\.?\d*)", zyzb_text)
-        result["pe_static"]           = _ex(r"市盈率[-静].*?(\-?\d+\.?\d*)", zyzb_text)
-        result["pe_dynamic"]          = _ex(r"市盈率[-动].*?(\-?\d+\.?\d*)", zyzb_text)
-        result["pb"]                  = _ex(r"市净率.*?(\-?\d+\.?\d*)", zyzb_text)
+        result["eps_basic"] = _ex(r"基本每股收益.*?(\-?\d+\.?\d*)", zyzb_text)
+        result["eps_diluted"] = _ex(r"稀释每股收益.*?(\-?\d+\.?\d*)", zyzb_text)
+        result["nav_per_share"] = _ex(r"每股净资产.*?(\-?\d+\.?\d*)", zyzb_text)
+        result["reserve_per_share"] = _ex(r"每股公积金.*?(\-?\d+\.?\d*)", zyzb_text)
+        result["retained_per_share"] = _ex(
+            r"每股未分配利润.*?(\-?\d+\.?\d*)", zyzb_text
+        )
+        result["cfps"] = _ex(r"每股经营现金流.*?(\-?\d+\.?\d*)", zyzb_text)
+        result["pe_ttm"] = _ex(r"市盈率TTM.*?(\-?\d+\.?\d*)", zyzb_text)
+        result["pe_static"] = _ex(r"市盈率[-静].*?(\-?\d+\.?\d*)", zyzb_text)
+        result["pe_dynamic"] = _ex(r"市盈率[-动].*?(\-?\d+\.?\d*)", zyzb_text)
+        result["pb"] = _ex(r"市净率.*?(\-?\d+\.?\d*)", zyzb_text)
         # 修复：实际文本格式为 "净资产收益率(加权)(%)\t9.03\t..."，取第一个数值
         roe_m = re.search(r"净资产收益率\(加权\)\(%\)\t(-?\d+\.?\d*)", zyzb_text)
-        result["roe_weighted"]        = roe_m.group(1) if roe_m else _ex(r"加权净资产收益率.*?(\-?\d+\.?\d*)", zyzb_text)
+        result["roe_weighted"] = (
+            roe_m.group(1)
+            if roe_m
+            else _ex(r"加权净资产收益率.*?(\-?\d+\.?\d*)", zyzb_text)
+        )
         # 修复：毛利率格式同上，取第一个值
         gm_m = re.search(r"毛利率\(%\)\t(-?\d+\.?\d*)", zyzb_text)
-        result["gross_margin"]        = gm_m.group(1) if gm_m else _ex(r"毛利率.*?(\-?\d+\.?\d*)", zyzb_text)
+        result["gross_margin"] = (
+            gm_m.group(1) if gm_m else _ex(r"毛利率.*?(\-?\d+\.?\d*)", zyzb_text)
+        )
         # 修复：资产负债率格式同上
         dr_m = re.search(r"资产负债率\(%\)\t(-?\d+\.?\d*)", zyzb_text)
-        result["debt_ratio"]          = dr_m.group(1) if dr_m else _ex(r"资产负债率.*?(\-?\d+\.?\d*)", zyzb_text)
-        result["revenue"]             = _ex(r"营业总收入\(元\)\s+(\d+\.?\d*[亿万]?)", zyzb_text)
-        result["revenue_yoy"]         = _ex(r"营业总收入同比增长.*?(\-?\d+\.?\d*)", zyzb_text)
-        result["net_profit"]          = _ex(r"归属净利润\(元\)\s+(\d+\.?\d*[亿万]?)", zyzb_text)
-        result["net_profit_yoy"]      = _ex(r"归属净利润同比增长.*?(\-?\d+\.?\d*)", zyzb_text)
-        result["deducted_profit_yoy"] = _ex(r"扣非净利润同比增长.*?(\-?\d+\.?\d*)", zyzb_text)
-        result["report_period"]       = _ex(r"(\d{4}-\d{2}-\d{2})", zyzb_text)
+        result["debt_ratio"] = (
+            dr_m.group(1) if dr_m else _ex(r"资产负债率.*?(\-?\d+\.?\d*)", zyzb_text)
+        )
+        result["revenue"] = _ex(r"营业总收入\(元\)\s+(\d+\.?\d*[亿万]?)", zyzb_text)
+        result["revenue_yoy"] = _ex(r"营业总收入同比增长.*?(\-?\d+\.?\d*)", zyzb_text)
+        result["net_profit"] = _ex(r"归属净利润\(元\)\s+(\d+\.?\d*[亿万]?)", zyzb_text)
+        result["net_profit_yoy"] = _ex(
+            r"归属净利润同比增长.*?(\-?\d+\.?\d*)", zyzb_text
+        )
+        result["deducted_profit_yoy"] = _ex(
+            r"扣非净利润同比增长.*?(\-?\d+\.?\d*)", zyzb_text
+        )
+        result["report_period"] = _ex(r"(\d{4}-\d{2}-\d{2})", zyzb_text)
 
         # ─────────────────────────────────
         # 2. 财务分析 cwfx — 财务三表 + 指标多维度 + 历史多期
@@ -195,9 +225,11 @@ def _scrape_f10_full(code: str) -> dict:
 
         # 三张报表：资产负债表、利润表、现金流量表
         financial_statements = {}
-        for stmt_name, stmt_key in [("资产负债表", "balance_sheet"),
-                                     ("利润表", "income"),
-                                     ("现金流量表", "cashflow")]:
+        for stmt_name, stmt_key in [
+            ("资产负债表", "balance_sheet"),
+            ("利润表", "income"),
+            ("现金流量表", "cashflow"),
+        ]:
             try:
                 page.goto(base + "cwfx", wait_until="domcontentloaded")
                 page.wait_for_timeout(5000)
@@ -256,11 +288,13 @@ def _scrape_f10_full(code: str) -> dict:
         page.goto(base + "jyfx", wait_until="domcontentloaded")
         page.wait_for_timeout(7000)
         result["jyfx_text"] = _get_content(page, 60)
-        result["rd_expense_ratio"] = _ex(r"研发投入占营收比\s+(\d+\.?\d*)%", result["jyfx_text"])
+        result["rd_expense_ratio"] = _ex(
+            r"研发投入占营收比\s+(\d+\.?\d*)%", result["jyfx_text"]
+        )
 
         # 主营构成按产品/行业/地区 — 保存原始文本 + 尝试解析表格行
         jyfx_categories = {}
-        jyfx_table_rows = {}   # 结构化表格行数据，最终用于饼图
+        jyfx_table_rows = {}  # 结构化表格行数据，最终用于饼图
 
         try:
             # 先切换到表格模式
@@ -304,19 +338,26 @@ def _scrape_f10_full(code: str) -> dict:
                                 if "%" in ratio_str and len(name) >= 2:
                                     ratio_val = _to_float(ratio_str)
                                     if ratio_val and 0 < ratio_val <= 100:
-                                        product_rows.append({
-                                            "name": name,
-                                            "revenue": _to_float(rev_str),
-                                            "ratio": ratio_val,
-                                            "gross_margin": _to_float(parts[8]) if len(parts) > 8 else None,
-                                        })
+                                        product_rows.append(
+                                            {
+                                                "name": name,
+                                                "revenue": _to_float(rev_str),
+                                                "ratio": ratio_val,
+                                                "gross_margin": _to_float(parts[8])
+                                                if len(parts) > 8
+                                                else None,
+                                            }
+                                        )
                             continue
                         # 只收集「按产品分类」下的行
                         if current_cat != "按产品分类":
                             continue
                         if len(parts) >= 3:
                             name = parts[0]
-                            if re.search(r"主营构成|收入比例|成本比例|利润比例|报告期|合计|小计", name):
+                            if re.search(
+                                r"主营构成|收入比例|成本比例|利润比例|报告期|合计|小计",
+                                name,
+                            ):
                                 continue
                             if len(name) < 2 or len(name) > 30:
                                 continue
@@ -325,12 +366,16 @@ def _scrape_f10_full(code: str) -> dict:
                             if "%" in ratio_str:
                                 ratio_val = _to_float(ratio_str)
                                 if ratio_val and 0 < ratio_val <= 100:
-                                    product_rows.append({
-                                        "name": name,
-                                        "revenue": _to_float(rev_str),
-                                        "ratio": ratio_val,
-                                        "gross_margin": _to_float(parts[8]) if len(parts) > 8 else None,
-                                    })
+                                    product_rows.append(
+                                        {
+                                            "name": name,
+                                            "revenue": _to_float(rev_str),
+                                            "ratio": ratio_val,
+                                            "gross_margin": _to_float(parts[8])
+                                            if len(parts) > 8
+                                            else None,
+                                        }
+                                    )
             except Exception as e_tbl:
                 logger.warning(f"[F10] {code} jyfx table解析失败: {e_tbl}")
 
@@ -351,7 +396,12 @@ def _scrape_f10_full(code: str) -> dict:
                             )
                         except Exception:
                             parent_text = ""
-                        if "业务竞争力" in parent_text and len(txt) < 25 and txt and "\n" not in txt:
+                        if (
+                            "业务竞争力" in parent_text
+                            and len(txt) < 25
+                            and txt
+                            and "\n" not in txt
+                        ):
                             business_lis.append((txt, li))
 
                     if business_lis:
@@ -364,25 +414,37 @@ def _scrape_f10_full(code: str) -> dict:
                                 # 匹配 "年报：X业务总营收Y亿元，同比Z%"
                                 m = re.search(
                                     r"\d{4}年报：.{0,20}?业务总营收(\d+\.?\d*)亿元[，,]同比([+-]?\d+\.?\d*)%",
-                                    btext
+                                    btext,
                                 )
                                 if m:
-                                    busi_breakdown.append({
-                                        "name": bname,
-                                        "revenue": _to_float(m.group(1) + "亿"),
-                                        "yoy": float(m.group(2)),
-                                    })
-                                    logger.info(f"[F10] {code} 业务{bname}: {m.group(1)}亿")
+                                    busi_breakdown.append(
+                                        {
+                                            "name": bname,
+                                            "revenue": _to_float(m.group(1) + "亿"),
+                                            "yoy": float(m.group(2)),
+                                        }
+                                    )
+                                    logger.info(
+                                        f"[F10] {code} 业务{bname}: {m.group(1)}亿"
+                                    )
                             except Exception as be:
-                                logger.warning(f"[F10] {code} 业务tab {bname} 点击失败: {be}")
+                                logger.warning(
+                                    f"[F10] {code} 业务tab {bname} 点击失败: {be}"
+                                )
 
                         if busi_breakdown:
-                            total_rev = sum(r.get("revenue") or 0 for r in busi_breakdown)
+                            total_rev = sum(
+                                r.get("revenue") or 0 for r in busi_breakdown
+                            )
                             if total_rev > 0:
                                 for r in busi_breakdown:
-                                    r["ratio"] = round((r.get("revenue") or 0) / total_rev * 100, 2)
+                                    r["ratio"] = round(
+                                        (r.get("revenue") or 0) / total_rev * 100, 2
+                                    )
                             jyfx_table_rows["业务竞争力"] = busi_breakdown
-                            logger.info(f"[F10] {code} 业务竞争力解析到 {len(busi_breakdown)} 条")
+                            logger.info(
+                                f"[F10] {code} 业务竞争力解析到 {len(busi_breakdown)} 条"
+                            )
                 except Exception as e2:
                     logger.warning(f"[F10] {code} 业务竞争力抓取失败: {e2}")
 
@@ -399,8 +461,12 @@ def _scrape_f10_full(code: str) -> dict:
         page.goto(base + "ylyc", wait_until="domcontentloaded")
         page.wait_for_timeout(5000)
         result["ylyc_text"] = _get_content(page, 60)
-        result["consensus_rating"] = _ex(r"综合评级\s+(买入|增持|中性|减持|卖出)", result["ylyc_text"])
-        result["analyst_count"]    = _ex(r"(\d+)\s*家\s*(?:券商|机构)", result["ylyc_text"])
+        result["consensus_rating"] = _ex(
+            r"综合评级\s+(买入|增持|中性|减持|卖出)", result["ylyc_text"]
+        )
+        result["analyst_count"] = _ex(
+            r"(\d+)\s*家\s*(?:券商|机构)", result["ylyc_text"]
+        )
 
         # ─────────────────────────────────
         # 6. 分红融资 fhrz — 分红历史/融资明细
@@ -410,7 +476,7 @@ def _scrape_f10_full(code: str) -> dict:
         page.wait_for_timeout(5000)
         result["fhrz_text"] = _get_content(page, 60)
         result["dividend_yield"] = _ex(r"股息率\s+(\d+\.?\d*%?)", result["fhrz_text"])
-        result["payout_ratio"]   = _ex(r"股利支付率\s+(\d+\.?\d*%?)", result["fhrz_text"])
+        result["payout_ratio"] = _ex(r"股利支付率\s+(\d+\.?\d*%?)", result["fhrz_text"])
 
         # ─────────────────────────────────
         # 7. 同行比较 thbj
@@ -483,7 +549,9 @@ def _scrape_f10_full(code: str) -> dict:
         page.goto(base + "zjlx", wait_until="domcontentloaded")
         page.wait_for_timeout(5000)
         result["zjlx_text"] = _get_content(page, 60)
-        result["margin_balance"]  = _ex(r"融资余额(\d+\.?\d*亿?万?)", result["zjlx_text"])
+        result["margin_balance"] = _ex(
+            r"融资余额(\d+\.?\d*亿?万?)", result["zjlx_text"]
+        )
 
         # ─────────────────────────────────
         # 16. 龙虎榜单 lhbd
@@ -535,6 +603,7 @@ def _scrape_f10_full(code: str) -> dict:
 # 数据解析 & 持久化
 # ──────────────────────────────────────────────
 
+
 def _parse_jyfx_breakdown(jyfx_table_rows: dict) -> list[dict]:
     """
     从 jyfx_table_rows（结构化主营构成）中提取营收占比，
@@ -556,7 +625,9 @@ def _parse_jyfx_breakdown(jyfx_table_rows: dict) -> list[dict]:
     return sorted_rows[:8]
 
 
-def _parse_cwfx_history(code: str, cwfx_by_period: str, cwfx_by_year: str = "") -> list[dict]:
+def _parse_cwfx_history(
+    code: str, cwfx_by_period: str, cwfx_by_year: str = ""
+) -> list[dict]:
     """
     从 cwfx 财务分析文本中解析多期历史财务数据，用于填充 stock_f10_financial_history 表。
 
@@ -589,31 +660,31 @@ def _parse_cwfx_history(code: str, cwfx_by_period: str, cwfx_by_year: str = "") 
         # 注意：较长/更精确的关键字必须放在前面，防止短关键字先匹配（如"营业总收入"
         # 在前缀匹配时会误命中"营业总收入同比增长(%)"）
         field_map = {
-            "营业总收入同比增长": "revenue_yoy",     # ← 必须在 "营业总收入" 前面
+            "营业总收入同比增长": "revenue_yoy",  # ← 必须在 "营业总收入" 前面
             "归属净利润同比增长": "net_profit_yoy",  # ← 必须在 "归属净利润" 前面
-            "扣非净利润同比增长": None,              # 忽略，不入库
-            "营业总收入滚动环比增长": None,           # 忽略，不入库
-            "归属净利润滚动环比增长": None,           # 忽略，不入库
-            "扣非净利润滚动环比增长": None,           # 忽略，不入库
-            "营业总收入":         "revenue",
-            "营业收入":           "revenue",
-            "归属净利润":         "net_profit",
-            "净利润":             "net_profit",
-            "扣非净利润":         "deducted_profit",
-            "毛利润":             "gross_profit",
-            "毛利率":             "gross_margin",
-            "净利率":             "net_margin",
+            "扣非净利润同比增长": None,  # 忽略，不入库
+            "营业总收入滚动环比增长": None,  # 忽略，不入库
+            "归属净利润滚动环比增长": None,  # 忽略，不入库
+            "扣非净利润滚动环比增长": None,  # 忽略，不入库
+            "营业总收入": "revenue",
+            "营业收入": "revenue",
+            "归属净利润": "net_profit",
+            "净利润": "net_profit",
+            "扣非净利润": "deducted_profit",
+            "毛利润": "gross_profit",
+            "毛利率": "gross_margin",
+            "净利率": "net_margin",
             "净资产收益率(加权)": "roe_weighted",
-            "净资产收益率":       "roe_weighted",
-            "资产负债率":         "debt_ratio",
-            "每股收益":           "eps_basic",
-            "基本每股收益":       "eps_basic",
-            "每股净资产":         "nav_per_share",
+            "净资产收益率": "roe_weighted",
+            "资产负债率": "debt_ratio",
+            "每股收益": "eps_basic",
+            "基本每股收益": "eps_basic",
+            "每股净资产": "nav_per_share",
         }
         # 精确匹配优先（避免"净利率"匹配到"净利润"）
         exact_fields = {
             "营业总收入": "revenue",
-            "营业收入":   "revenue",
+            "营业收入": "revenue",
             "归属净利润": "net_profit",
         }
 
@@ -709,8 +780,13 @@ def _parse_cwfx_history(code: str, cwfx_by_period: str, cwfx_by_year: str = "") 
                 if v is not None:
                     existing = rows_by_date.get(d, {})
                     # 已有数据则不覆盖（保留更早解析的值）
-                    if matched_field not in existing or existing.get(matched_field) is None:
-                        rows_by_date.setdefault(d, {"code": code, "report_date": d})[matched_field] = v
+                    if (
+                        matched_field not in existing
+                        or existing.get(matched_field) is None
+                    ):
+                        rows_by_date.setdefault(d, {"code": code, "report_date": d})[
+                            matched_field
+                        ] = v
 
     _parse_block(cwfx_by_period)
     _parse_block(cwfx_by_year)
@@ -782,7 +858,14 @@ def _build_history_from_statements(code: str) -> list[dict]:
         rows_raw = _parse_cwfx_history_relaxed(code, text)
         for row in rows_raw:
             d = row["report_date"]
-            supplement_fields = {"revenue_yoy", "net_profit_yoy", "roe_weighted", "gross_margin", "net_margin", "debt_ratio"}
+            supplement_fields = {
+                "revenue_yoy",
+                "net_profit_yoy",
+                "roe_weighted",
+                "gross_margin",
+                "net_margin",
+                "debt_ratio",
+            }
             if d in combined_result:
                 for k in supplement_fields:
                     v = row.get(k)
@@ -802,7 +885,12 @@ def _build_history_from_statements(code: str) -> list[dict]:
         rows_raw = _parse_cwfx_history_relaxed(code, text)
         for row in rows_raw:
             d = row["report_date"]
-            supplement_fields = {"gross_margin", "net_margin", "debt_ratio", "roe_weighted"}
+            supplement_fields = {
+                "gross_margin",
+                "net_margin",
+                "debt_ratio",
+                "roe_weighted",
+            }
             if d in combined_result:
                 for k in supplement_fields:
                     v = row.get(k)
@@ -820,6 +908,7 @@ def _parse_cwfx_history_relaxed(code: str, text: str) -> list[dict]:
     专门用于从 balance_sheet 文本提取 revenue_yoy/net_profit_yoy/roe_weighted 等指标。
     """
     import re as _re
+
     rows_by_date: dict[str, dict] = {}
 
     def _normalize_date(d: str) -> str:
@@ -926,7 +1015,9 @@ def _parse_cwfx_history_relaxed(code: str, text: str) -> list[dict]:
                 continue
             v = _to_float(raw)
             if v is not None:
-                rows_by_date.setdefault(d, {"code": code, "report_date": d})[matched_field] = v
+                rows_by_date.setdefault(d, {"code": code, "report_date": d})[
+                    matched_field
+                ] = v
 
     # 宽松过滤：只要有任意一个字段就保留（不强求 revenue/net_profit）
     cutoff_year = datetime.utcnow().year - 5
@@ -939,7 +1030,10 @@ def _parse_cwfx_history_relaxed(code: str, text: str) -> list[dict]:
         if row_year < cutoff_year:
             continue
         # 只要有至少一个有意义的财务指标
-        if any(row.get(f) is not None for f in ["revenue_yoy", "net_profit_yoy", "roe_weighted", "gross_margin"]):
+        if any(
+            row.get(f) is not None
+            for f in ["revenue_yoy", "net_profit_yoy", "roe_weighted", "gross_margin"]
+        ):
             result.append(row)
 
     result.sort(key=lambda r: r.get("report_date", ""), reverse=True)
@@ -960,26 +1054,28 @@ def _parse_dividend_history(code: str, fhrz_text: str) -> list[dict]:
         # 提取每股派息金额
         cash_m = re.search(r"派(\d+\.?\d*)元", plan)
         dps = float(cash_m.group(1)) / 10 if cash_m else None  # 10派X元 → X/10
-        rows.append({
-            "code": code,
-            "report_period": period,
-            "announce_date": announce_date,
-            "dividend_plan": plan,
-            "record_date": record_date if record_date != "--" else None,
-            "ex_div_date": ex_div_date if ex_div_date != "--" else None,
-            "dividend_per_share": dps,
-            "status": "实施方案",
-        })
+        rows.append(
+            {
+                "code": code,
+                "report_period": period,
+                "announce_date": announce_date,
+                "dividend_plan": plan,
+                "record_date": record_date if record_date != "--" else None,
+                "ex_div_date": ex_div_date if ex_div_date != "--" else None,
+                "dividend_per_share": dps,
+                "status": "实施方案",
+            }
+        )
     return rows
 
 
 def _parse_institution_forecast(code: str, ylyc_text: str) -> list[dict]:
     """从盈利预测文本中解析机构预测（预测明细部分）。
-    
+
     实际文本格式（预测明细区块）:
       时间\t机构\t研究员\t{年A}\t{年B预测}\t{年C预测}\t{年D预测}\n评级
       2026-05-06\t中国银河\t华立,阎予露\t0.5620\t2.11\t2.22\t2.46\n买入
-    
+
     表头标识预测年份，从"预测明细"和"每股收益(元)净利润(元)"行之后的"时间\t机构..."行开始解析。
     """
     rows = []
@@ -1005,17 +1101,19 @@ def _parse_institution_forecast(code: str, ylyc_text: str) -> list[dict]:
         for line in lines:
             date_m = re.match(
                 r"(\d{4}-\d{2}-\d{2})\s+(.+?)\s+(.+?)\s+(\d+\.?\d*)\s+(\d+\.?\d*)\s+(-?\d+\.?\d*|--).*?(买入|增持|中性|减持|卖出|推荐)",
-                line
+                line,
             )
             if date_m:
-                rows.append({
-                    "code": code,
-                    "report_date": date_m.group(1),
-                    "institution": date_m.group(2).strip(),
-                    "eps_forecast": _to_float(date_m.group(5)),
-                    "rating": date_m.group(7),
-                    "year": f"{int(date_m.group(1)[:4])+1}E",
-                })
+                rows.append(
+                    {
+                        "code": code,
+                        "report_date": date_m.group(1),
+                        "institution": date_m.group(2).strip(),
+                        "eps_forecast": _to_float(date_m.group(5)),
+                        "rating": date_m.group(7),
+                        "year": f"{int(date_m.group(1)[:4]) + 1}E",
+                    }
+                )
         return rows
 
     # 逐行解析预测明细：一行数据 + 下一行评级
@@ -1049,14 +1147,16 @@ def _parse_institution_forecast(code: str, ylyc_text: str) -> list[dict]:
                 if j < len(eps_parts):
                     val_str = eps_parts[j]
                     if val_str and val_str != "--":
-                        rows.append({
-                            "code": code,
-                            "report_date": report_date,
-                            "institution": institution,
-                            "eps_forecast": _to_float(val_str),
-                            "rating": rating,
-                            "year": f"{year}E",
-                        })
+                        rows.append(
+                            {
+                                "code": code,
+                                "report_date": report_date,
+                                "institution": institution,
+                                "eps_forecast": _to_float(val_str),
+                                "rating": rating,
+                                "year": f"{year}E",
+                            }
+                        )
         i += 1
 
     return rows
@@ -1064,59 +1164,88 @@ def _parse_institution_forecast(code: str, ylyc_text: str) -> list[dict]:
 
 def _parse_key_events(code: str, gsds_text: str) -> list[dict]:
     """从公司大事文本中解析大事事件。
-    
+
     实际文本格式（每条事件连续排列）:
       2026-05-20股东大会[查看公告]于2026-05-20召开2025年年度股东大会 查看详情>
       2026-05-16资本运作为满足自硬公司...
       2026-04-27一季报披露[查看公告]...  同类事件
-    
+
     策略：以 "YYYY-MM-DD事件类型" 为分割点，提取事件类型和描述。
     已知事件类型关键词列表（用于从日期后紧跟的文字中识别类型）。
     """
     EVENT_TYPES = [
-        "股东大会", "资本运作", "机构调研", "一季报披露", "半年报披露", "三季报披露",
-        "年报披露", "股东户数", "沪深港通", "限售解禁", "股票回购", "新增概念",
-        "重大事项", "业绩预告", "股权激励", "增发", "配股", "分红送转", "融资融券",
-        "龙虎榜", "大宗交易", "股权质押", "董事会", "监事会", "高管变动", "诉讼仲裁",
-        "合同中标", "战略合作", "并购重组", "子公司变动", "评级变动", "中报预披露",
+        "股东大会",
+        "资本运作",
+        "机构调研",
+        "一季报披露",
+        "半年报披露",
+        "三季报披露",
+        "年报披露",
+        "股东户数",
+        "沪深港通",
+        "限售解禁",
+        "股票回购",
+        "新增概念",
+        "重大事项",
+        "业绩预告",
+        "股权激励",
+        "增发",
+        "配股",
+        "分红送转",
+        "融资融券",
+        "龙虎榜",
+        "大宗交易",
+        "股权质押",
+        "董事会",
+        "监事会",
+        "高管变动",
+        "诉讼仲裁",
+        "合同中标",
+        "战略合作",
+        "并购重组",
+        "子公司变动",
+        "评级变动",
+        "中报预披露",
     ]
-    
+
     rows = []
     # 将事件类型列表合并为正则或组，用于识别日期后的事件类型
     type_pattern = "|".join(re.escape(t) for t in EVENT_TYPES)
-    
+
     # 按日期+事件类型分割：找所有 "YYYY-MM-DD事件类型" 的位置
     split_re = re.compile(r"(\d{4}-\d{2}-\d{2})(" + type_pattern + r")")
-    
+
     # 找出所有起始位置
     matches = list(split_re.finditer(gsds_text))
-    
+
     for idx, m in enumerate(matches):
         event_date = m.group(1)
         event_type = m.group(2)
-        
+
         # 描述从事件类型之后到下一个事件起始位置之前
         start = m.end()
         end = matches[idx + 1].start() if idx + 1 < len(matches) else len(gsds_text)
         raw_desc = gsds_text[start:end].strip()
-        
+
         # 清理描述：去掉 "[查看公告]"、"查看详情>"、"同类事件" 等
         desc = re.sub(r"\[查看公告\]", "", raw_desc)
         desc = re.sub(r"查看详情>?\s*", "", desc)
         desc = re.sub(r"同类事件\s*", "", desc)
         desc = re.sub(r"\s+", " ", desc).strip()
-        
+
         # 跳过描述过短的（可能是噪音）
         if len(desc) < 2:
             continue
-        
-        rows.append({
-            "code": code,
-            "event_date": event_date,
-            "event_type": event_type,
-            "event_desc": desc[:1000],
-        })
-    
+
+        rows.append(
+            {
+                "code": code,
+                "event_date": event_date,
+                "event_type": event_type,
+                "event_desc": desc[:1000],
+            }
+        )
+
     return rows
 
 
@@ -1132,37 +1261,42 @@ def _upsert_f10_full(code: str, data: dict):
             snap = StockF10Snapshot(code=code)
             db.add(snap)
 
-        snap.eps_basic           = _to_float(data.get("eps_basic"))
-        snap.eps_diluted         = _to_float(data.get("eps_diluted"))
-        snap.nav_per_share       = _to_float(data.get("nav_per_share"))
-        snap.reserve_per_share   = _to_float(data.get("reserve_per_share"))
-        snap.retained_per_share  = _to_float(data.get("retained_per_share"))
-        snap.cfps                = _to_float(data.get("cfps"))
-        snap.pe_dynamic          = _to_float(data.get("pe_dynamic"))
+        snap.eps_basic = _to_float(data.get("eps_basic"))
+        snap.eps_diluted = _to_float(data.get("eps_diluted"))
+        snap.nav_per_share = _to_float(data.get("nav_per_share"))
+        snap.reserve_per_share = _to_float(data.get("reserve_per_share"))
+        snap.retained_per_share = _to_float(data.get("retained_per_share"))
+        snap.cfps = _to_float(data.get("cfps"))
+        snap.pe_dynamic = _to_float(data.get("pe_dynamic"))
         # pe_ttm 优先从 stock_quote 取（行情数据更准确），兜底用 F10 爬取值
         quote_pe = None
         try:
             from db import StockQuote
+
             sq = db.query(StockQuote).filter(StockQuote.code == code).first()
             if sq and sq.pe:
                 quote_pe = sq.pe
         except Exception:
             pass
-        snap.pe_ttm              = quote_pe if quote_pe else _to_float(data.get("pe_ttm"))
-        snap.pe_static           = _to_float(data.get("pe_static"))
-        snap.pb                  = _to_float(data.get("pb"))
-        snap.roe_weighted        = _to_float(data.get("roe_weighted"))
-        snap.gross_margin        = _to_float(data.get("gross_margin"))
-        snap.debt_ratio          = _to_float(data.get("debt_ratio"))
-        snap.revenue_yoy         = _to_float(data.get("revenue_yoy"))
-        snap.net_profit_yoy      = _to_float(data.get("net_profit_yoy"))
+        snap.pe_ttm = quote_pe if quote_pe else _to_float(data.get("pe_ttm"))
+        snap.pe_static = _to_float(data.get("pe_static"))
+        snap.pb = _to_float(data.get("pb"))
+        snap.roe_weighted = _to_float(data.get("roe_weighted"))
+        snap.gross_margin = _to_float(data.get("gross_margin"))
+        snap.debt_ratio = _to_float(data.get("debt_ratio"))
+        snap.revenue_yoy = _to_float(data.get("revenue_yoy"))
+        snap.net_profit_yoy = _to_float(data.get("net_profit_yoy"))
         snap.deducted_profit_yoy = _to_float(data.get("deducted_profit_yoy"))
-        snap.report_period       = data.get("report_period")
-        snap.source_url          = data.get("source_url")
-        snap.data_source         = "eastmoney_f10"
-        snap.raw_json            = json.dumps(
-            {k: v for k, v in data.items() if not k.endswith("_text") and not isinstance(v, dict)},
-            ensure_ascii=False
+        snap.report_period = data.get("report_period")
+        snap.source_url = data.get("source_url")
+        snap.data_source = "eastmoney_f10"
+        snap.raw_json = json.dumps(
+            {
+                k: v
+                for k, v in data.items()
+                if not k.endswith("_text") and not isinstance(v, dict)
+            },
+            ensure_ascii=False,
         )
         snap.updated_at = now
 
@@ -1184,37 +1318,50 @@ def _upsert_f10_full(code: str, data: dict):
             if isinstance(stmt_data, dict):
                 for tab_label, content in stmt_data.items():
                     if content and len(content) > 100:
-                        existing = db.query(StockF10FinancialStatement).filter(
-                            StockF10FinancialStatement.code == code,
-                            StockF10FinancialStatement.statement_type == stmt_type,
-                            StockF10FinancialStatement.tab_label == tab_label,
-                        ).first()
+                        existing = (
+                            db.query(StockF10FinancialStatement)
+                            .filter(
+                                StockF10FinancialStatement.code == code,
+                                StockF10FinancialStatement.statement_type == stmt_type,
+                                StockF10FinancialStatement.tab_label == tab_label,
+                            )
+                            .first()
+                        )
                         if not existing:
                             existing = StockF10FinancialStatement(
                                 code=code,
                                 statement_type=stmt_type,
                                 tab_label=tab_label,
-                                report_date=data.get("report_period") or now.strftime("%Y-%m-%d"),
+                                report_date=data.get("report_period")
+                                or now.strftime("%Y-%m-%d"),
                             )
                             db.add(existing)
                         existing.content_text = content
                         existing.updated_at = now
 
         # 额外保存 cwfx 成长性摘要（含同比增长、ROE 等历史多期数据）
-        for cwfx_tab_label, cwfx_content_key in [("按报告期", "cwfx_by_period"), ("按年度", "cwfx_by_year")]:
+        for cwfx_tab_label, cwfx_content_key in [
+            ("按报告期", "cwfx_by_period"),
+            ("按年度", "cwfx_by_year"),
+        ]:
             cwfx_content = data.get(cwfx_content_key, "")
             if cwfx_content and len(cwfx_content) > 100 and "同比" in cwfx_content:
-                existing_cwfx = db.query(StockF10FinancialStatement).filter(
-                    StockF10FinancialStatement.code == code,
-                    StockF10FinancialStatement.statement_type == "cwfx_summary",
-                    StockF10FinancialStatement.tab_label == cwfx_tab_label,
-                ).first()
+                existing_cwfx = (
+                    db.query(StockF10FinancialStatement)
+                    .filter(
+                        StockF10FinancialStatement.code == code,
+                        StockF10FinancialStatement.statement_type == "cwfx_summary",
+                        StockF10FinancialStatement.tab_label == cwfx_tab_label,
+                    )
+                    .first()
+                )
                 if not existing_cwfx:
                     existing_cwfx = StockF10FinancialStatement(
                         code=code,
                         statement_type="cwfx_summary",
                         tab_label=cwfx_tab_label,
-                        report_date=data.get("report_period") or now.strftime("%Y-%m-%d"),
+                        report_date=data.get("report_period")
+                        or now.strftime("%Y-%m-%d"),
                     )
                     db.add(existing_cwfx)
                 existing_cwfx.content_text = cwfx_content
@@ -1224,12 +1371,18 @@ def _upsert_f10_full(code: str, data: dict):
         if data.get("fhrz_text"):
             div_rows = _parse_dividend_history(code, data["fhrz_text"])
             for dr in div_rows:
-                ex = db.query(StockF10DividendHistory).filter(
-                    StockF10DividendHistory.code == code,
-                    StockF10DividendHistory.report_period == dr["report_period"],
-                ).first()
+                ex = (
+                    db.query(StockF10DividendHistory)
+                    .filter(
+                        StockF10DividendHistory.code == code,
+                        StockF10DividendHistory.report_period == dr["report_period"],
+                    )
+                    .first()
+                )
                 if not ex:
-                    ex = StockF10DividendHistory(code=code, report_period=dr["report_period"])
+                    ex = StockF10DividendHistory(
+                        code=code, report_period=dr["report_period"]
+                    )
                     db.add(ex)
                 ex.announce_date = dr.get("announce_date")
                 ex.dividend_plan = dr.get("dividend_plan")
@@ -1243,11 +1396,16 @@ def _upsert_f10_full(code: str, data: dict):
         if data.get("ylyc_text"):
             fc_rows = _parse_institution_forecast(code, data["ylyc_text"])
             for fr in fc_rows:
-                ex = db.query(StockF10InstitutionForecast).filter(
-                    StockF10InstitutionForecast.code == code,
-                    StockF10InstitutionForecast.institution == fr.get("institution", ""),
-                    StockF10InstitutionForecast.year == fr.get("year", ""),
-                ).first()
+                ex = (
+                    db.query(StockF10InstitutionForecast)
+                    .filter(
+                        StockF10InstitutionForecast.code == code,
+                        StockF10InstitutionForecast.institution
+                        == fr.get("institution", ""),
+                        StockF10InstitutionForecast.year == fr.get("year", ""),
+                    )
+                    .first()
+                )
                 if not ex:
                     ex = StockF10InstitutionForecast(
                         code=code,
@@ -1261,9 +1419,11 @@ def _upsert_f10_full(code: str, data: dict):
                 ex.updated_at = now
 
         # ──── 6. stock_f10_business_analysis 经营分析 ────
-        biz = db.query(StockF10BusinessAnalysis).filter(
-            StockF10BusinessAnalysis.code == code
-        ).first()
+        biz = (
+            db.query(StockF10BusinessAnalysis)
+            .filter(StockF10BusinessAnalysis.code == code)
+            .first()
+        )
         if not biz:
             biz = StockF10BusinessAnalysis(code=code)
             db.add(biz)
@@ -1273,7 +1433,7 @@ def _upsert_f10_full(code: str, data: dict):
         if jyfx_table_rows:
             biz.main_business_breakdown = json.dumps(
                 {"structured": jyfx_table_rows, "raw": data.get("jyfx_categories", {})},
-                ensure_ascii=False
+                ensure_ascii=False,
             )
         else:
             biz.main_business_breakdown = json.dumps(
@@ -1283,7 +1443,9 @@ def _upsert_f10_full(code: str, data: dict):
         biz.updated_at = now
         # 提取经营评述
         jyfx_text = data.get("jyfx_text", "")
-        biz_review_m = re.search(r"经营评述(.{200,3000}?)(?:核心竞争力|行业背景|$)", jyfx_text, re.S)
+        biz_review_m = re.search(
+            r"经营评述(.{200,3000}?)(?:核心竞争力|行业背景|$)", jyfx_text, re.S
+        )
         if biz_review_m:
             biz.business_review = biz_review_m.group(1).strip()
 
@@ -1300,10 +1462,14 @@ def _upsert_f10_full(code: str, data: dict):
                     data.get("cwfx_by_year", ""),
                 )
             for hr in hist_rows:
-                ex = db.query(StockF10FinancialHistory).filter(
-                    StockF10FinancialHistory.code == code,
-                    StockF10FinancialHistory.report_date == hr["report_date"],
-                ).first()
+                ex = (
+                    db.query(StockF10FinancialHistory)
+                    .filter(
+                        StockF10FinancialHistory.code == code,
+                        StockF10FinancialHistory.report_date == hr["report_date"],
+                    )
+                    .first()
+                )
                 if not ex:
                     ex = StockF10FinancialHistory(
                         code=code,
@@ -1311,9 +1477,20 @@ def _upsert_f10_full(code: str, data: dict):
                     )
                     db.add(ex)
                 # 只更新有值的字段
-                for field in ["revenue", "revenue_yoy", "net_profit", "net_profit_yoy",
-                               "deducted_profit", "gross_profit", "gross_margin",
-                               "net_margin", "roe_weighted", "debt_ratio", "eps_basic", "nav_per_share"]:
+                for field in [
+                    "revenue",
+                    "revenue_yoy",
+                    "net_profit",
+                    "net_profit_yoy",
+                    "deducted_profit",
+                    "gross_profit",
+                    "gross_margin",
+                    "net_margin",
+                    "roe_weighted",
+                    "debt_ratio",
+                    "eps_basic",
+                    "nav_per_share",
+                ]:
                     val = hr.get(field)
                     if val is not None:
                         setattr(ex, field, val)
@@ -1324,9 +1501,11 @@ def _upsert_f10_full(code: str, data: dict):
             logger.warning(f"[F10] {code} 写入 financial_history 失败: {e}")
 
         # ──── 7. stock_f10_shareholder_info 股东研究 ────
-        sh = db.query(StockF10ShareholderInfo).filter(
-            StockF10ShareholderInfo.code == code
-        ).first()
+        sh = (
+            db.query(StockF10ShareholderInfo)
+            .filter(StockF10ShareholderInfo.code == code)
+            .first()
+        )
         if not sh:
             sh = StockF10ShareholderInfo(code=code)
             db.add(sh)
@@ -1335,9 +1514,11 @@ def _upsert_f10_full(code: str, data: dict):
         sh.updated_at = now
 
         # ──── 8. stock_f10_peer_comparison 同行比较 ────
-        pc = db.query(StockF10PeerComparison).filter(
-            StockF10PeerComparison.code == code
-        ).first()
+        pc = (
+            db.query(StockF10PeerComparison)
+            .filter(StockF10PeerComparison.code == code)
+            .first()
+        )
         if not pc:
             pc = StockF10PeerComparison(code=code)
             db.add(pc)
@@ -1346,9 +1527,11 @@ def _upsert_f10_full(code: str, data: dict):
         pc.updated_at = now
 
         # ──── 9. stock_f10_company_profile 公司概况/高管/股本 ────
-        cp = db.query(StockF10CompanyProfile).filter(
-            StockF10CompanyProfile.code == code
-        ).first()
+        cp = (
+            db.query(StockF10CompanyProfile)
+            .filter(StockF10CompanyProfile.code == code)
+            .first()
+        )
         if not cp:
             cp = StockF10CompanyProfile(code=code)
             db.add(cp)
@@ -1360,18 +1543,22 @@ def _upsert_f10_full(code: str, data: dict):
         cp.related_stocks_json = data.get("glgg_text", "")[:1000]
         # 提取核心竞争力和行业背景
         gsgk_text = data.get("gsgk_text", "") or data.get("zyzb_text", "")
-        cc_m = re.search(r"核心竞争力(.{100,3000}?)(?:智能制造|产品优势|科技创新|行业背景|$)", gsgk_text, re.S)
+        cc_m = re.search(
+            r"核心竞争力(.{100,3000}?)(?:智能制造|产品优势|科技创新|行业背景|$)",
+            gsgk_text,
+            re.S,
+        )
         if cc_m:
             cp.core_competence = cc_m.group(1).strip()
-        ib_m = re.search(r"行业背景(.{100,2000}?)(?:核心竞争力|主营业务|$)", gsgk_text, re.S)
+        ib_m = re.search(
+            r"行业背景(.{100,2000}?)(?:核心竞争力|主营业务|$)", gsgk_text, re.S
+        )
         if ib_m:
             cp.industry_background = ib_m.group(1).strip()
         cp.updated_at = now
 
         # ──── 10. stock_f10_fund_flow 资金流向/龙虎榜 ────
-        ff = db.query(StockF10FundFlow).filter(
-            StockF10FundFlow.code == code
-        ).first()
+        ff = db.query(StockF10FundFlow).filter(StockF10FundFlow.code == code).first()
         if not ff:
             ff = StockF10FundFlow(code=code)
             db.add(ff)
@@ -1393,11 +1580,15 @@ def _upsert_f10_full(code: str, data: dict):
             rating = m.group(1)
             title = m.group(2).strip()
             rdate = m.group(3)
-            ex = db.query(StockF10ResearchReport).filter(
-                StockF10ResearchReport.code == code,
-                StockF10ResearchReport.report_date == rdate,
-                StockF10ResearchReport.title == title[:200],
-            ).first()
+            ex = (
+                db.query(StockF10ResearchReport)
+                .filter(
+                    StockF10ResearchReport.code == code,
+                    StockF10ResearchReport.report_date == rdate,
+                    StockF10ResearchReport.title == title[:200],
+                )
+                .first()
+            )
             if not ex:
                 ex = StockF10ResearchReport(
                     code=code,
@@ -1418,7 +1609,9 @@ def _upsert_f10_full(code: str, data: dict):
             for ke in key_event_rows:
                 key = (ke["event_date"], ke["event_type"])
                 if key in merged:
-                    merged[key]["event_desc"] = (merged[key]["event_desc"] + " / " + ke["event_desc"])[:1000]
+                    merged[key]["event_desc"] = (
+                        merged[key]["event_desc"] + " / " + ke["event_desc"]
+                    )[:1000]
                 else:
                     merged[key] = dict(ke)
             for ke in merged.values():
@@ -1445,6 +1638,7 @@ def _upsert_f10_full(code: str, data: dict):
 # 向下兼容：旧版轻量抓取（仅抓5个标签页）
 # ──────────────────────────────────────────────
 
+
 def _scrape_f10(code: str) -> dict:
     """轻量版抓取（仅核心指标），用于快速查询场景"""
     try:
@@ -1453,13 +1647,21 @@ def _scrape_f10(code: str) -> dict:
         raise RuntimeError("playwright 未安装")
 
     base = _f10_url(code)
-    result: dict = {"code": code, "source_url": base, "scraped_at": datetime.utcnow().isoformat()}
-    ua = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-          "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+    result: dict = {
+        "code": code,
+        "source_url": base,
+        "scraped_at": datetime.utcnow().isoformat(),
+    }
+    ua = (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    )
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        ctx = browser.new_context(viewport={"width": 1600, "height": 900}, user_agent=ua)
+        ctx = browser.new_context(
+            viewport={"width": 1600, "height": 900}, user_agent=ua
+        )
         page = ctx.new_page()
 
         page.goto(base + "zyzb", wait_until="domcontentloaded")
@@ -1471,19 +1673,21 @@ def _scrape_f10(code: str) -> dict:
             m = re.search(pattern, txt, re.S)
             return m.group(group).strip() if m else None
 
-        result["eps_basic"]           = _ex(r"基本每股收益.*?(\-?\d+\.?\d*)", text)
-        result["eps_diluted"]         = _ex(r"稀释每股收益.*?(\-?\d+\.?\d*)", text)
-        result["nav_per_share"]       = _ex(r"每股净资产.*?(\-?\d+\.?\d*)", text)
-        result["cfps"]                = _ex(r"每股经营现金流.*?(\-?\d+\.?\d*)", text)
-        result["pe_ttm"]              = _ex(r"市盈率TTM.*?(\-?\d+\.?\d*)", text)
-        result["pb"]                  = _ex(r"市净率.*?(\-?\d+\.?\d*)", text)
-        result["roe_weighted"]        = _ex(r"加权净资产收益率.*?(\-?\d+\.?\d*)", text)
-        result["gross_margin"]        = _ex(r"毛利率.*?(\-?\d+\.?\d*)", text)
-        result["debt_ratio"]          = _ex(r"资产负债率.*?(\-?\d+\.?\d*)", text)
-        result["revenue_yoy"]         = _ex(r"营业总收入同比增长.*?(\-?\d+\.?\d*)", text)
-        result["net_profit_yoy"]      = _ex(r"归属净利润同比增长.*?(\-?\d+\.?\d*)", text)
-        result["deducted_profit_yoy"] = _ex(r"扣非净利润同比增长.*?(\-?\d+\.?\d*)", text)
-        result["report_period"]       = _ex(r"(\d{4}-\d{2}-\d{2})", text)
+        result["eps_basic"] = _ex(r"基本每股收益.*?(\-?\d+\.?\d*)", text)
+        result["eps_diluted"] = _ex(r"稀释每股收益.*?(\-?\d+\.?\d*)", text)
+        result["nav_per_share"] = _ex(r"每股净资产.*?(\-?\d+\.?\d*)", text)
+        result["cfps"] = _ex(r"每股经营现金流.*?(\-?\d+\.?\d*)", text)
+        result["pe_ttm"] = _ex(r"市盈率TTM.*?(\-?\d+\.?\d*)", text)
+        result["pb"] = _ex(r"市净率.*?(\-?\d+\.?\d*)", text)
+        result["roe_weighted"] = _ex(r"加权净资产收益率.*?(\-?\d+\.?\d*)", text)
+        result["gross_margin"] = _ex(r"毛利率.*?(\-?\d+\.?\d*)", text)
+        result["debt_ratio"] = _ex(r"资产负债率.*?(\-?\d+\.?\d*)", text)
+        result["revenue_yoy"] = _ex(r"营业总收入同比增长.*?(\-?\d+\.?\d*)", text)
+        result["net_profit_yoy"] = _ex(r"归属净利润同比增长.*?(\-?\d+\.?\d*)", text)
+        result["deducted_profit_yoy"] = _ex(
+            r"扣非净利润同比增长.*?(\-?\d+\.?\d*)", text
+        )
+        result["report_period"] = _ex(r"(\d{4}-\d{2}-\d{2})", text)
 
         page.goto(base + "ylyc", wait_until="domcontentloaded")
         page.wait_for_timeout(4000)
@@ -1508,24 +1712,24 @@ def _upsert_f10(code: str, data: dict):
             snap = StockF10Snapshot(code=code)
             db.add(snap)
 
-        snap.eps_basic           = _to_float(data.get("eps_basic"))
-        snap.eps_diluted         = _to_float(data.get("eps_diluted"))
-        snap.nav_per_share       = _to_float(data.get("nav_per_share"))
-        snap.cfps                = _to_float(data.get("cfps"))
-        snap.pe_ttm              = _to_float(data.get("pe_ttm"))
-        snap.pb                  = _to_float(data.get("pb"))
-        snap.roe_weighted        = _to_float(data.get("roe_weighted"))
-        snap.gross_margin        = _to_float(data.get("gross_margin"))
-        snap.debt_ratio          = _to_float(data.get("debt_ratio"))
-        snap.revenue_yoy         = _to_float(data.get("revenue_yoy"))
-        snap.net_profit_yoy      = _to_float(data.get("net_profit_yoy"))
+        snap.eps_basic = _to_float(data.get("eps_basic"))
+        snap.eps_diluted = _to_float(data.get("eps_diluted"))
+        snap.nav_per_share = _to_float(data.get("nav_per_share"))
+        snap.cfps = _to_float(data.get("cfps"))
+        snap.pe_ttm = _to_float(data.get("pe_ttm"))
+        snap.pb = _to_float(data.get("pb"))
+        snap.roe_weighted = _to_float(data.get("roe_weighted"))
+        snap.gross_margin = _to_float(data.get("gross_margin"))
+        snap.debt_ratio = _to_float(data.get("debt_ratio"))
+        snap.revenue_yoy = _to_float(data.get("revenue_yoy"))
+        snap.net_profit_yoy = _to_float(data.get("net_profit_yoy"))
         snap.deducted_profit_yoy = _to_float(data.get("deducted_profit_yoy"))
-        snap.report_period       = data.get("report_period")
-        snap.source_url          = data.get("source_url")
-        snap.data_source         = "eastmoney_f10"
-        snap.raw_json            = json.dumps(
+        snap.report_period = data.get("report_period")
+        snap.source_url = data.get("source_url")
+        snap.data_source = "eastmoney_f10"
+        snap.raw_json = json.dumps(
             {k: v for k, v in data.items() if not k.endswith("_text")},
-            ensure_ascii=False
+            ensure_ascii=False,
         )
         snap.updated_at = datetime.now()
 
@@ -1549,6 +1753,7 @@ def _upsert_f10(code: str, data: dict):
 # API 路由
 # ──────────────────────────────────────────────
 
+
 @router.get("/{code}")
 async def get_fundamental(code: str, force_sync: bool = False):
     """
@@ -1557,11 +1762,16 @@ async def get_fundamental(code: str, force_sync: bool = False):
     - 若数据库无数据，或数据超过 24h 未更新，自动触发 F10 抓取（轻量版）
     - force_sync=true 可强制重新抓取
     """
+
     def _fetch():
         db = SessionLocal()
         try:
-            snap = db.query(StockF10Snapshot).filter(StockF10Snapshot.code == code).first()
-            old  = db.query(StockFundamental).filter(StockFundamental.code == code).first()
+            snap = (
+                db.query(StockF10Snapshot).filter(StockF10Snapshot.code == code).first()
+            )
+            old = (
+                db.query(StockFundamental).filter(StockFundamental.code == code).first()
+            )
             return snap, old
         finally:
             db.close()
@@ -1571,7 +1781,9 @@ async def get_fundamental(code: str, force_sync: bool = False):
     need_sync = force_sync
     if not snap:
         need_sync = True
-    elif snap.updated_at and (datetime.utcnow() - snap.updated_at) > timedelta(hours=24):
+    elif snap.updated_at and (datetime.utcnow() - snap.updated_at) > timedelta(
+        hours=24
+    ):
         need_sync = True
 
     if need_sync:
@@ -1584,7 +1796,7 @@ async def get_fundamental(code: str, force_sync: bool = False):
             if not snap and not old:
                 raise HTTPException(
                     status_code=404,
-                    detail=f"数据库无 {code} 基本面数据，且 F10 抓取失败: {str(e)}"
+                    detail=f"数据库无 {code} 基本面数据，且 F10 抓取失败: {str(e)}",
                 )
 
     if not snap and not old:
@@ -1593,67 +1805,80 @@ async def get_fundamental(code: str, force_sync: bool = False):
     result = {
         "code": code,
         "source_url": _f10_url(code),
-        "data_freshness": snap.updated_at.strftime("%Y-%m-%d %H:%M") if snap and snap.updated_at else None,
-        "report_period": snap.report_period if snap else (old.report_date if old else None),
+        "data_freshness": snap.updated_at.strftime("%Y-%m-%d %H:%M")
+        if snap and snap.updated_at
+        else None,
+        "report_period": snap.report_period
+        if snap
+        else (old.report_date if old else None),
     }
 
     if snap:
         result["metrics"] = {
             "per_share": {
-                "eps_basic":          snap.eps_basic,
-                "eps_diluted":        snap.eps_diluted,
-                "nav_per_share":      snap.nav_per_share,
-                "cfps":               snap.cfps,
+                "eps_basic": snap.eps_basic,
+                "eps_diluted": snap.eps_diluted,
+                "nav_per_share": snap.nav_per_share,
+                "cfps": snap.cfps,
                 "retained_per_share": snap.retained_per_share,
             },
             "valuation": {
-                "pe_ttm":                 snap.pe_ttm,
-                "pe_static":              snap.pe_static,
-                "pe_dynamic":             snap.pe_dynamic,
-                "pb":                     snap.pb,
-                "total_market_cap":       snap.total_market_cap,
+                "pe_ttm": snap.pe_ttm,
+                "pe_static": snap.pe_static,
+                "pe_dynamic": snap.pe_dynamic,
+                "pb": snap.pb,
+                "total_market_cap": snap.total_market_cap,
                 "circulating_market_cap": snap.circulating_market_cap,
             },
             "profitability": {
                 "roe_weighted": snap.roe_weighted,
                 "roa_weighted": snap.roa_weighted,
                 "gross_margin": snap.gross_margin,
-                "net_margin":   snap.net_margin,
+                "net_margin": snap.net_margin,
             },
             "growth": {
-                "revenue_yoy":         snap.revenue_yoy,
-                "revenue_qoq":         snap.revenue_qoq,
-                "net_profit_yoy":      snap.net_profit_yoy,
-                "net_profit_qoq":      snap.net_profit_qoq,
+                "revenue_yoy": snap.revenue_yoy,
+                "revenue_qoq": snap.revenue_qoq,
+                "net_profit_yoy": snap.net_profit_yoy,
+                "net_profit_qoq": snap.net_profit_qoq,
                 "deducted_profit_yoy": snap.deducted_profit_yoy,
             },
             "leverage": {
-                "debt_ratio":    snap.debt_ratio,
+                "debt_ratio": snap.debt_ratio,
                 "current_ratio": snap.current_ratio,
-                "quick_ratio":   snap.quick_ratio,
+                "quick_ratio": snap.quick_ratio,
             },
             "cashflow": {
-                "cfps":                snap.cfps,
+                "cfps": snap.cfps,
                 "sales_cashflow_ratio": snap.sales_cashflow_ratio,
             },
         }
     elif old:
         result["metrics"] = {
-            "profitability": {"roe_weighted": old.roe, "gross_margin": old.gross_margin},
-            "growth":        {"revenue_yoy": old.revenue_yoy, "net_profit_yoy": old.net_profit_yoy},
-            "leverage":      {"debt_ratio": old.debt_ratio},
+            "profitability": {
+                "roe_weighted": old.roe,
+                "gross_margin": old.gross_margin,
+            },
+            "growth": {
+                "revenue_yoy": old.revenue_yoy,
+                "net_profit_yoy": old.net_profit_yoy,
+            },
+            "leverage": {"debt_ratio": old.debt_ratio},
         }
 
     return result
 
 
 @router.post("/{code}/sync")
-async def sync_fundamental(code: str, background_tasks: BackgroundTasks, full: bool = False):
+async def sync_fundamental(
+    code: str, background_tasks: BackgroundTasks, full: bool = False
+):
     """
     主动触发 F10 数据同步（异步后台执行）
     - full=false (默认) 轻量版：仅同步主要指标
     - full=true  全量版：爬取全部20个标签页（约2-3分钟）
     """
+
     def _do_sync():
         if full:
             data = _scrape_f10_full(code)
@@ -1674,6 +1899,7 @@ async def sync_fundamental(code: str, background_tasks: BackgroundTasks, full: b
 @router.get("/{code}/history")
 async def get_fundamental_history(code: str, limit: int = 8):
     """查询历史多报告期财务数据"""
+
     def _fetch():
         db = SessionLocal()
         try:
@@ -1693,15 +1919,15 @@ async def get_fundamental_history(code: str, limit: int = 8):
         "code": code,
         "history": [
             {
-                "report_date":    r.report_date,
-                "revenue":        r.revenue,
-                "revenue_yoy":    r.revenue_yoy,
-                "net_profit":     r.net_profit,
+                "report_date": r.report_date,
+                "revenue": r.revenue,
+                "revenue_yoy": r.revenue_yoy,
+                "net_profit": r.net_profit,
                 "net_profit_yoy": r.net_profit_yoy,
-                "roe_weighted":   r.roe_weighted,
-                "gross_margin":   r.gross_margin,
-                "debt_ratio":     r.debt_ratio,
-                "eps_basic":      r.eps_basic,
+                "roe_weighted": r.roe_weighted,
+                "gross_margin": r.gross_margin,
+                "debt_ratio": r.debt_ratio,
+                "eps_basic": r.eps_basic,
             }
             for r in rows
         ],
@@ -1716,77 +1942,134 @@ async def get_fundamental_full(code: str):
     - 经营分析、股东研究、同行比较
     - 公司概况/高管/股本、资金流向/龙虎榜、研究报告
     """
+
     def _fetch_all():
         db = SessionLocal()
         try:
-            snap    = db.query(StockF10Snapshot).filter_by(code=code).first()
-            biz     = db.query(StockF10BusinessAnalysis).filter_by(code=code).first()
-            sh      = db.query(StockF10ShareholderInfo).filter_by(code=code).first()
-            pc      = db.query(StockF10PeerComparison).filter_by(code=code).first()
-            cp      = db.query(StockF10CompanyProfile).filter_by(code=code).first()
-            ff      = db.query(StockF10FundFlow).filter_by(code=code).first()
-            divs    = db.query(StockF10DividendHistory).filter_by(code=code).order_by(
-                StockF10DividendHistory.announce_date.desc()).limit(10).all()
-            fcs     = db.query(StockF10InstitutionForecast).filter_by(code=code).order_by(
-                StockF10InstitutionForecast.report_date.desc()).limit(20).all()
-            rrs     = db.query(StockF10ResearchReport).filter_by(code=code).order_by(
-                StockF10ResearchReport.report_date.desc()).limit(10).all()
-            stmts   = db.query(StockF10FinancialStatement).filter_by(code=code).order_by(
-                StockF10FinancialStatement.report_date.desc()).limit(6).all()
+            snap = db.query(StockF10Snapshot).filter_by(code=code).first()
+            biz = db.query(StockF10BusinessAnalysis).filter_by(code=code).first()
+            sh = db.query(StockF10ShareholderInfo).filter_by(code=code).first()
+            pc = db.query(StockF10PeerComparison).filter_by(code=code).first()
+            cp = db.query(StockF10CompanyProfile).filter_by(code=code).first()
+            ff = db.query(StockF10FundFlow).filter_by(code=code).first()
+            divs = (
+                db.query(StockF10DividendHistory)
+                .filter_by(code=code)
+                .order_by(StockF10DividendHistory.announce_date.desc())
+                .limit(10)
+                .all()
+            )
+            fcs = (
+                db.query(StockF10InstitutionForecast)
+                .filter_by(code=code)
+                .order_by(StockF10InstitutionForecast.report_date.desc())
+                .limit(20)
+                .all()
+            )
+            rrs = (
+                db.query(StockF10ResearchReport)
+                .filter_by(code=code)
+                .order_by(StockF10ResearchReport.report_date.desc())
+                .limit(10)
+                .all()
+            )
+            stmts = (
+                db.query(StockF10FinancialStatement)
+                .filter_by(code=code)
+                .order_by(StockF10FinancialStatement.report_date.desc())
+                .limit(6)
+                .all()
+            )
             return snap, biz, sh, pc, cp, ff, divs, fcs, rrs, stmts
         finally:
             db.close()
 
-    snap, biz, sh, pc, cp, ff, divs, fcs, rrs, stmts = await run_in_threadpool(_fetch_all)
+    snap, biz, sh, pc, cp, ff, divs, fcs, rrs, stmts = await run_in_threadpool(
+        _fetch_all
+    )
 
     if not snap:
-        raise HTTPException(status_code=404, detail=f"No F10 data for {code}, please sync first: POST /api/fundamental/{code}/sync?full=true")
+        raise HTTPException(
+            status_code=404,
+            detail=f"No F10 data for {code}, please sync first: POST /api/fundamental/{code}/sync?full=true",
+        )
 
     return {
         "code": code,
         "source_url": _f10_url(code),
-        "updated_at": snap.updated_at.strftime("%Y-%m-%d %H:%M") if snap and snap.updated_at else None,
+        "updated_at": snap.updated_at.strftime("%Y-%m-%d %H:%M")
+        if snap and snap.updated_at
+        else None,
         "snapshot": {
             "report_period": snap.report_period,
-            "eps_basic": snap.eps_basic, "eps_diluted": snap.eps_diluted,
-            "nav_per_share": snap.nav_per_share, "cfps": snap.cfps,
-            "pe_ttm": snap.pe_ttm, "pe_static": snap.pe_static, "pb": snap.pb,
-            "roe_weighted": snap.roe_weighted, "roa_weighted": snap.roa_weighted,
-            "gross_margin": snap.gross_margin, "net_margin": snap.net_margin,
-            "revenue_yoy": snap.revenue_yoy, "net_profit_yoy": snap.net_profit_yoy,
+            "eps_basic": snap.eps_basic,
+            "eps_diluted": snap.eps_diluted,
+            "nav_per_share": snap.nav_per_share,
+            "cfps": snap.cfps,
+            "pe_ttm": snap.pe_ttm,
+            "pe_static": snap.pe_static,
+            "pb": snap.pb,
+            "roe_weighted": snap.roe_weighted,
+            "roa_weighted": snap.roa_weighted,
+            "gross_margin": snap.gross_margin,
+            "net_margin": snap.net_margin,
+            "revenue_yoy": snap.revenue_yoy,
+            "net_profit_yoy": snap.net_profit_yoy,
             "deducted_profit_yoy": snap.deducted_profit_yoy,
-            "debt_ratio": snap.debt_ratio, "current_ratio": snap.current_ratio,
+            "debt_ratio": snap.debt_ratio,
+            "current_ratio": snap.current_ratio,
         },
         "business_analysis": {
-            "main_business_breakdown": json.loads(biz.main_business_breakdown) if biz and biz.main_business_breakdown else None,
+            "main_business_breakdown": json.loads(biz.main_business_breakdown)
+            if biz and biz.main_business_breakdown
+            else None,
             "rd_expense_ratio": biz.rd_expense_ratio if biz else None,
             "business_review": biz.business_review if biz else None,
-        } if biz else None,
+        }
+        if biz
+        else None,
         "shareholder": {
             "report_date": sh.report_date,
-            "top10_holders": sh.top10_holders[:2000] if sh and sh.top10_holders else None,
-        } if sh else None,
+            "top10_holders": sh.top10_holders[:2000]
+            if sh and sh.top10_holders
+            else None,
+        }
+        if sh
+        else None,
         "peer_comparison": {
             "industry_name": pc.industry_name,
             "content": pc.content_text[:2000] if pc and pc.content_text else None,
-        } if pc else None,
+        }
+        if pc
+        else None,
         "company_profile": {
-            "main_business": cp.main_business[:1000] if cp and cp.main_business else None,
-            "core_competence": cp.core_competence[:500] if cp and cp.core_competence else None,
-            "concept_sectors": cp.concept_sectors[:500] if cp and cp.concept_sectors else None,
-        } if cp else None,
+            "main_business": cp.main_business[:1000]
+            if cp and cp.main_business
+            else None,
+            "core_competence": cp.core_competence[:500]
+            if cp and cp.core_competence
+            else None,
+            "concept_sectors": cp.concept_sectors[:500]
+            if cp and cp.concept_sectors
+            else None,
+        }
+        if cp
+        else None,
         "fund_flow": {
             "margin_balance": ff.margin_balance,
             "last_dragon_date": ff.last_dragon_date,
             "last_dragon_reason": ff.last_dragon_reason,
-        } if ff else None,
+        }
+        if ff
+        else None,
         "dividends": [
             {
                 "report_period": d.report_period,
                 "dividend_plan": d.dividend_plan,
                 "dividend_per_share": d.dividend_per_share,
                 "ex_div_date": d.ex_div_date,
-            } for d in divs
+            }
+            for d in divs
         ],
         "institution_forecasts": [
             {
@@ -1795,7 +2078,8 @@ async def get_fundamental_full(code: str):
                 "eps_forecast": f.eps_forecast,
                 "rating": f.rating,
                 "report_date": f.report_date,
-            } for f in fcs
+            }
+            for f in fcs
         ],
         "research_reports": [
             {
@@ -1803,7 +2087,8 @@ async def get_fundamental_full(code: str):
                 "institution": r.institution,
                 "rating": r.rating,
                 "title": r.title,
-            } for r in rrs
+            }
+            for r in rrs
         ],
         "financial_statements": [
             {
@@ -1811,7 +2096,8 @@ async def get_fundamental_full(code: str):
                 "tab_label": s.tab_label,
                 "report_date": s.report_date,
                 "content_preview": s.content_text[:500] if s.content_text else None,
-            } for s in stmts
+            }
+            for s in stmts
         ],
     }
 
@@ -1822,7 +2108,7 @@ async def get_finance_view(code: str, background_tasks: BackgroundTasks):
     财务 Tab 专用接口：
     - 立即从数据库返回：营收业务占比（饼图数据）+ 近5年财报历史（表格数据）
     - 同时在后台触发全量 F10 同步（异步，不阻塞响应）
-    
+
     响应结构：
     {
       "code": "...",
@@ -1831,6 +2117,7 @@ async def get_finance_view(code: str, background_tasks: BackgroundTasks):
       "income_history": [{"report_date": "2025-12-31", "revenue": 1234.56, "net_profit": 56.78, ...}, ...]
     }
     """
+
     def _fetch_db():
         """
         F10 表中部分字段（main_business_breakdown、raw_json 等）可能含非 UTF-8 乱码数据。
@@ -1858,15 +2145,19 @@ async def get_finance_view(code: str, background_tasks: BackgroundTasks):
             try:
                 row = raw_conn.execute(
                     "SELECT main_business_breakdown FROM stock_f10_business_analysis WHERE code=?",
-                    (code,)
+                    (code,),
                 ).fetchone()
                 if row and row[0]:
                     decoded = _safe_str(row[0])
+
                     class _BizProxy:
                         main_business_breakdown = decoded
+
                     biz = _BizProxy()
             except Exception as e_biz:
-                logger.warning(f"[finance-view] {code} 读取 business_analysis 失败，跳过: {e_biz}")
+                logger.warning(
+                    f"[finance-view] {code} 读取 business_analysis 失败，跳过: {e_biz}"
+                )
 
             # ---- 读取 financial_history（纯数值列，bytes 模式下仍返回 bytes for TEXT） ----
             hist_rows = raw_conn.execute(
@@ -1876,25 +2167,36 @@ async def get_finance_view(code: str, background_tasks: BackgroundTasks):
                    WHERE code=?
                    ORDER BY report_date DESC
                    LIMIT 20""",
-                (code,)
+                (code,),
             ).fetchall()
 
             class _HistProxy:
-                __slots__ = ("report_date", "revenue", "revenue_yoy", "net_profit",
-                             "net_profit_yoy", "deducted_profit", "gross_margin",
-                             "net_margin", "roe_weighted", "debt_ratio", "eps_basic")
+                __slots__ = (
+                    "report_date",
+                    "revenue",
+                    "revenue_yoy",
+                    "net_profit",
+                    "net_profit_yoy",
+                    "deducted_profit",
+                    "gross_margin",
+                    "net_margin",
+                    "roe_weighted",
+                    "debt_ratio",
+                    "eps_basic",
+                )
+
                 def __init__(self, row):
-                    self.report_date     = _safe_str(row[0])
-                    self.revenue         = row[1]
-                    self.revenue_yoy     = row[2]
-                    self.net_profit      = row[3]
-                    self.net_profit_yoy  = row[4]
+                    self.report_date = _safe_str(row[0])
+                    self.revenue = row[1]
+                    self.revenue_yoy = row[2]
+                    self.net_profit = row[3]
+                    self.net_profit_yoy = row[4]
                     self.deducted_profit = row[5]
-                    self.gross_margin    = row[6]
-                    self.net_margin      = row[7]
-                    self.roe_weighted    = row[8]
-                    self.debt_ratio      = row[9]
-                    self.eps_basic       = row[10]
+                    self.gross_margin = row[6]
+                    self.net_margin = row[7]
+                    self.roe_weighted = row[8]
+                    self.debt_ratio = row[9]
+                    self.eps_basic = row[10]
 
             hist = [_HistProxy(r) for r in hist_rows]
 
@@ -1905,23 +2207,31 @@ async def get_finance_view(code: str, background_tasks: BackgroundTasks):
                     """SELECT updated_at, report_period, revenue_yoy, net_profit_yoy,
                               roe_weighted, gross_margin, net_margin
                        FROM stock_f10_snapshot WHERE code=?""",
-                    (code,)
+                    (code,),
                 ).fetchone()
                 if snap_row:
                     from datetime import datetime as _dt
+
                     class _SnapProxy:
                         pass
+
                     s = _SnapProxy()
-                    s.updated_at      = _dt.fromisoformat(_safe_str(snap_row[0])) if snap_row[0] else None
-                    s.report_period   = _safe_str(snap_row[1]) if snap_row[1] else None
-                    s.revenue_yoy     = snap_row[2]
-                    s.net_profit_yoy  = snap_row[3]
-                    s.roe_weighted    = snap_row[4]
-                    s.gross_margin    = snap_row[5]
-                    s.net_margin      = snap_row[6]
+                    s.updated_at = (
+                        _dt.fromisoformat(_safe_str(snap_row[0]))
+                        if snap_row[0]
+                        else None
+                    )
+                    s.report_period = _safe_str(snap_row[1]) if snap_row[1] else None
+                    s.revenue_yoy = snap_row[2]
+                    s.net_profit_yoy = snap_row[3]
+                    s.roe_weighted = snap_row[4]
+                    s.gross_margin = snap_row[5]
+                    s.net_margin = snap_row[6]
                     snap = s
             except Exception as e_snap:
-                logger.warning(f"[finance-view] {code} 读取 snapshot 失败，跳过: {e_snap}")
+                logger.warning(
+                    f"[finance-view] {code} 读取 snapshot 失败，跳过: {e_snap}"
+                )
 
             return biz, hist, snap
         finally:
@@ -1958,64 +2268,79 @@ async def get_finance_view(code: str, background_tasks: BackgroundTasks):
                 continue
         except Exception:
             continue
-        income_history.append({
-            "report_date":      r.report_date,
-            "revenue":          r.revenue,
-            "revenue_yoy":      r.revenue_yoy,
-            "net_profit":       r.net_profit,
-            "net_profit_yoy":   r.net_profit_yoy,
-            "deducted_profit":  r.deducted_profit,
-            "gross_margin":     r.gross_margin,
-            "net_margin":       r.net_margin,
-            "roe_weighted":     r.roe_weighted,
-            "debt_ratio":       r.debt_ratio,
-            "eps_basic":        r.eps_basic,
-        })
+        income_history.append(
+            {
+                "report_date": r.report_date,
+                "revenue": r.revenue,
+                "revenue_yoy": r.revenue_yoy,
+                "net_profit": r.net_profit,
+                "net_profit_yoy": r.net_profit_yoy,
+                "deducted_profit": r.deducted_profit,
+                "gross_margin": r.gross_margin,
+                "net_margin": r.net_margin,
+                "roe_weighted": r.roe_weighted,
+                "debt_ratio": r.debt_ratio,
+                "eps_basic": r.eps_basic,
+            }
+        )
 
     # 若 stock_f10_financial_history 为空，从 stock_f10_financial_statement 直接解析（兜底）
     if not income_history:
         try:
-            fallback_rows = await run_in_threadpool(_build_history_from_statements, code)
+            fallback_rows = await run_in_threadpool(
+                _build_history_from_statements, code
+            )
             if fallback_rows:
                 income_history = fallback_rows
-                logger.info(f"[finance-view] {code} 从 financial_statement 兜底解析到 {len(income_history)} 条历史数据")
+                logger.info(
+                    f"[finance-view] {code} 从 financial_statement 兜底解析到 {len(income_history)} 条历史数据"
+                )
         except Exception as e:
             logger.warning(f"[finance-view] {code} 兜底解析失败: {e}")
 
     # 用 snapshot 补充最新一期缺失的 yoy/roe 数据（snapshot 有最近一期的指标快照）
     if income_history and snap:
         latest = income_history[0]
-        snap_date = snap.report_period if hasattr(snap, 'report_period') and snap.report_period else None
+        snap_date = (
+            snap.report_period
+            if hasattr(snap, "report_period") and snap.report_period
+            else None
+        )
         # 如果最新记录日期与 snapshot 一致（或 snapshot 无报告期），补充缺失字段
         if not snap_date or latest.get("report_date") == snap_date:
             for field, snap_field in [
-                ("revenue_yoy",    "revenue_yoy"),
+                ("revenue_yoy", "revenue_yoy"),
                 ("net_profit_yoy", "net_profit_yoy"),
-                ("roe_weighted",   "roe_weighted"),
-                ("gross_margin",   "gross_margin"),
-                ("net_margin",     "net_margin"),
+                ("roe_weighted", "roe_weighted"),
+                ("gross_margin", "gross_margin"),
+                ("net_margin", "net_margin"),
             ]:
                 if latest.get(field) is None:
                     v = getattr(snap, snap_field, None)
                     if v is not None:
                         latest[field] = v
 
-    # 后台触发全量同步（不阻塞）
-    def _bg_sync():
-        try:
-            data = _scrape_f10_full(code)
-            _upsert_f10_full(code, data)
-            logger.info(f"[finance-view] {code} 后台全量同步完成")
-        except Exception as e:
-            logger.warning(f"[finance-view] {code} 后台同步失败: {e}")
+    # 后台触发全量同步（不阻塞）——仅当数据库无数据时才触发
+    has_data = bool(business_breakdown or income_history)
+    if not has_data:
 
-    background_tasks.add_task(run_in_threadpool, _bg_sync)
+        def _bg_sync():
+            try:
+                data = _scrape_f10_full(code)
+                _upsert_f10_full(code, data)
+                logger.info(f"[finance-view] {code} 后台全量同步完成")
+            except Exception as e:
+                logger.warning(f"[finance-view] {code} 后台同步失败: {e}")
+
+        background_tasks.add_task(run_in_threadpool, _bg_sync)
 
     return {
-        "code":               code,
-        "updated_at":         snap.updated_at.strftime("%Y-%m-%d %H:%M") if snap and snap.updated_at else None,
-        "has_data":           bool(business_breakdown or income_history),
+        "code": code,
+        "updated_at": snap.updated_at.strftime("%Y-%m-%d %H:%M")
+        if snap and snap.updated_at
+        else None,
+        "has_data": has_data,
         "business_breakdown": business_breakdown,
-        "income_history":     income_history,
-        "syncing":            True,
+        "income_history": income_history,
+        "syncing": not has_data,
     }

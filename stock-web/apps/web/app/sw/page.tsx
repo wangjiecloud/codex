@@ -14,6 +14,7 @@ import {
   Trash2,
   TrendingUp,
   Activity,
+  Layers,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -2779,6 +2780,441 @@ function RotationModal({ onClose }: { onClose: () => void }) {
   );
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// 连板天梯弹窗
+// ──────────────────────────────────────────────────────────────────────────────
+
+interface LimitUpStock {
+  code: string;
+  name: string;
+  consecutiveDays: number;
+  changePct: number;
+  isYizi: boolean;
+  sealTime: string;
+  industry: string;
+  boards: { code: string; name: string }[];
+}
+
+interface LimitUpLevel {
+  days: number;
+  stocks: LimitUpStock[];
+}
+
+interface LimitUpLadderData {
+  date: string;
+  totalCount: number;
+  ladder: LimitUpLevel[];
+  sectorSummary: { code: string; name: string; count: number }[];
+  allSectors: { name: string; count: number }[];
+}
+
+interface BrokenStock {
+  code: string;
+  name: string;
+  prevConsecutiveDays: number;
+  changePct: number;
+  isPrevYizi: boolean;
+  prevSealTime: string;
+  industry: string;
+}
+
+interface BrokenLevel {
+  days: number;
+  stocks: BrokenStock[];
+}
+
+interface BrokenData {
+  date: string;
+  totalCount: number;
+  broken: BrokenLevel[];
+  allSectors: { name: string; count: number }[];
+}
+
+function LimitUpLadderModal({ onClose }: { onClose: () => void }) {
+  const router = useRouter();
+  const [activeTab, setActiveTab] = useState<"ladder" | "broken">("ladder");
+  const [data, setData] = useState<LimitUpLadderData | null>(null);
+  const [brokenData, setBrokenData] = useState<BrokenData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [brokenLoading, setBrokenLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [brokenError, setBrokenError] = useState("");
+  const brokenFetched = useRef(false);
+
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const res = await fetch(`${API}/api/sw-industry/limit-up-ladder`, {
+        cache: "no-store",
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json: LimitUpLadderData = await res.json();
+      setData(json);
+    } catch {
+      setError("数据获取失败，请稍后重试");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const fetchBrokenData = useCallback(async () => {
+    setBrokenLoading(true);
+    setBrokenError("");
+    try {
+      const res = await fetch(`${API}/api/sw-industry/limit-up-broken`, {
+        cache: "no-store",
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json: BrokenData = await res.json();
+      setBrokenData(json);
+      brokenFetched.current = true;
+    } catch {
+      setBrokenError("数据获取失败，请稍后重试");
+    } finally {
+      setBrokenLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  useEffect(() => {
+    if (activeTab === "broken" && !brokenFetched.current) {
+      fetchBrokenData();
+    }
+  }, [activeTab, fetchBrokenData]);
+
+  const formatDate = (d: string) => {
+    if (!d) return "";
+    const m = d.slice(5, 7);
+    const day = d.slice(8, 10);
+    return `${parseInt(m)}月${parseInt(day)}日`;
+  };
+
+  const currentSectors =
+    activeTab === "ladder" ? data?.allSectors : brokenData?.allSectors;
+  const sectorColor = activeTab === "ladder" ? "#e8a235" : "#e84444";
+
+  const handleRefresh = () => {
+    if (activeTab === "ladder") {
+      fetchData();
+    } else {
+      brokenFetched.current = false;
+      fetchBrokenData();
+    }
+  };
+  const isRefreshing = activeTab === "ladder" ? loading : brokenLoading;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70"
+      onClick={onClose}
+    >
+      <div
+        className="relative flex flex-col bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-xl shadow-2xl overflow-hidden"
+        style={{ width: "min(1100px, 96vw)", maxHeight: "92vh" }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* ── 标题栏 ── */}
+        <div className="flex flex-col gap-2 px-5 pt-3 pb-0 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] flex-shrink-0">
+          {/* 第一行：标题 + 操作 */}
+          <div className="flex items-center gap-3">
+            <Layers size={15} className="text-[#e8a235] flex-shrink-0" />
+            <span className="text-[14px] font-bold text-[var(--text-primary)]">
+              {data ? `${formatDate(data.date)} 连板天梯` : "连板天梯"}
+            </span>
+            {activeTab === "ladder" && data && (
+              <span className="text-[11px] text-[var(--text-tertiary)]">
+                今日涨停 {data.totalCount} 只
+              </span>
+            )}
+            {activeTab === "broken" && brokenData && (
+              <span className="text-[11px] text-[var(--text-tertiary)]">
+                断板 {brokenData.totalCount} 只
+              </span>
+            )}
+            <div className="ml-auto flex items-center gap-2">
+              <button
+                onClick={handleRefresh}
+                disabled={isRefreshing}
+                className="flex items-center gap-1 text-[11px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
+              >
+                <RefreshCw
+                  size={11}
+                  className={isRefreshing ? "animate-spin" : ""}
+                />
+                刷新
+              </button>
+              <button
+                onClick={onClose}
+                className="text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors"
+              >
+                <X size={16} />
+              </button>
+            </div>
+          </div>
+
+          {/* 第二行：行业分布摘要 */}
+          {currentSectors && currentSectors.length > 0 && (
+            <div className="flex items-center gap-1.5 flex-wrap text-[11px] pb-2">
+              {currentSectors.slice(0, 8).map((s) => (
+                <span
+                  key={s.name}
+                  className="font-medium cursor-default"
+                  style={{ color: sectorColor }}
+                >
+                  {s.name}({s.count})
+                </span>
+              ))}
+              {currentSectors.length > 8 && (
+                <span className="text-[var(--text-tertiary)]">
+                  其他(
+                  {currentSectors.slice(8).reduce((s, i) => s + i.count, 0)})
+                </span>
+              )}
+            </div>
+          )}
+
+          {/* 第三行：Tab 切换 */}
+          <div className="flex gap-0 -mb-px">
+            <button
+              onClick={() => setActiveTab("ladder")}
+              className={cn(
+                "px-4 py-1.5 text-[12px] font-medium border-b-2 transition-colors",
+                activeTab === "ladder"
+                  ? "border-[#e8a235] text-[#e8a235]"
+                  : "border-transparent text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]",
+              )}
+            >
+              连板天梯
+            </button>
+            <button
+              onClick={() => setActiveTab("broken")}
+              className={cn(
+                "px-4 py-1.5 text-[12px] font-medium border-b-2 transition-colors",
+                activeTab === "broken"
+                  ? "border-[#e84444] text-[#e84444]"
+                  : "border-transparent text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]",
+              )}
+            >
+              断板股
+              {brokenData && brokenData.totalCount > 0 && (
+                <span className="ml-1 text-[10px] text-[var(--text-tertiary)]">
+                  ({brokenData.totalCount})
+                </span>
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* ── 内容区域 ── */}
+        <div className="flex-1 overflow-y-auto">
+          {/* 连板天梯 Tab */}
+          {activeTab === "ladder" && (
+            <>
+              {loading && (
+                <div className="flex items-center justify-center h-40 text-[var(--text-tertiary)] text-sm">
+                  加载中...
+                </div>
+              )}
+              {error && !loading && (
+                <div className="flex items-center justify-center h-40 text-[#e84444] text-sm">
+                  {error}
+                </div>
+              )}
+              {!loading && !error && data && (
+                <div className="flex flex-col">
+                  {data.ladder.map((level) => (
+                    <div
+                      key={level.days}
+                      className="flex border-b border-[var(--border-color)] last:border-b-0"
+                    >
+                      {/* 左侧：连板数标签 */}
+                      <div className="flex-shrink-0 w-[80px] flex flex-col items-center justify-center py-3 border-r border-[var(--border-color)] bg-[var(--bg-secondary)]">
+                        {level.days >= 7 ? (
+                          <span className="text-[20px] font-black text-[#e84444] leading-tight">
+                            {level.days}板
+                          </span>
+                        ) : level.days >= 4 ? (
+                          <span className="text-[17px] font-bold text-[#e84444] leading-tight">
+                            {level.days}板
+                          </span>
+                        ) : level.days >= 2 ? (
+                          <span className="text-[15px] font-semibold text-[#e84444] leading-tight">
+                            {level.days}板
+                          </span>
+                        ) : (
+                          <span className="text-[13px] font-medium text-[var(--text-secondary)] leading-tight">
+                            首板
+                          </span>
+                        )}
+                        <span className="text-[10px] text-[var(--text-tertiary)] mt-0.5">
+                          {level.stocks.length}只
+                        </span>
+                      </div>
+                      {/* 右侧：股票卡片 */}
+                      <div className="flex-1 flex flex-wrap gap-x-4 gap-y-2 p-3">
+                        {level.stocks.map((stock) => (
+                          <div
+                            key={stock.code}
+                            className="flex flex-col gap-0 min-w-[76px] cursor-pointer group"
+                            onClick={() => {
+                              onClose();
+                              router.push(
+                                `/stock/${stock.code}?src=limit_up_ladder`,
+                              );
+                            }}
+                          >
+                            <div className="flex items-center gap-1 h-4">
+                              {stock.isYizi ? (
+                                <span className="text-[9px] bg-[#e84444] text-white px-1 rounded font-medium leading-4">
+                                  一字板
+                                </span>
+                              ) : stock.sealTime ? (
+                                <span className="text-[10px] text-[var(--text-tertiary)]">
+                                  {stock.sealTime}
+                                </span>
+                              ) : (
+                                <span
+                                  className={cn(
+                                    "text-[10px] font-medium",
+                                    stock.changePct >= 0
+                                      ? "text-[#e84444]"
+                                      : "text-[#09d464]",
+                                  )}
+                                >
+                                  {stock.changePct > 0 ? "+" : ""}
+                                  {stock.changePct.toFixed(2)}%
+                                </span>
+                              )}
+                            </div>
+                            <span className="text-[13px] font-semibold text-[var(--text-primary)] leading-tight group-hover:text-[#e84444] transition-colors">
+                              {stock.name || stock.code}
+                            </span>
+                            <span className="text-[10px] text-[var(--text-tertiary)] leading-tight">
+                              {stock.industry || stock.code}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                  {data.ladder.length === 0 && (
+                    <div className="text-center text-[var(--text-tertiary)] text-sm py-12">
+                      暂无连板数据
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+
+          {/* 断板股 Tab */}
+          {activeTab === "broken" && (
+            <>
+              {brokenLoading && (
+                <div className="flex items-center justify-center h-40 text-[var(--text-tertiary)] text-sm">
+                  加载中...
+                </div>
+              )}
+              {brokenError && !brokenLoading && (
+                <div className="flex items-center justify-center h-40 text-[#e84444] text-sm">
+                  {brokenError}
+                </div>
+              )}
+              {!brokenLoading && !brokenError && brokenData && (
+                <div className="flex flex-col">
+                  {brokenData.broken.map((level) => (
+                    <div
+                      key={level.days}
+                      className="flex border-b border-[var(--border-color)] last:border-b-0"
+                    >
+                      {/* 左侧：昨日连板数标签 */}
+                      <div className="flex-shrink-0 w-[80px] flex flex-col items-center justify-center py-3 border-r border-[var(--border-color)] bg-[var(--bg-secondary)]">
+                        {level.days >= 7 ? (
+                          <span className="text-[20px] font-black text-[var(--text-secondary)] leading-tight line-through decoration-[#e84444] decoration-2">
+                            {level.days}板
+                          </span>
+                        ) : level.days >= 4 ? (
+                          <span className="text-[17px] font-bold text-[var(--text-secondary)] leading-tight line-through decoration-[#e84444] decoration-2">
+                            {level.days}板
+                          </span>
+                        ) : level.days >= 2 ? (
+                          <span className="text-[15px] font-semibold text-[var(--text-secondary)] leading-tight line-through decoration-[#e84444] decoration-2">
+                            {level.days}板
+                          </span>
+                        ) : (
+                          <span className="text-[13px] font-medium text-[var(--text-tertiary)] leading-tight line-through decoration-[#e84444] decoration-2">
+                            首板
+                          </span>
+                        )}
+                        <span className="text-[9px] text-[var(--text-tertiary)] mt-0.5">
+                          昨日{level.days}板
+                        </span>
+                        <span className="text-[10px] text-[var(--text-tertiary)]">
+                          {level.stocks.length}只
+                        </span>
+                      </div>
+                      {/* 右侧：股票卡片 */}
+                      <div className="flex-1 flex flex-wrap gap-x-4 gap-y-2 p-3">
+                        {level.stocks.map((stock) => (
+                          <div
+                            key={stock.code}
+                            className="flex flex-col gap-0 min-w-[76px] cursor-pointer group"
+                            onClick={() => {
+                              onClose();
+                              router.push(
+                                `/stock/${stock.code}?src=limit_up_broken`,
+                              );
+                            }}
+                          >
+                            {/* 今日涨跌幅 */}
+                            <div className="flex items-center gap-1 h-4">
+                              {stock.isPrevYizi && (
+                                <span className="text-[9px] bg-[var(--text-tertiary)] text-white px-1 rounded font-medium leading-4 mr-0.5">
+                                  昨一字
+                                </span>
+                              )}
+                              <span
+                                className={cn(
+                                  "text-[10px] font-medium",
+                                  stock.changePct >= 0
+                                    ? "text-[#e84444]"
+                                    : "text-[#09d464]",
+                                )}
+                              >
+                                {stock.changePct > 0 ? "+" : ""}
+                                {stock.changePct.toFixed(2)}%
+                              </span>
+                            </div>
+                            <span className="text-[13px] font-semibold text-[var(--text-primary)] leading-tight group-hover:text-[#09d464] transition-colors">
+                              {stock.name || stock.code}
+                            </span>
+                            <span className="text-[10px] text-[var(--text-tertiary)] leading-tight">
+                              {stock.industry || stock.code}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                  {brokenData.broken.length === 0 && (
+                    <div className="text-center text-[var(--text-tertiary)] text-sm py-12">
+                      今日暂无断板数据
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function SwIndustryPage() {
   const router = useRouter();
 
@@ -2813,6 +3249,7 @@ export default function SwIndustryPage() {
   const [showRotation, setShowRotation] = useState(false);
   const [showFundFlow, setShowFundFlow] = useState(false);
   const [showLiveFlow, setShowLiveFlow] = useState(false);
+  const [showLimitUpLadder, setShowLimitUpLadder] = useState(false);
   const [onlyIndustryBoards, setOnlyIndustryBoards] = useState(() => {
     const s = loadSwPageState();
     return s?.onlyIndustryBoards ?? false;
@@ -3498,6 +3935,14 @@ export default function SwIndustryPage() {
           资金流向
         </button>
 
+        <button
+          onClick={() => setShowLimitUpLadder(true)}
+          className="flex items-center gap-1.5 text-xs text-[var(--text-secondary)] hover:text-[#e8a235] transition-colors border border-[var(--border-color)] hover:border-[#e8a235]/50 px-2.5 py-1 rounded-md"
+        >
+          <Layers size={13} />
+          连板分析
+        </button>
+
         <label className="flex items-center gap-1.5 cursor-pointer select-none">
           <input
             type="checkbox"
@@ -4131,6 +4576,9 @@ export default function SwIndustryPage() {
       {showRotation && <RotationModal onClose={() => setShowRotation(false)} />}
       {showFundFlow && <FundFlowModal onClose={() => setShowFundFlow(false)} />}
       {showLiveFlow && <LiveFlowModal onClose={() => setShowLiveFlow(false)} />}
+      {showLimitUpLadder && (
+        <LimitUpLadderModal onClose={() => setShowLimitUpLadder(false)} />
+      )}
     </div>
   );
 }

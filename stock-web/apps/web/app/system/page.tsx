@@ -83,7 +83,12 @@ interface GubaStat {
 interface MonitorSummary {
   stats: SystemStats;
   flashStats: FlashCatStat[];
-  swIndustry: { count: number; updatedAt: string | null };
+  swIndustry: {
+    count: number;
+    updatedAt: string | null;
+    constituentCount: number;
+    constituentUpdatedAt: string | null;
+  };
   conceptBoard: { count: number; updatedAt: string | null };
   fundFlowDates: { "10d": string[] };
   globalIndices: { count: number; updatedAt: string | null };
@@ -118,10 +123,17 @@ function SwIndustryMonitorInline({
   data,
 }: {
   onTaskClick?: (taskId: string) => void;
-  data?: { count: number; updatedAt: string | null };
+  data?: {
+    count: number;
+    updatedAt: string | null;
+    constituentCount: number;
+    constituentUpdatedAt: string | null;
+  };
 }) {
   const boardCount = data?.count ?? 0;
   const lastSync = data?.updatedAt ?? null;
+  const constCount = data?.constituentCount ?? 0;
+  const constLastSync = data?.constituentUpdatedAt ?? null;
   return (
     <div className="bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg px-3 py-2.5">
       <div className="flex items-center gap-1.5 mb-2">
@@ -130,7 +142,7 @@ function SwIndustryMonitorInline({
           申万行业板块
         </span>
         <span className="ml-auto text-[10px] text-[var(--text-tertiary)]">
-          每交易日
+          每日 18:30
         </span>
       </div>
       <div className="flex gap-4">
@@ -147,11 +159,22 @@ function SwIndustryMonitorInline({
         </div>
         <div>
           <div className="text-[10px] text-[var(--text-tertiary)]">
+            成分股数
+          </div>
+          <button
+            onClick={() => onTaskClick?.("sw_constituents_sync")}
+            className="text-sm font-semibold text-[var(--text-primary)] cursor-pointer hover:text-[var(--accent)] hover:underline underline-offset-2 transition-colors text-left"
+          >
+            {constCount || "--"}
+          </button>
+        </div>
+        <div>
+          <div className="text-[10px] text-[var(--text-tertiary)]">
             最近同步
           </div>
           <div className="text-xs text-[var(--text-secondary)]">
-            {lastSync
-              ? new Date(lastSync)
+            {constLastSync || lastSync
+              ? new Date(constLastSync || lastSync!)
                   .toLocaleString("zh-CN", { hour12: false })
                   .slice(5)
               : "--"}

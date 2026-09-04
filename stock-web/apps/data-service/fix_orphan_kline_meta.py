@@ -8,6 +8,9 @@
 """
 
 import sys
+import random
+import string
+import time
 import os
 
 sys.path.insert(0, os.path.dirname(__file__))
@@ -45,7 +48,10 @@ if not orphan_codes:
 # ── 2. 从 baostock 拉取基本信息 ──────────────────────────────
 import baostock as bs
 
-lg = bs.login()
+lg = bs.login(
+    user_id="".join(random.choices(string.ascii_lowercase + string.digits, k=8)),
+    password="123456",
+)
 if lg.error_code != "0":
     print(f"baostock 登录失败: {lg.error_msg}")
     sys.exit(1)

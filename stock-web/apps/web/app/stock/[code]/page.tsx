@@ -526,17 +526,54 @@ export default function StockDetailPage() {
   }, [code]);
 
   useEffect(() => {
-    // 当切换到财务 tab 时：先从数据库加载 finance-view 数据，同时后台同步
     if (activeTab !== "财务") return;
+    let cancelled = false;
     setFinanceLoading(true);
-    fetch(`http://localhost:8000/api/fundamental/${code}/finance-view`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
+
+    const fetchFinanceView = async () => {
+      try {
+        const r = await fetch(
+          `http://localhost:8000/api/fundamental/${code}/finance-view`,
+        );
+        if (!r.ok) return;
+        const data = await r.json();
+        if (cancelled) return;
         if (data) setFinanceView(data as FinanceViewData);
-      })
-      .catch(() => {})
-      .finally(() => setFinanceLoading(false));
+      } catch {
+      } finally {
+        if (!cancelled) setFinanceLoading(false);
+      }
+    };
+
+    fetchFinanceView();
   }, [code, activeTab]);
+
+  useEffect(() => {
+    if (activeTab !== "财务") return;
+    if (!financeView?.syncing) return;
+    let cancelled = false;
+    const pollInterval = setInterval(async () => {
+      if (cancelled) return;
+      try {
+        const r = await fetch(
+          `http://localhost:8000/api/fundamental/${code}/finance-view`,
+        );
+        if (!r.ok) return;
+        const data = await r.json();
+        if (cancelled) return;
+        if (data) {
+          setFinanceView(data as FinanceViewData);
+          if (!data.syncing || data.has_data) {
+            clearInterval(pollInterval);
+          }
+        }
+      } catch {}
+    }, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(pollInterval);
+    };
+  }, [code, activeTab, financeView?.syncing]);
 
   // 当切换到资讯/公告 tab 时：先读库展示已有数据，同时后台静默同步
   useEffect(() => {

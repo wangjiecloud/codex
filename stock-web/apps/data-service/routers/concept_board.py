@@ -608,11 +608,10 @@ def _sync_missing_industry_stocks_klines():
         except Exception as e:
             print(f"[sync_missing_industry_stocks] {code} error: {e}")
             fail_count += 1
-            # 出错后多等一会，让 baostock 连接恢复
+            # 出错后多等一会，避免高频请求
             time.sleep(2.0)
             continue
-        # 正常调用间隔 0.3s，避免单连接高频请求导致 baostock 错误
-        time.sleep(0.3)
+        # 正常调用间隔 0.3s，避免高频请求被限频
     print(
         f"[sync_missing_industry_stocks] done: success={success_count}, fail={fail_count}, total={len(missing)}"
     )

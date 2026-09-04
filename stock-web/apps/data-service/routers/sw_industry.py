@@ -247,51 +247,66 @@ def _fetch_all_stocks_by_sw2() -> dict:
 
 
 def sync_sw_constituents_bulk() -> int:
-    try:
-        industry_stocks = _fetch_all_stocks_by_sw2()
-    except Exception as e:
-        from routers.system import sched_log
-
-        sched_log("error", f"申万成分股批量拉取失败: {e}", source="scheduler")
-        return 0
+    import akshare as ak
+    from routers.system import sched_log
+    import time as _time
 
     db = SessionLocal()
     try:
-        boards = db.query(SwIndustry).all()
-        name_to_code = {b.name: b.code for b in boards}
+        boards = db.query(SwIndustry.code, SwIndustry.name).all()
+        if not boards:
+            sched_log(
+                "warning",
+                "申万行业表为空，请先执行 sync_sw_industries",
+                source="scheduler",
+            )
+            return 0
 
         total = 0
-        for ind_name, stocks in industry_stocks.items():
-            board_code = name_to_code.get(ind_name)
-            if not board_code:
-                continue
+        errors = 0
+        for board_code, board_name in boards:
+            try:
+                df = ak.index_component_sw(symbol=board_code)
+                if df is None or df.empty:
+                    continue
+                for _, row in df.iterrows():
+                    code = str(row["证券代码"]).strip()
+                    sname = str(row["证券名称"]).strip()
+                    if not code or not sname:
+                        continue
+                    _upsert_stock_meta(db, code, sname)
 
-            for stock in stocks:
-                code = stock["code"]
-                sname = stock["name"]
-                _upsert_stock_meta(db, code, sname)
-
-                stmt = sqlite_insert(SwIndustryConstituent).values(
-                    board_code=board_code,
-                    stock_code=code,
-                    stock_name=sname,
-                    updated_at=datetime.utcnow(),
-                )
-                stmt = stmt.on_conflict_do_update(
-                    index_elements=["board_code", "stock_code"],
-                    set_={
-                        "stock_name": stmt.excluded.stock_name,
-                        "updated_at": stmt.excluded.updated_at,
-                    },
-                )
-                db.execute(stmt)
-                total += 1
-
-        db.commit()
-        from routers.system import sched_log
+                    stmt = sqlite_insert(SwIndustryConstituent).values(
+                        board_code=board_code,
+                        stock_code=code,
+                        stock_name=sname,
+                        updated_at=datetime.utcnow(),
+                    )
+                    stmt = stmt.on_conflict_do_update(
+                        index_elements=["board_code", "stock_code"],
+                        set_={
+                            "stock_name": stmt.excluded.stock_name,
+                            "updated_at": stmt.excluded.updated_at,
+                        },
+                    )
+                    db.execute(stmt)
+                    total += 1
+                db.commit()
+            except Exception as e:
+                db.rollback()
+                errors += 1
+                if errors <= 3:
+                    sched_log(
+                        "error",
+                        f"申万成分股[{board_code}]同步失败: {e}",
+                        source="scheduler",
+                    )
+            _time.sleep(0.1)
 
         sched_log(
-            "success", f"申万成分股批量同步完成，共 {total} 条", source="scheduler"
+            "success",
+            f"申万成分股批量同步完成，共 {total} 条（{errors} 个行业失败）",
+            source="scheduler",
         )
         return total
     except Exception as e:
@@ -1081,3 +1096,322 @@ def trigger_sync_klines(force: bool = Query(default=False)):
     """后台异步同步板块轮动 K 线（供前端进入页面时触发）\n\nforce=true 时跳过「今日已更新」判断，强制补拉最新数据。"""
     threading.Thread(target=_sync_rotation_klines, args=(force,), daemon=True).start()
     return {"message": "kline sync started", "force": force}
+
+
+@router.get("/limit-up-ladder")
+def get_limit_up_ladder(
+    date: str = Query(default=None, description="交易日期，默认取最新，格式 YYYYMMDD"),
+    db: Session = Depends(get_db),
+):
+    """连板天梯：从东方财富涨停板池获取今日连板数据，按连板数分层展示及板块汇总。"""
+    import akshare as ak
+    import pandas as pd
+    from datetime import date as _date
+
+    # 确定查询日期
+    if date:
+        query_date = date.replace("-", "")  # 支持 YYYY-MM-DD 或 YYYYMMDD
+    else:
+        query_date = _date.today().strftime("%Y%m%d")
+
+    # 格式化显示日期 YYYY-MM-DD
+    display_date = f"{query_date[:4]}-{query_date[4:6]}-{query_date[6:8]}"
+
+    try:
+        df = ak.stock_zt_pool_em(date=query_date)
+    except Exception as e:
+        return {
+            "date": display_date,
+            "totalCount": 0,
+            "ladder": [],
+            "sectorSummary": [],
+            "error": str(e),
+        }
+
+    if df is None or df.empty:
+        return {
+            "date": display_date,
+            "totalCount": 0,
+            "ladder": [],
+            "sectorSummary": [],
+        }
+
+    # 解析数据
+    stocks_list = []
+    for _, row in df.iterrows():
+        code = str(row.get("代码", "")).strip()
+        name = str(row.get("名称", "")).strip().replace(" ", "")
+        change_pct = float(row.get("涨跌幅", 0) or 0)
+        consecutive = int(row.get("连板数", 1) or 1)
+        industry = str(row.get("所属行业", "")).strip()
+        seal_time = str(row.get("首次封板时间", "")).strip()  # 格式 HHmmss
+
+        # 一字板判断：封板时间在 092500 ~ 092600 之间（集合竞价封板）
+        is_yizi = seal_time.startswith("092") and seal_time <= "092600"
+
+        # 格式化封板时间 HH:mm
+        if len(seal_time) >= 4:
+            fmt_time = f"{seal_time[:2]}:{seal_time[2:4]}"
+        else:
+            fmt_time = ""
+
+        stocks_list.append(
+            {
+                "code": code,
+                "name": name,
+                "consecutiveDays": consecutive,
+                "changePct": round(change_pct, 2),
+                "isYizi": is_yizi,
+                "sealTime": fmt_time,
+                "industry": industry,
+                # boards 字段：将行业名称包装为统一格式
+                "boards": [{"code": "", "name": industry}] if industry else [],
+            }
+        )
+
+    # 按连板数分层
+    from collections import defaultdict
+
+    ladder_dict: dict[int, list] = defaultdict(list)
+    for s in stocks_list:
+        ladder_dict[s["consecutiveDays"]].append(s)
+
+    # 按连板数从高到低排序，每层内按封板时间排序（早封板优先）
+    ladder = []
+    for days in sorted(ladder_dict.keys(), reverse=True):
+        stocks_in_level = sorted(
+            ladder_dict[days],
+            key=lambda x: x["sealTime"] if x["sealTime"] else "99:99",
+        )
+        ladder.append({"days": days, "stocks": stocks_in_level})
+
+    # 板块汇总：连板 >= 2 的股票，按行业聚合
+    sector_count: dict[str, dict] = {}
+    for s in stocks_list:
+        if s["consecutiveDays"] >= 2 and s["industry"]:
+            ind = s["industry"]
+            if ind not in sector_count:
+                sector_count[ind] = {"code": "", "name": ind, "count": 0}
+            sector_count[ind]["count"] += 1
+
+    # 同时统计首板行业分布（用于顶部摘要所有涨停行业）
+    all_sector_count: dict[str, int] = {}
+    for s in stocks_list:
+        if s["industry"]:
+            all_sector_count[s["industry"]] = all_sector_count.get(s["industry"], 0) + 1
+
+    sector_summary = sorted(sector_count.values(), key=lambda x: -x["count"])
+
+    # 所有行业分布（按数量排序），用于顶部板块标签展示
+    all_sectors = sorted(
+        [{"name": k, "count": v} for k, v in all_sector_count.items()],
+        key=lambda x: -x["count"],
+    )
+
+    return {
+        "date": display_date,
+        "totalCount": len(stocks_list),
+        "ladder": ladder,
+        "sectorSummary": sector_summary,
+        "allSectors": all_sectors,
+    }
+
+
+@router.get("/limit-up-broken")
+def get_limit_up_broken(
+    date: str = Query(default=None, description="交易日期，默认取今日，格式 YYYYMMDD"),
+    db: Session = Depends(get_db),
+):
+    """断板股：昨日涨停（有连板历史）但今日未涨停的股票，按昨日连板数从高到低展示。"""
+    import akshare as ak
+    from datetime import date as _date
+
+    if date:
+        query_date = date.replace("-", "")
+    else:
+        query_date = _date.today().strftime("%Y%m%d")
+
+    display_date = f"{query_date[:4]}-{query_date[4:6]}-{query_date[6:8]}"
+
+    try:
+        df = ak.stock_zt_pool_previous_em(date=query_date)
+    except Exception as e:
+        return {
+            "date": display_date,
+            "totalCount": 0,
+            "broken": [],
+            "error": str(e),
+        }
+
+    if df is None or df.empty:
+        return {
+            "date": display_date,
+            "totalCount": 0,
+            "broken": [],
+        }
+
+    # 获取今日涨停板中的股票代码（排除在今日涨停池中的股票）
+    try:
+        today_zt_df = ak.stock_zt_pool_em(date=query_date)
+        today_zt_codes = (
+            set(str(r).strip() for r in today_zt_df["代码"].tolist())
+            if today_zt_df is not None and not today_zt_df.empty
+            else set()
+        )
+    except Exception:
+        today_zt_codes = set()
+
+    broken_list = []
+    for _, row in df.iterrows():
+        code = str(row.get("代码", "")).strip()
+        name = str(row.get("名称", "")).strip().replace(" ", "")
+        change_pct = float(row.get("涨跌幅", 0) or 0)
+        prev_consecutive = int(row.get("昨日连板数", 1) or 1)
+        industry = str(row.get("所属行业", "")).strip()
+        prev_seal_time = str(row.get("昨日封板时间", "")).strip()
+
+        # 断板判断：今日不在涨停池中
+        if code in today_zt_codes:
+            continue
+
+        # 格式化昨日封板时间
+        if len(prev_seal_time) >= 4:
+            fmt_prev_time = f"{prev_seal_time[:2]}:{prev_seal_time[2:4]}"
+        else:
+            fmt_prev_time = ""
+
+        # 一字板判断（昨日）
+        is_prev_yizi = prev_seal_time.startswith("092") and prev_seal_time <= "092600"
+
+        broken_list.append(
+            {
+                "code": code,
+                "name": name,
+                "prevConsecutiveDays": prev_consecutive,
+                "changePct": round(change_pct, 2),
+                "isPrevYizi": is_prev_yizi,
+                "prevSealTime": fmt_prev_time,
+                "industry": industry,
+            }
+        )
+
+    # 按昨日连板数从高到低排序，同连板数内按今日涨跌幅排序（跌幅最大的在前，反映最惨）
+    broken_list.sort(key=lambda x: (-x["prevConsecutiveDays"], x["changePct"]))
+
+    # 按昨日连板数分层
+    from collections import defaultdict
+
+    broken_dict: dict[int, list] = defaultdict(list)
+    for s in broken_list:
+        broken_dict[s["prevConsecutiveDays"]].append(s)
+
+    broken_ladder = []
+    for days in sorted(broken_dict.keys(), reverse=True):
+        broken_ladder.append({"days": days, "stocks": broken_dict[days]})
+
+    # 行业分布统计
+    sector_count: dict[str, int] = {}
+    for s in broken_list:
+        if s["industry"]:
+            sector_count[s["industry"]] = sector_count.get(s["industry"], 0) + 1
+    all_sectors = sorted(
+        [{"name": k, "count": v} for k, v in sector_count.items()],
+        key=lambda x: -x["count"],
+    )
+
+    return {
+        "date": display_date,
+        "totalCount": len(broken_list),
+        "broken": broken_ladder,
+        "allSectors": all_sectors,
+    }
+
+    # 6. 查询申万板块成分股，关联每支股票的板块
+    # 先看本地数据库是否有成分股数据
+    cons_rows = (
+        db.query(
+            SwIndustryConstituent.stock_code,
+            SwIndustryConstituent.stock_name,
+            SwIndustryConstituent.board_code,
+        )
+        .filter(SwIndustryConstituent.stock_code.in_(lookback_codes))
+        .all()
+    )
+
+    # 本地有成分股数据
+    board_map: dict[str, list[str]] = {}  # code -> [board_code, ...]
+    stock_name_map: dict[str, str] = {}
+    if cons_rows:
+        for r in cons_rows:
+            board_map.setdefault(r[0], []).append(r[2])
+            if r[1]:
+                stock_name_map[r[0]] = r[1]
+
+        # 查询板块名称
+        board_codes = list({b for bs in board_map.values() for b in bs})
+        board_name_rows = (
+            db.query(SwIndustry.code, SwIndustry.name)
+            .filter(SwIndustry.code.in_(board_codes))
+            .all()
+        )
+        board_name_dict = {r[0]: r[1] for r in board_name_rows}
+
+        for code, info in code_info.items():
+            codes_for_stock = board_map.get(code, [])
+            info["boards"] = [
+                {"code": bc, "name": board_name_dict.get(bc, bc)}
+                for bc in codes_for_stock
+            ]
+    else:
+        # 本地无成分股数据，尝试从东财实时接口获取股票名称
+        try:
+            live_quotes = _fetch_realtime_quotes(lookback_codes)
+            for code, q in live_quotes.items():
+                if q.get("name"):
+                    stock_name_map[code] = q["name"]
+        except Exception:
+            pass
+
+    # 7. 补充股票名称（从 stock_quote 或 sw_industry_constituent）
+    sq_rows = (
+        db.query(StockQuote.code, StockQuote.name)
+        .filter(StockQuote.code.in_(lookback_codes))
+        .all()
+    )
+    for r in sq_rows:
+        if r[1] and r[1].strip():
+            stock_name_map[r[0]] = r[1]
+
+    for code, info in code_info.items():
+        info["name"] = stock_name_map.get(code, code)
+
+    # 8. 按连板数分层，构建天梯结构
+    ladder_dict: dict[int, list] = {}
+    for code, info in code_info.items():
+        days = info["consecutiveDays"]
+        ladder_dict.setdefault(days, []).append(info)
+
+    # 按连板数从高到低排序
+    ladder = []
+    for days in sorted(ladder_dict.keys(), reverse=True):
+        stocks = sorted(ladder_dict[days], key=lambda x: x["changePct"], reverse=True)
+        ladder.append({"days": days, "stocks": stocks})
+
+    # 9. 板块汇总：统计各板块出现次数（连板 >= 2 的股票）
+    sector_count: dict[str, dict] = {}
+    for code, info in code_info.items():
+        if info["consecutiveDays"] >= 2:
+            for board in info["boards"]:
+                bc = board["code"]
+                if bc not in sector_count:
+                    sector_count[bc] = {"code": bc, "name": board["name"], "count": 0}
+                sector_count[bc]["count"] += 1
+
+    sector_summary = sorted(sector_count.values(), key=lambda x: -x["count"])
+
+    return {
+        "date": target_date,
+        "totalCount": len(code_info),
+        "ladder": ladder,
+        "sectorSummary": sector_summary,
+    }

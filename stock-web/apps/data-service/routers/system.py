@@ -457,6 +457,8 @@ async def get_monitor_summary(db: Session = Depends(get_db)):
             (SELECT COUNT(*) FROM stock_kline WHERE period='daily' AND rowid=(SELECT MIN(rowid) FROM stock_kline WHERE period='daily'))  AS _dummy,
             (SELECT COUNT(*) FROM sw_industry)                              AS sw_count,
             (SELECT MAX(updated_at) FROM sw_industry)                       AS sw_last,
+            (SELECT COUNT(*) FROM sw_industry_constituent)                  AS sw_const_count,
+            (SELECT MAX(updated_at) FROM sw_industry_constituent)           AS sw_const_last,
             (SELECT COUNT(*) FROM concept_board)                            AS cb_count,
             (SELECT MAX(updated_at) FROM concept_board)                     AS cb_last,
             (SELECT COUNT(*) FROM global_market_index)                      AS gi_count,
@@ -481,17 +483,19 @@ async def get_monitor_summary(db: Session = Depends(get_db)):
     # bulk[7] 是占位查询，忽略
     sw_count = bulk[8] or 0
     sw_last = bulk[9]
-    cb_count = bulk[10] or 0
-    cb_last = bulk[11]
-    gi_count = bulk[12] or 0
-    gi_last = bulk[13]
-    mt_days = bulk[14] or 0
-    mt_latest = bulk[15]
-    tn_total = bulk[16] or 0
-    guba_news = bulk[17] or 0
-    guba_notice = bulk[18] or 0
-    guba_stocks = bulk[19] or 0
-    guba_last = bulk[20]
+    sw_const_count = bulk[10] or 0
+    sw_const_last = bulk[11]
+    cb_count = bulk[12] or 0
+    cb_last = bulk[13]
+    gi_count = bulk[14] or 0
+    gi_last = bulk[15]
+    mt_days = bulk[16] or 0
+    mt_latest = bulk[17]
+    tn_total = bulk[18] or 0
+    guba_news = bulk[19] or 0
+    guba_notice = bulk[20] or 0
+    guba_stocks = bulk[21] or 0
+    guba_last = bulk[22]
 
     # stock_kline distinct code 数：stock_meta 行数与 kline 覆盖数非常接近，
     # 直接用 stock_meta count 作为近似（避免 3 秒全表扫描）
@@ -558,7 +562,12 @@ async def get_monitor_summary(db: Session = Depends(get_db)):
     ]
 
     # ── 3-7. 小表统计（已在 bulk SQL 中完成） ──────────────────────
-    sw_industry = {"count": sw_count, "updatedAt": sw_last}
+    sw_industry = {
+        "count": sw_count,
+        "updatedAt": sw_last,
+        "constituentCount": sw_const_count,
+        "constituentUpdatedAt": sw_const_last,
+    }
     concept_board = {"count": cb_count, "updatedAt": cb_last}
     global_indices = {"count": gi_count, "updatedAt": gi_last}
     margin_trading = {"dayCount": mt_days, "latestDate": mt_latest}

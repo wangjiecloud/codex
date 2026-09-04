@@ -61,17 +61,22 @@ FEATURED_CODES = [
     "UDI",
 ]
 
-# 复盘 tab 需要同步的全球指数 K 线（仅非A股，A 股大盘指数走 baostock）
-# 000680 科创综指：baostock 不支持，走新浪日K接口
+# 复盘 tab 需要同步的全球指数 K 线（仅非A股，A 股大盘指数走新浪日K）
+# 000680 科创综指：走新浪日K接口
 REVIEW_INDEX_CODES = [
-    # A 股特殊指数（baostock 不支持）
+    # A 股特殊指数
     "000680",
     # 港股
-    "HSI", "HSCEI", "HSTECH",
+    "HSI",
+    "HSCEI",
+    "HSTECH",
     # 美股
-    "DJIA", "SPX", "NDX",
+    "DJIA",
+    "SPX",
+    "NDX",
     # 日本/韩国
-    "N225", "KS11",
+    "N225",
+    "KS11",
 ]
 
 _sync_lock = threading.Lock()
@@ -100,29 +105,30 @@ def _safe_float(val, default: float = 0.0) -> float:
 # 新浪财经接口映射：code -> (接口类型, 新浪symbol)
 _SINA_INDEX_MAP: dict[str, tuple[str, str]] = {
     # 港股：ak.stock_hk_index_daily_sina(symbol)
-    "HSI":    ("hk",     "HSI"),
-    "HSCEI":  ("hk",     "HSCEI"),
-    "HSTECH": ("hk",     "HSTECH"),
+    "HSI": ("hk", "HSI"),
+    "HSCEI": ("hk", "HSCEI"),
+    "HSTECH": ("hk", "HSTECH"),
     # 美股：ak.index_us_stock_sina(symbol)
-    "DJIA":   ("us",     ".DJI"),
-    "SPX":    ("us",     ".INX"),
-    "NDX":    ("us",     ".NDX"),
+    "DJIA": ("us", ".DJI"),
+    "SPX": ("us", ".INX"),
+    "NDX": ("us", ".NDX"),
     # 日本/韩国：ak.index_global_hist_sina(symbol) 用中文名
-    "N225":   ("global", "日经225指数"),
-    "KS11":   ("global", "首尔综合指数"),
-    # A 股指数（baostock 不支持，走新浪日K直接抓取接口）
-    "000680": ("cn_index", "sh000680"),   # 科创综指
+    "N225": ("global", "日经225指数"),
+    "KS11": ("global", "首尔综合指数"),
+    # A 股指数（走新浪日K直接抓取接口）
+    "000680": ("cn_index", "sh000680"),  # 科创综指
 }
 
 
 def _fetch_sina_cn_index_daily(symbol: str) -> Optional[pd.DataFrame]:
     """
-    通过新浪财经日K接口抓取 A 股指数数据（baostock 不支持的指数，如科创综指 sh000680）。
+    通过新浪财经日K接口抓取 A 股指数数据（新浪日K接口支持的指数，如科创综指 sh000680）。
     symbol: 新浪格式，如 'sh000680'
     返回标准化 DataFrame：date, open, high, low, close, volume
     """
     import re
     import json
+
     # 新浪日K接口每次最多返回有限条，循环多次获取近 500 个交易日
     # scale=240 表示日K，datalen 最大约 300
     all_bars: list[dict] = []
@@ -137,19 +143,21 @@ def _fetch_sina_cn_index_daily(symbol: str) -> Optional[pd.DataFrame]:
         r = requests.get(url, headers=headers, timeout=15)
         text = r.text
         # 提取 JSON 数组
-        m = re.search(r'\(\[(.+)\]\)', text, re.DOTALL)
+        m = re.search(r"\(\[(.+)\]\)", text, re.DOTALL)
         if not m:
             return None
         items = json.loads("[" + m.group(1) + "]")
         for it in items:
-            all_bars.append({
-                "date": it["day"],
-                "open": float(it["open"]),
-                "high": float(it["high"]),
-                "low": float(it["low"]),
-                "close": float(it["close"]),
-                "volume": float(it.get("volume", 0)),
-            })
+            all_bars.append(
+                {
+                    "date": it["day"],
+                    "open": float(it["open"]),
+                    "high": float(it["high"]),
+                    "low": float(it["low"]),
+                    "close": float(it["close"]),
+                    "volume": float(it.get("volume", 0)),
+                }
+            )
     except Exception as e:
         print(f"[global_kline] sina cn_index fetch failed for {symbol}: {e}")
         return None
@@ -177,29 +185,47 @@ def _fetch_sina_daily(code: str) -> Optional[pd.DataFrame]:
             if kind == "hk":
                 df = ak.stock_hk_index_daily_sina(symbol=symbol)
                 # 列名：date, open, high, low, close, volume
-                df = df.rename(columns={
-                    "date": "date", "open": "open", "high": "high",
-                    "low": "low", "close": "close", "volume": "volume"
-                })
+                df = df.rename(
+                    columns={
+                        "date": "date",
+                        "open": "open",
+                        "high": "high",
+                        "low": "low",
+                        "close": "close",
+                        "volume": "volume",
+                    }
+                )
             elif kind == "us":
                 df = ak.index_us_stock_sina(symbol=symbol)
                 # 列名：date, open, high, low, close, volume
-                df = df.rename(columns={
-                    "date": "date", "open": "open", "high": "high",
-                    "low": "low", "close": "close", "volume": "volume"
-                })
+                df = df.rename(
+                    columns={
+                        "date": "date",
+                        "open": "open",
+                        "high": "high",
+                        "low": "low",
+                        "close": "close",
+                        "volume": "volume",
+                    }
+                )
             elif kind == "cn_index":
-                # A 股指数直接调用新浪财经 K 线接口（baostock 不支持的指数）
+                # A 股指数直接调用新浪财经 K 线接口
                 df = _fetch_sina_cn_index_daily(symbol)
                 if df is None:
                     return None
             else:  # global
                 df = ak.index_global_hist_sina(symbol=symbol)
                 # 列名：日期, 开盘, 收盘, 最高, 最低, 成交量
-                df = df.rename(columns={
-                    "日期": "date", "开盘": "open", "收盘": "close",
-                    "最高": "high", "最低": "low", "成交量": "volume"
-                })
+                df = df.rename(
+                    columns={
+                        "日期": "date",
+                        "开盘": "open",
+                        "收盘": "close",
+                        "最高": "high",
+                        "最低": "low",
+                        "成交量": "volume",
+                    }
+                )
 
             # 统一日期格式为字符串 YYYY-MM-DD
             df["date"] = pd.to_datetime(df["date"]).dt.strftime("%Y-%m-%d")
@@ -228,13 +254,18 @@ def _resample_to_period(df: pd.DataFrame, period: str) -> pd.DataFrame:
     df = df.set_index("date_dt")
 
     freq = "W" if period == "weekly" else "ME"
-    resampled = df.resample(freq).agg(
-        open=("open", "first"),
-        high=("high", "max"),
-        low=("low", "min"),
-        close=("close", "last"),
-        volume=("volume", "sum"),
-    ).dropna(subset=["close"]).reset_index()
+    resampled = (
+        df.resample(freq)
+        .agg(
+            open=("open", "first"),
+            high=("high", "max"),
+            low=("low", "min"),
+            close=("close", "last"),
+            volume=("volume", "sum"),
+        )
+        .dropna(subset=["close"])
+        .reset_index()
+    )
     resampled["date"] = resampled["date_dt"].dt.strftime("%Y-%m-%d")
     return resampled[["date", "open", "high", "low", "close", "volume"]]
 
@@ -262,19 +293,22 @@ def _fetch_sina_kline(code: str, period: str, count: int) -> list[dict]:
 
     result = []
     for _, row in df.tail(count).iterrows():
-        result.append({
-            "time": str(row["date"]),
-            "open": _safe_float(row["open"]),
-            "high": _safe_float(row["high"]),
-            "low": _safe_float(row["low"]),
-            "close": _safe_float(row["close"]),
-            "volume": _safe_float(row["volume"]),
-            "change_pct": _safe_float(row.get("change_pct", 0.0)),
-        })
+        result.append(
+            {
+                "time": str(row["date"]),
+                "open": _safe_float(row["open"]),
+                "high": _safe_float(row["high"]),
+                "low": _safe_float(row["low"]),
+                "close": _safe_float(row["close"]),
+                "volume": _safe_float(row["volume"]),
+                "change_pct": _safe_float(row.get("change_pct", 0.0)),
+            }
+        )
     return result
 
 
 # ─────────────────── 数据库写入 ───────────────────
+
 
 def _save_global_klines(code: str, period: str, bars: list[dict]) -> int:
     """将全球指数 K 线写入 global_index_kline 表，返回写入条数"""
@@ -403,15 +437,17 @@ def sync_all_review_index_klines() -> int:
                     df_p = _compute_change_pct(df_p)
                     bars = []
                     for _, row in df_p.tail(count).iterrows():
-                        bars.append({
-                            "time": str(row["date"]),
-                            "open": _safe_float(row["open"]),
-                            "high": _safe_float(row["high"]),
-                            "low": _safe_float(row["low"]),
-                            "close": _safe_float(row["close"]),
-                            "volume": _safe_float(row["volume"]),
-                            "change_pct": _safe_float(row.get("change_pct", 0.0)),
-                        })
+                        bars.append(
+                            {
+                                "time": str(row["date"]),
+                                "open": _safe_float(row["open"]),
+                                "high": _safe_float(row["high"]),
+                                "low": _safe_float(row["low"]),
+                                "close": _safe_float(row["close"]),
+                                "volume": _safe_float(row["volume"]),
+                                "change_pct": _safe_float(row.get("change_pct", 0.0)),
+                            }
+                        )
                     n = _save_global_klines(code, period, bars)
                     total += n
                     print(f"[global_kline] {code}/{period}: saved {n} bars")
@@ -426,6 +462,7 @@ def sync_all_review_index_klines() -> int:
 
 
 # ─────────────────── 原有全球快照同步 ───────────────────
+
 
 def sync_global_indices() -> int:
     global _is_syncing
@@ -492,6 +529,7 @@ def sync_global_indices() -> int:
                     count += 1
                 db.commit()
                 from routers.system import sched_log
+
                 sched_log(
                     "success",
                     f"全球市场指数同步完成，共 {count} 条",
@@ -507,6 +545,7 @@ def sync_global_indices() -> int:
                     time.sleep(1 + db_attempt * 0.5)
                     continue
                 from routers.system import sched_log
+
                 sched_log("error", f"全球市场指数同步DB错误: {e}", source="scheduler")
                 return 0
             finally:
@@ -514,6 +553,7 @@ def sync_global_indices() -> int:
                     db.close()
     except Exception as e:
         from routers.system import sched_log
+
         sched_log("error", f"全球市场指数同步失败: {e}", source="scheduler")
         return 0
     finally:

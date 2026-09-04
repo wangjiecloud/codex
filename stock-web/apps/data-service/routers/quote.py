@@ -5,9 +5,9 @@ from sqlalchemy.orm import Session
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from datetime import datetime, date, timedelta
 from typing import Optional
+import requests
 
 from db import SessionLocal, StockQuote, StockMeta
-from bs_session import get_bs, reset_bs
 
 router = APIRouter()
 
@@ -119,37 +119,6 @@ def get_stock_name(code: str) -> str:
         db.close()
 
 
-def _to_bs_code(code: str) -> str:
-    if code.startswith("6") or code.startswith("5"):
-        return f"sh.{code}"
-    return f"sz.{code}"
-
-
-def _fetch_total_share(bs_code: str) -> float:
-    """通过 baostock query_profit_data 获取总股本（股），最多回退 8 个季度。"""
-    bs = get_bs()
-    today = date.today()
-    year = today.year
-    quarter = (today.month - 1) // 3 + 1
-    for _ in range(8):
-        try:
-            rs = bs.query_profit_data(code=bs_code, year=year, quarter=quarter)
-            rows = []
-            while rs.error_code == "0" and rs.next():
-                rows.append(rs.get_row_data())
-            if rows and len(rows[0]) > 9:
-                ts = float(rows[0][9]) if rows[0][9] else 0.0
-                if ts > 0:
-                    return ts
-        except Exception:
-            pass
-        quarter -= 1
-        if quarter == 0:
-            year -= 1
-            quarter = 4
-    return 0.0
-
-
 def _is_a_share(code: str) -> bool:
     if not code or len(code) != 6:
         return False
@@ -168,6 +137,12 @@ def _safe_float(val, default=0.0) -> float:
         return default
 
 
+def _to_sina_symbol(code: str) -> str:
+    if code.startswith("6") or code.startswith("5"):
+        return f"sh{code}"
+    return f"sz{code}"
+
+
 def _fetch_and_cache_quote(code: str, update_market_cap: bool = False) -> dict:
     if not _is_a_share(code):
         raise HTTPException(
@@ -177,72 +152,49 @@ def _fetch_and_cache_quote(code: str, update_market_cap: bool = False) -> dict:
 
     db = SessionLocal()
     try:
-        bs = get_bs()
-        bs_code = _to_bs_code(code)
-        today = date.today().strftime("%Y-%m-%d")
-        start = (date.today() - timedelta(days=5)).strftime("%Y-%m-%d")
-        fields = "date,code,open,high,low,close,preclose,volume,amount,turn,pctChg,peTTM,pbMRQ"
-        rs = bs.query_history_k_data_plus(
-            bs_code,
-            fields,
-            start_date=start,
-            end_date=today,
-            frequency="d",
-            adjustflag="2",
-        )
-        row_data = []
-        while rs.error_code == "0":
-            try:
-                has_next = rs.next()
-            except IndexError as e:
-                reset_bs()
-                raise HTTPException(
-                    status_code=503,
-                    detail=f"baostock returned malformed quote rows for {code}: {e}",
-                ) from e
-            if not has_next:
-                break
-            try:
-                row = rs.get_row_data()
-            except IndexError as e:
-                reset_bs()
-                raise HTTPException(
-                    status_code=503,
-                    detail=f"baostock returned malformed quote rows for {code}: {e}",
-                ) from e
-            if row and len(row) >= 13:
-                row_data.append(row)
-
-        if not row_data:
+        sina_symbol = _to_sina_symbol(code)
+        url = f"https://hq.sinajs.cn/list={sina_symbol}"
+        headers = {"Referer": "https://finance.sina.com.cn"}
+        r = requests.get(url, headers=headers, timeout=10)
+        r.encoding = "gbk"
+        line = r.text.strip()
+        if not line or '=""' in line:
             raise HTTPException(status_code=404, detail=f"Stock {code} not found")
 
-        r = row_data[-1]
+        import re
 
-        # 校验 baostock 返回的 code 字段（index=1）是否与请求的 code 一致
-        # 防止 baostock session 串码——游标错位时返回的是别的股票数据
-        returned_bs_code = str(r[1]).strip()  # e.g. "sh.688012"
-        expected_bs_code = bs_code.lower()  # e.g. "sh.688012"
-        if returned_bs_code.lower() != expected_bs_code:
-            print(
-                f"[quote] {code} baostock串码：请求 {expected_bs_code}，返回 {returned_bs_code}，重置session并拒绝写入"
-            )
-            reset_bs()
-            # 降级返回已有缓存
-            existing = db.query(StockQuote).filter(StockQuote.code == code).first()
-            if existing and existing.price and existing.price > 0:
-                return _row_to_dict(existing, "baostock串码，返回缓存数据")
-            raise HTTPException(
-                status_code=503,
-                detail=f"baostock code mismatch for {code}, please retry",
-            )
-        close = round(_safe_float(r[5]), 4)
-        preclose = round(_safe_float(r[6]), 4)
+        m = re.search(r'"([^"]*)"', line)
+        if not m or not m.group(1):
+            raise HTTPException(status_code=404, detail=f"Stock {code} not found")
+        fields = m.group(1).split(",")
+        if len(fields) < 10:
+            raise HTTPException(status_code=404, detail=f"Stock {code} malformed data")
 
-        # 计算总市值：仅在 update_market_cap=True 时才调用 baostock（耗时约1.6s/只）
-        # 普通行情刷新时直接读数据库已有市值，避免大量并发时超时
+        name = fields[0]
+        open_price = _safe_float(fields[1])
+        preclose = _safe_float(fields[2])
+        close = _safe_float(fields[3])
+        high = _safe_float(fields[4])
+        low = _safe_float(fields[5])
+        volume = _safe_float(fields[8])
+        turnover = _safe_float(fields[9])
+        change_pct = (
+            round((close - preclose) / preclose * 100, 4) if preclose > 0 else 0.0
+        )
+        change_amt = round(close - preclose, 4) if preclose > 0 else 0.0
+
         if update_market_cap:
-            total_share = _fetch_total_share(bs_code)
-            market_cap = round(close * total_share, 2) if total_share > 0 else 0.0
+            try:
+                import akshare as ak
+
+                df = ak.stock_zh_a_spot_em()
+                row = df[df["代码"] == code]
+                if not row.empty:
+                    market_cap = _safe_float(row.iloc[0].get("总市值", 0))
+                else:
+                    market_cap = 0.0
+            except Exception:
+                market_cap = 0.0
         else:
             existing_q = db.query(StockQuote).filter(StockQuote.code == code).first()
             market_cap = (
@@ -251,58 +203,38 @@ def _fetch_and_cache_quote(code: str, update_market_cap: bool = False) -> dict:
                 else 0.0
             )
 
-        # 价格合理性校验：与 kline 最新收盘价偏差超过 25% 时，拒绝写入，返回已有缓存
-        # 25% 能覆盖科创板/创业板 ±20% 涨跌停上限，同时拦住 baostock 串码（偏差通常 >100%）
-        if close > 0:
-            from db import StockKline
-
-            kline_ref = (
-                db.query(StockKline.close)
-                .filter(StockKline.code == code, StockKline.period == "daily")
-                .order_by(StockKline.trade_date.desc())
-                .first()
-            )
-            if kline_ref and kline_ref[0] and float(kline_ref[0]) > 0:
-                diff_pct = abs(close - float(kline_ref[0])) / float(kline_ref[0]) * 100
-                if diff_pct > 25:
-                    print(
-                        f"[quote] {code} baostock价格异常：{close} vs kline={kline_ref[0]}，偏差{diff_pct:.1f}%，返回缓存数据"
-                    )
-                    # 返回已有缓存数据，不写入异常值
-                    existing = (
-                        db.query(StockQuote).filter(StockQuote.code == code).first()
-                    )
-                    if existing and existing.price and existing.price > 0:
-                        return _row_to_dict(existing)
-                    # 无缓存则用 kline 数据构建返回值（不写库）
-                    raise HTTPException(
-                        status_code=503,
-                        detail=f"baostock returned abnormal price for {code}, please retry later",
-                    )
-
         result = {
             "code": code,
-            "name": get_stock_name(code),
-            "price": close,
-            "change": round(_safe_float(r[10]), 4),
-            "changeAmt": round(close - preclose, 4),
-            "open": round(_safe_float(r[2]), 4),
-            "prevClose": preclose,
-            "high": round(_safe_float(r[3]), 4),
-            "low": round(_safe_float(r[4]), 4),
-            "volume": _safe_float(r[7]),
-            "turnover": _safe_float(r[8]),
+            "name": name,
+            "price": round(close, 4),
+            "change": change_pct,
+            "changeAmt": change_amt,
+            "open": round(open_price, 4),
+            "prevClose": round(preclose, 4),
+            "high": round(high, 4),
+            "low": round(low, 4),
+            "volume": volume,
+            "turnover": turnover,
             "marketCap": market_cap,
-            "pe": round(_safe_float(r[11]), 4),
-            "pb": round(_safe_float(r[12]), 4),
-            "turnoverRate": round(_safe_float(r[9]), 4),
+            "pe": 0.0,
+            "pb": 0.0,
+            "turnoverRate": 0.0,
             "amplitude": 0.0,
             "updatedAt": datetime.utcnow().isoformat(),
         }
 
+        existing_pe_pb = db.query(StockQuote).filter(StockQuote.code == code).first()
+        if existing_pe_pb:
+            if existing_pe_pb.pe:
+                result["pe"] = float(existing_pe_pb.pe)
+            if existing_pe_pb.pb:
+                result["pb"] = float(existing_pe_pb.pb)
+            if existing_pe_pb.turnover_rate:
+                result["turnoverRate"] = float(existing_pe_pb.turnover_rate)
+
         stmt = sqlite_insert(StockQuote).values(
             code=code,
-            name=get_stock_name(code),
+            name=name,
             price=result["price"],
             change=result["change"],
             change_amt=result["changeAmt"],
@@ -345,7 +277,6 @@ def _fetch_and_cache_quote(code: str, update_market_cap: bool = False) -> dict:
         raise
     except Exception as e:
         db.rollback()
-        reset_bs()
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         db.close()
@@ -453,72 +384,43 @@ _market_cap_sync_running = False
 
 
 def _do_sync_market_cap_bg():
-    """后台线程：批量用 baostock 总股本 × 价格更新所有 market_cap=0 的股票"""
+    """后台线程：用 akshare stock_zh_a_spot_em 批量更新所有 market_cap=0 的股票市值"""
     global _market_cap_sync_running
     try:
         db = SessionLocal()
         rows = (
-            db.query(StockQuote.code, StockQuote.price)
+            db.query(StockQuote.code)
             .filter((StockQuote.market_cap == None) | (StockQuote.market_cap == 0.0))
             .all()
         )
-        targets = [
-            (r.code, r.price)
-            for r in rows
-            if _is_a_share(r.code) and r.price and r.price > 0
-        ]
+        target_codes = {r.code for r in rows if _is_a_share(r.code)}
         db.close()
 
-        # 找有效季度（2026 Q1）
-        today = date.today()
-        year = today.year
-        quarter = (today.month - 1) // 3 + 1
-        eff_year, eff_quarter = year, quarter
-        for _ in range(6):
-            eff_quarter -= 1
-            if eff_quarter == 0:
-                eff_year -= 1
-                eff_quarter = 4
-            rs_test = get_bs().query_profit_data(
-                code="sh.600877", year=eff_year, quarter=eff_quarter
-            )
-            test_rows = []
-            while rs_test.error_code == "0" and rs_test.next():
-                test_rows.append(rs_test.get_row_data())
-            if test_rows and test_rows[0][9]:
-                break
+        if not target_codes:
+            print("[sync-market-cap] 无需同步，所有股票市值已填充")
+            return
 
-        print(
-            f"[sync-market-cap] 开始同步 {len(targets)} 只股票，使用 {eff_year} Q{eff_quarter} 数据"
-        )
+        print(f"[sync-market-cap] 开始同步 {len(target_codes)} 只股票市值 (akshare)")
+        import akshare as ak
+
+        df = ak.stock_zh_a_spot_em()
         updated = failed = 0
         batch_db = SessionLocal()
-        for i, (code, price) in enumerate(targets):
-            try:
-                bs_code = _to_bs_code(code)
-                rs = get_bs().query_profit_data(
-                    code=bs_code, year=eff_year, quarter=eff_quarter
+        for _, row in df.iterrows():
+            code = str(row.get("代码", "")).strip()
+            if code not in target_codes:
+                continue
+            mc = _safe_float(row.get("总市值", 0))
+            if mc > 0:
+                batch_db.query(StockQuote).filter(StockQuote.code == code).update(
+                    {"market_cap": round(mc, 2)}
                 )
-                rows_data = []
-                while rs.error_code == "0" and rs.next():
-                    rows_data.append(rs.get_row_data())
-                if rows_data and rows_data[0][9]:
-                    ts = float(rows_data[0][9])
-                    if ts > 0:
-                        batch_db.query(StockQuote).filter(
-                            StockQuote.code == code
-                        ).update({"market_cap": round(price * ts, 2)})
-                        updated += 1
-                        if updated % 50 == 0:
-                            batch_db.commit()
-                            print(
-                                f"[sync-market-cap] 进度 {i + 1}/{len(targets)}, 已更新 {updated}"
-                            )
-                        continue
+                updated += 1
+                if updated % 100 == 0:
+                    batch_db.commit()
+                    print(f"[sync-market-cap] 已更新 {updated}")
+            else:
                 failed += 1
-            except Exception as e:
-                failed += 1
-                print(f"[sync-market-cap] {code} 失败: {e}")
         batch_db.commit()
         batch_db.close()
         print(f"[sync-market-cap] 完成: updated={updated}, failed={failed}")

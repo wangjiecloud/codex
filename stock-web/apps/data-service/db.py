@@ -897,6 +897,34 @@ class MarginTradingStockSyncStatus(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class XmindFile(Base):
+    """XMind 复合文件（一个文件包含多个子 sheet，每个 sheet 对应一个 URL 的内容）"""
+
+    __tablename__ = "xmind_file"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(200), nullable=False)
+    description = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class XmindNode(Base):
+    """XMind 节点（树形结构，每个节点属于一个 file_id 和 sheet_id）"""
+
+    __tablename__ = "xmind_node"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    file_id = Column(Integer, nullable=False, index=True)
+    parent_id = Column(Integer, nullable=True, index=True)
+    sheet_id = Column(String(100), nullable=False)
+    sheet_title = Column(String(200), default="")
+    title = Column(Text, nullable=False)
+    content = Column(Text)
+    url = Column(Text)
+    node_order = Column(Integer, default=0)
+    source_url = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 def get_db():
     db = SessionLocal()
     try:
@@ -1241,5 +1269,57 @@ def init_db():
                     updated_at   DATETIME DEFAULT (datetime('now','localtime'))
                 )
                 """)
+            )
+            conn.commit()
+
+        # ── xmind_file / xmind_node：XMind 复合文件管理 ──────────────────────
+        all_tables = {
+            row[0]
+            for row in conn.execute(
+                text("SELECT name FROM sqlite_master WHERE type='table'")
+            )
+        }
+        if "xmind_file" not in all_tables:
+            conn.execute(
+                text("""
+                CREATE TABLE xmind_file (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name        VARCHAR(200) NOT NULL,
+                    description TEXT,
+                    created_at  DATETIME DEFAULT (datetime('now','localtime')),
+                    updated_at  DATETIME DEFAULT (datetime('now','localtime'))
+                )
+                """)
+            )
+            conn.commit()
+
+        if "xmind_node" not in all_tables:
+            conn.execute(
+                text("""
+                CREATE TABLE xmind_node (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    file_id     INTEGER NOT NULL,
+                    parent_id   INTEGER,
+                    sheet_id    VARCHAR(100) NOT NULL,
+                    sheet_title VARCHAR(200) DEFAULT '',
+                    title       TEXT NOT NULL,
+                    content     TEXT,
+                    url         TEXT,
+                    node_order  INTEGER DEFAULT 0,
+                    source_url  TEXT,
+                    created_at  DATETIME DEFAULT (datetime('now','localtime')),
+                    FOREIGN KEY (file_id) REFERENCES xmind_file(id) ON DELETE CASCADE
+                )
+                """)
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_xmind_node_file ON xmind_node (file_id)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_xmind_node_sheet ON xmind_node (file_id, sheet_id)"
+                )
             )
             conn.commit()

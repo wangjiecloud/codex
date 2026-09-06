@@ -27,6 +27,7 @@ from routers import (
     margin_trading,
     backtest,
     auto_strategy,
+    xmind,
 )
 import akshare as ak
 from fastapi import HTTPException
@@ -74,6 +75,7 @@ app.include_router(
 )
 app.include_router(backtest.router, prefix="/api/backtest", tags=["回测系统"])
 app.include_router(auto_strategy.router, prefix="/api/backtest", tags=["AI策略定制"])
+app.include_router(xmind.router, prefix="/api/xmind", tags=["XMind工具"])
 
 _scheduler = BackgroundScheduler(timezone="Asia/Shanghai")
 

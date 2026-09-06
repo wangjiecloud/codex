@@ -12,7 +12,7 @@ const DB_PATH =
   );
 
 const LLM_BASE_URL = "https://apiprod.midea.com/llm/f-devops-python-litellm/v1";
-const LLM_MODEL = "claude-sonnet-4.6";
+const LLM_MODEL = "hw-glm-5";
 
 function loadLlmHeaders(): Record<string, string> {
   if (process.env.LLM_AUTHORIZATION) {

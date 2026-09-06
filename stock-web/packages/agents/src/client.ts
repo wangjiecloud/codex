@@ -31,7 +31,7 @@ function loadLlmConfig(): LlmConfig {
   );
 }
 
-export const DEFAULT_MODEL = "claude-sonnet-4.6";
+export const DEFAULT_MODEL = "hw-glm-5";
 export const BASE_URL =
   "https://apiprod.midea.com/llm/f-devops-python-litellm/v1";
 

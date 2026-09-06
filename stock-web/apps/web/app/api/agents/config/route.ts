@@ -3,16 +3,30 @@ import { NextRequest, NextResponse } from "next/server";
 import * as os from "os";
 import * as path from "path";
 
-interface MsModel {
+interface MsModelCapabilities {
+  toolcall?: boolean;
+  [k: string]: unknown;
+}
+
+interface MsModelEntry {
+  id: string;
+  name: string;
+  capabilities?: MsModelCapabilities;
+  [k: string]: unknown;
+}
+
+interface MsJsonNew {
+  models: Record<string, MsModelEntry>;
+}
+
+interface MsModelOld {
   name: string;
   model: string;
-  provider?: string;
-  onPremProxyUrl?: string;
   capabilities?: string[];
 }
 
-interface MsJson {
-  models: MsModel[];
+interface MsJsonOld {
+  models: MsModelOld[];
 }
 
 function parseTomlModel(content: string): string {
@@ -20,7 +34,7 @@ function parseTomlModel(content: string): string {
     const m = line.match(/^model\s*=\s*"([^"]+)"/);
     if (m) return m[1];
   }
-  return "claude-sonnet-4.6";
+  return "hw-glm-5";
 }
 
 export async function GET() {
@@ -29,21 +43,34 @@ export async function GET() {
   let models: { name: string; model: string }[] = [];
   if (fs.existsSync(msPath)) {
     try {
-      const ms = JSON.parse(fs.readFileSync(msPath, "utf-8")) as MsJson;
-      // 只保留有 tool_use 能力的模型（agent 需要工具调用）
-      models = ms.models
-        .filter((m) => !m.capabilities || m.capabilities.includes("tool_use"))
-        .map((m) => ({ name: m.name, model: m.model }));
-    } catch { /* ignore */ }
+      const raw = JSON.parse(fs.readFileSync(msPath, "utf-8"));
+      if (Array.isArray(raw.models)) {
+        // 旧格式：models 为数组
+        const ms = raw as MsJsonOld;
+        models = ms.models
+          .filter((m) => !m.capabilities || m.capabilities.includes("tool_use"))
+          .map((m) => ({ name: m.name, model: m.model }));
+      } else {
+        // 新格式：models 为对象（以模型 ID 为 key）
+        const ms = raw as MsJsonNew;
+        models = Object.values(ms.models)
+          .filter((m) => !m.capabilities || m.capabilities.toolcall !== false)
+          .map((m) => ({ name: m.name, model: m.id }));
+      }
+    } catch {
+      /* ignore */
+    }
   }
 
   // 读取当前选中模型（来自 config.toml）
   const configPath = path.join(os.homedir(), ".codex", "config.toml");
-  let currentModel = "claude-sonnet-4.6";
+  let currentModel = "hw-glm-5";
   if (fs.existsSync(configPath)) {
     try {
       currentModel = parseTomlModel(fs.readFileSync(configPath, "utf-8"));
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }
 
   return NextResponse.json({ models, currentModel });
@@ -51,12 +78,16 @@ export async function GET() {
 
 // 切换模型：写入 ~/.codex/config.toml
 export async function POST(req: NextRequest) {
-  const { model } = await req.json() as { model: string };
-  if (!model) return NextResponse.json({ error: "model required" }, { status: 400 });
+  const { model } = (await req.json()) as { model: string };
+  if (!model)
+    return NextResponse.json({ error: "model required" }, { status: 400 });
 
   const configPath = path.join(os.homedir(), ".codex", "config.toml");
   if (!fs.existsSync(configPath)) {
-    return NextResponse.json({ error: "config.toml not found" }, { status: 404 });
+    return NextResponse.json(
+      { error: "config.toml not found" },
+      { status: 404 },
+    );
   }
 
   try {

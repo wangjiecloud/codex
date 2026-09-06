@@ -36,6 +36,7 @@ import {
   TeamReport,
   upsertTeamReport,
 } from "@/lib/teamReports";
+import { XmindTool } from "@/components/agents/XmindTool";
 
 const AGENTS = [
   {
@@ -212,6 +213,7 @@ export default function AgentsPage() {
   >([]);
   const [teamSearchOpen, setTeamSearchOpen] = useState(false);
   const [teamSearchLoading, setTeamSearchLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState<"stock" | "tools">("stock");
 
   const persistSession = useCallback((agentId: string, session: Session) => {
     fetch("/api/agents/sessions", {
@@ -1199,155 +1201,187 @@ export default function AgentsPage() {
             <p className="text-[var(--text-tertiary)] text-sm">
               选择一个 Agent 直接对话，或在个股详情页使用 Team 全量分析
             </p>
-          </div>
-
-          <div className="grid grid-cols-2 xl:grid-cols-3 gap-4">
-            {AGENTS.map((agent) => {
-              const isActive = activeAgentId === agent.id;
-              const hasSessions = agentStates[agent.id].sessions.length > 0;
-              return (
-                <div
-                  key={agent.id}
-                  className={cn(
-                    "p-5 rounded-xl text-left border transition-all group",
-                    isActive
-                      ? "border-[#f5a623]/50 bg-[#f5a623]/5"
-                      : "border-[var(--border-color)] bg-[var(--bg-secondary)] hover:border-[#f5a623]/30 hover:bg-[var(--bg-hover)]",
-                  )}
-                >
-                  <button
-                    onClick={() => openAgent(agent.id)}
-                    className="w-full text-left"
-                  >
-                    <div className="flex items-start justify-between mb-3">
-                      <div
-                        className="w-10 h-10 rounded-lg flex items-center justify-center text-xl"
-                        style={{ background: `${agent.color}15` }}
-                      >
-                        {agent.emoji}
-                      </div>
-                      {hasSessions && (
-                        <span className="w-2 h-2 bg-[#f5a623] rounded-full mt-1" />
-                      )}
-                    </div>
-                    <div className="font-medium text-[var(--text-primary)] mb-1">
-                      {agent.label}
-                    </div>
-                    <p className="text-xs text-[var(--text-tertiary)] leading-relaxed">
-                      {agent.description}
-                    </p>
-                    <div
-                      className="mt-3 flex items-center gap-1.5 text-xs font-medium transition-colors"
-                      style={{
-                        color: isActive ? "#f5a623" : agent.color + "aa",
-                      }}
-                    >
-                      <MessageSquare size={12} />
-                      {isActive ? "对话中" : "启动对话"}
-                    </div>
-                  </button>
-                </div>
-              );
-            })}
-
+            {/* Tab 导航 */}
             <div
-              ref={teamReportRef}
-              className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)] p-5"
+              className="flex gap-1 mt-4 border-b"
+              style={{ borderColor: "var(--border-color)" }}
             >
-              <div className="mb-3 flex items-center gap-2">
-                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#f5a623]/10 text-[#f5a623]">
-                  <FileText size={18} />
-                </div>
-                <div>
-                  <div className="font-medium text-[var(--text-primary)]">
-                    报告
-                  </div>
-                  <p className="text-xs text-[var(--text-tertiary)] leading-relaxed">
-                    独立查看和维护 Team 生成的个股分析报告
-                  </p>
-                </div>
-              </div>
-
-              <div className="mb-3 flex flex-wrap gap-2">
-                {teamReports.map((report) => (
-                  <div
-                    key={report.code}
-                    className="flex items-center gap-1 rounded-full border border-[var(--border-color)] bg-[var(--bg-primary)] px-2 py-1 text-[11px]"
-                  >
-                    <button
-                      type="button"
-                      onClick={() => openTeamReport(report)}
-                      className="text-[var(--text-secondary)] hover:text-[#f5a623]"
-                    >
-                      {report.name}
-                    </button>
-                    <span
-                      className={cn(
-                        "inline-block h-2 w-2 rounded-full",
-                        report.status === "ready"
-                          ? "bg-emerald-400"
-                          : report.status === "running"
-                            ? "bg-amber-400"
-                            : report.status === "error"
-                              ? "bg-red-400"
-                              : "bg-[var(--text-tertiary)]",
-                      )}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => removeTeamReport(report.code)}
-                      className="text-[var(--text-tertiary)] hover:text-red-400"
-                      title="删除报告"
-                    >
-                      <X size={10} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-
-              <div className="relative">
-                <div className="flex items-center gap-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] px-2 py-1.5">
-                  <Search size={12} className="text-[var(--text-tertiary)]" />
-                  <input
-                    value={teamReportQuery}
-                    onChange={(e) => setTeamReportQuery(e.target.value)}
-                    placeholder="添加个股报告"
-                    className="w-full bg-transparent text-xs text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
-                  />
-                  {teamSearchLoading && (
-                    <Loader2
-                      size={12}
-                      className="animate-spin text-[#f5a623]"
-                    />
-                  )}
-                </div>
-                {teamSearchOpen && teamSearchResults.length > 0 && (
-                  <div className="absolute z-20 mt-2 w-full rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)] p-1 shadow-lg">
-                    {teamSearchResults.slice(0, 8).map((item) => (
-                      <button
-                        key={item.code}
-                        type="button"
-                        onClick={() => void addTeamReport(item)}
-                        className="flex w-full items-center justify-between rounded-lg px-2 py-2 text-left hover:bg-[var(--bg-hover)]"
-                      >
-                        <span className="text-xs text-[var(--text-secondary)]">
-                          {item.name}
-                        </span>
-                        <span className="text-[10px] text-[var(--text-tertiary)]">
-                          {item.code}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
+              <button
+                onClick={() => setActiveTab("stock")}
+                className={cn(
+                  "px-4 py-2 text-sm font-medium transition-all border-b-2 -mb-px",
+                  activeTab === "stock"
+                    ? "border-[#f5a623] text-[#f5a623]"
+                    : "border-transparent text-[var(--text-tertiary)] hover:text-[var(--text-primary)]",
                 )}
-              </div>
+              >
+                选股
+              </button>
+              <button
+                onClick={() => setActiveTab("tools")}
+                className={cn(
+                  "px-4 py-2 text-sm font-medium transition-all border-b-2 -mb-px",
+                  activeTab === "tools"
+                    ? "border-[#f5a623] text-[#f5a623]"
+                    : "border-transparent text-[var(--text-tertiary)] hover:text-[var(--text-primary)]",
+                )}
+              >
+                小工具
+              </button>
             </div>
           </div>
+
+          {activeTab === "stock" && (
+            <div className="grid grid-cols-2 xl:grid-cols-3 gap-4">
+              {AGENTS.map((agent) => {
+                const isActive = activeAgentId === agent.id;
+                const hasSessions = agentStates[agent.id].sessions.length > 0;
+                return (
+                  <div
+                    key={agent.id}
+                    className={cn(
+                      "p-5 rounded-xl text-left border transition-all group",
+                      isActive
+                        ? "border-[#f5a623]/50 bg-[#f5a623]/5"
+                        : "border-[var(--border-color)] bg-[var(--bg-secondary)] hover:border-[#f5a623]/30 hover:bg-[var(--bg-hover)]",
+                    )}
+                  >
+                    <button
+                      onClick={() => openAgent(agent.id)}
+                      className="w-full text-left"
+                    >
+                      <div className="flex items-start justify-between mb-3">
+                        <div
+                          className="w-10 h-10 rounded-lg flex items-center justify-center text-xl"
+                          style={{ background: `${agent.color}15` }}
+                        >
+                          {agent.emoji}
+                        </div>
+                        {hasSessions && (
+                          <span className="w-2 h-2 bg-[#f5a623] rounded-full mt-1" />
+                        )}
+                      </div>
+                      <div className="font-medium text-[var(--text-primary)] mb-1">
+                        {agent.label}
+                      </div>
+                      <p className="text-xs text-[var(--text-tertiary)] leading-relaxed">
+                        {agent.description}
+                      </p>
+                      <div
+                        className="mt-3 flex items-center gap-1.5 text-xs font-medium transition-colors"
+                        style={{
+                          color: isActive ? "#f5a623" : agent.color + "aa",
+                        }}
+                      >
+                        <MessageSquare size={12} />
+                        {isActive ? "对话中" : "启动对话"}
+                      </div>
+                    </button>
+                  </div>
+                );
+              })}
+
+              <div
+                ref={teamReportRef}
+                className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)] p-5"
+              >
+                <div className="mb-3 flex items-center gap-2">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#f5a623]/10 text-[#f5a623]">
+                    <FileText size={18} />
+                  </div>
+                  <div>
+                    <div className="font-medium text-[var(--text-primary)]">
+                      报告
+                    </div>
+                    <p className="text-xs text-[var(--text-tertiary)] leading-relaxed">
+                      独立查看和维护 Team 生成的个股分析报告
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mb-3 flex flex-wrap gap-2">
+                  {teamReports.map((report) => (
+                    <div
+                      key={report.code}
+                      className="flex items-center gap-1 rounded-full border border-[var(--border-color)] bg-[var(--bg-primary)] px-2 py-1 text-[11px]"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => openTeamReport(report)}
+                        className="text-[var(--text-secondary)] hover:text-[#f5a623]"
+                      >
+                        {report.name}
+                      </button>
+                      <span
+                        className={cn(
+                          "inline-block h-2 w-2 rounded-full",
+                          report.status === "ready"
+                            ? "bg-emerald-400"
+                            : report.status === "running"
+                              ? "bg-amber-400"
+                              : report.status === "error"
+                                ? "bg-red-400"
+                                : "bg-[var(--text-tertiary)]",
+                        )}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removeTeamReport(report.code)}
+                        className="text-[var(--text-tertiary)] hover:text-red-400"
+                        title="删除报告"
+                      >
+                        <X size={10} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="relative">
+                  <div className="flex items-center gap-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] px-2 py-1.5">
+                    <Search size={12} className="text-[var(--text-tertiary)]" />
+                    <input
+                      value={teamReportQuery}
+                      onChange={(e) => setTeamReportQuery(e.target.value)}
+                      placeholder="添加个股报告"
+                      className="w-full bg-transparent text-xs text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
+                    />
+                    {teamSearchLoading && (
+                      <Loader2
+                        size={12}
+                        className="animate-spin text-[#f5a623]"
+                      />
+                    )}
+                  </div>
+                  {teamSearchOpen && teamSearchResults.length > 0 && (
+                    <div className="absolute z-20 mt-2 w-full rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)] p-1 shadow-lg">
+                      {teamSearchResults.slice(0, 8).map((item) => (
+                        <button
+                          key={item.code}
+                          type="button"
+                          onClick={() => void addTeamReport(item)}
+                          className="flex w-full items-center justify-between rounded-lg px-2 py-2 text-left hover:bg-[var(--bg-hover)]"
+                        >
+                          <span className="text-xs text-[var(--text-secondary)]">
+                            {item.name}
+                          </span>
+                          <span className="text-[10px] text-[var(--text-tertiary)]">
+                            {item.code}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === "tools" && <XmindTool />}
         </div>
       </div>
 
       {/* 拖拽分隔条 + 收起按钮 */}
-      {activeAgent && activeSession && (
+      {activeTab === "stock" && activeAgent && activeSession && (
         <div
           className="relative flex items-center shrink-0"
           style={{ width: 10 }}
@@ -1375,7 +1409,7 @@ export default function AgentsPage() {
       )}
 
       {/* Right: Chat panel */}
-      {activeAgent && activeSession && chatVisible && (
+      {activeTab === "stock" && activeAgent && activeSession && chatVisible && (
         <div
           className="border-l border-[var(--border-color)] bg-[var(--bg-deep)] flex flex-col shrink-0 h-full"
           style={{ width: chatWidth }}
@@ -1713,15 +1747,18 @@ export default function AgentsPage() {
       )}
 
       {/* chat 收起时显示展开箭头 */}
-      {activeAgent && activeSession && !chatVisible && (
-        <button
-          onClick={() => setChatVisible(true)}
-          className="shrink-0 w-8 border-l border-[var(--border-color)] bg-[var(--bg-secondary)] flex flex-col items-center justify-center gap-1 hover:bg-[var(--bg-hover)] transition-colors text-[var(--text-tertiary)] hover:text-[#f5a623]"
-          title="展开面板"
-        >
-          <PanelRightOpen size={14} />
-        </button>
-      )}
+      {activeTab === "stock" &&
+        activeAgent &&
+        activeSession &&
+        !chatVisible && (
+          <button
+            onClick={() => setChatVisible(true)}
+            className="shrink-0 w-8 border-l border-[var(--border-color)] bg-[var(--bg-secondary)] flex flex-col items-center justify-center gap-1 hover:bg-[var(--bg-hover)] transition-colors text-[var(--text-tertiary)] hover:text-[#f5a623]"
+            title="展开面板"
+          >
+            <PanelRightOpen size={14} />
+          </button>
+        )}
     </div>
   );
 }

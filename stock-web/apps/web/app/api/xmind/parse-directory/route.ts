@@ -3,22 +3,22 @@ import { NextRequest, NextResponse } from "next/server";
 const DATA_SERVICE_URL =
   process.env.DATA_SERVICE_URL || "http://localhost:8000";
 
-export async function POST(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> },
-) {
-  const { id } = await params;
+export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
-    const file = formData.get("file");
-    if (!file || !(file instanceof File)) {
-      return NextResponse.json({ error: "No file uploaded" }, { status: 400 });
+    const files = formData.getAll("files");
+    if (!files || files.length === 0) {
+      return NextResponse.json({ error: "No files uploaded" }, { status: 400 });
     }
 
     const forwardForm = new FormData();
-    forwardForm.append("file", file, file.name);
+    for (const f of files) {
+      if (f instanceof File) {
+        forwardForm.append("files", f, f.name);
+      }
+    }
 
-    const res = await fetch(`${DATA_SERVICE_URL}/api/xmind/merge-pdf/${id}`, {
+    const res = await fetch(`${DATA_SERVICE_URL}/api/xmind/parse-directory`, {
       method: "POST",
       body: forwardForm,
     });

@@ -1,7 +1,6 @@
-from fastapi import APIRouter, Query, Depends
-from sqlalchemy.orm import Session
-
-from db import get_db, StockNews
+from fastapi import APIRouter, HTTPException, Query
+from fastapi.concurrency import run_in_threadpool
+import realtime_data
 
 router = APIRouter()
 
@@ -10,25 +9,19 @@ router = APIRouter()
 async def get_news(
     code: str,
     count: int = Query(default=20, ge=5, le=100),
-    db: Session = Depends(get_db),
 ):
-    rows = (
-        db.query(StockNews)
-        .filter(StockNews.code == code)
-        .order_by(StockNews.pub_time.desc())
-        .limit(count)
-        .all()
-    )
+    news = await run_in_threadpool(realtime_data.fetch_stock_news, code)
+    news = news[:count]
     return {
         "code": code,
         "news": [
             {
-                "code": r.code,
-                "title": r.title,
-                "url": r.url,
-                "source": r.source,
-                "pubTime": r.pub_time,
+                "code": r.get("code", code),
+                "title": r.get("title", ""),
+                "url": r.get("url", ""),
+                "source": r.get("source", ""),
+                "pubTime": r.get("pubTime", ""),
             }
-            for r in rows
+            for r in news
         ],
     }

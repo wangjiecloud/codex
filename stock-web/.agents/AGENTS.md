@@ -5,30 +5,35 @@
 - 写入数据时若使用 INSERT OR REPLACE / on_conflict_do_update，必须明确告知用户该操作会覆盖已有数据，并获得同意后才能执行
 - 任何涉及数据库数据变更的脚本（如 seed、migrate、reset），执行前必须获得用户明确授权
 
-1、所有的股票相关的数据，都要存到数据库中
+1、实时数据优先规则（最高优先级）：
 
-1.1、股票基本面（F10）数据爬取规则：
+- 所有股票相关的行情、K线、分时、基本面、板块、资金流向、融资融券、新闻、快讯、全球指数等数据，一律使用实时查询，不再存入数据库
+- 数据源参考 fundtool-extension 项目模式：
+  - 腾讯财经（qt.gtimg.cn）：A股/港股/美股实时行情 + 分钟K线 + 日/周/月K线
+  - 东方财富（push2his.eastmoney.com / push2delay.eastmoney.com）：板块/指数/换手率/资金流向/融资融券/F10基本面
+  - 新浪财经（hq.sinajs.cn / suggest3.sinajs.cn）：期货/搜索建议/贵金属
+- 请求时 URL 拼接时间戳 `_=${Date.now()}` 防缓存
+- 腾讯/新浪接口返回 GBK 编码，需用 TextDecoder('gbk') 解码
+- 新浪接口需带 Referer: https://finance.sina.com.cn
+- 东方财富 secid 前缀：1.=沪 0.=深/bj 116.=港 105.=美股 100.=全球指数 90.=板块
+- 只有以下结构性数据可存数据库（用户数据/产业图谱元数据）：
+  - industry_node / industry_edge / industry_meta / industry_list（产业链图谱）
+  - user_watchlist（自选股）
+  - portfolio_holding / portfolio_trade（持仓/交易）
+  - memo（备忘录）
+  - user_strategy（用户策略）
+  - xmind_file / xmind_node（XMind文件）
+- 严禁创建任何定时同步任务（APScheduler），数据仅在用户请求时实时获取
+- 严禁创建任何数据监控/同步状态页面
 
-- **必须使用 f10-scraper skill**（位于 `.agents/skills/f10-scraper/`）来爬取和入库 F10 数据
-- 爬取命令（在 `apps/data-service/` 目录下执行）：
-  ```bash
-  python ../../.agents/skills/f10-scraper/scripts/scrape_f10.py --code {股票代码}
-  ```
-- 覆盖 11 张数据库表：stock_f10_snapshot / stock_f10_financial_statement / stock_f10_dividend_history / stock_f10_institution_forecast / stock_f10_business_analysis / stock_f10_shareholder_info / stock_f10_peer_comparison / stock_f10_company_profile / stock_f10_key_events / stock_f10_fund_flow / stock_f10_research_report
-- 爬取后必须用 `--verify-only` 参数验证数据已写入所有表
-- 详细的爬取方法、SPA 结构说明、已知问题解决方案见 `.agents/skills/f10-scraper/SKILL.md`
+2、新增产业时只需补全以下结构性数据：
 
-2、新增产业时必须完整补全以下所有数据，缺一不可：
-
-- stock_meta：产业内所有股票的基本信息（code/name/market/industry_ids）
-- stock_quote：对应股票的行情缓存（新增时写入默认值0，再调用同步）
-- stock_kline：所有股票的日K线数据（至少400个交易日），调用 \_sync_klines(code, "daily")
-- stock_fundamental：所有股票的基本面数据，调用 \_sync_fundamental(code)
 - industry_list：列表页卡片（industry_id/name/description/icon/company_count/last_analyzed/representatives/sort_order）
 - industry_meta：产业元信息（industry_id/title/subtitle/layer_labels/sort_order）
 - industry_node：产业链图谱节点，需含（industry_id/node_id/x/y/label/icon/desc/layer/ticker/market/group_name/stocks）
 - industry_edge：产业链图谱连接边（industry_id/edge_id/source/target/layer/label）
 - 前端 OVERVIEW_INDUSTRIES 常量：在 IndustryDetailContent.tsx 的 OVERVIEW_INDUSTRIES 数组中追加新产业节点（id/label/icon/color/reps/x/y），并在 OVERVIEW_EDGES_DEF 中追加与其他产业的关联边
+- 行情/K线/基本面等数据无需预存，前端请求时实时获取
 
 3、产业链图谱节点设计规范：
 
@@ -71,21 +76,18 @@
 000050 深天马A、002652 蓝思科技、002475 立讯精密、002241 歌尔股份、
 002129 中环股份、688599 天岳先进
 
-6、routers/quote.py 中 \_is_a_share() 函数的A股判断规则：
+6、A股判断规则：
 
 - 以 0 或 3 开头（深交所主板/创业板）：True
 - 以 6 开头（上交所全部，含600/601/603/605/688等）：True
 - 其他（含NVDA/AAPL等海外股票代码）：False
 
-7、向现有产业的 3D图/供应链图 新增节点时，必须同步以下所有数据，缺一不可：
+7、向现有产业的 3D图/供应链图 新增节点时，只需同步以下结构性数据：
 
 - industry_node：新增节点记录（industry_id/node_id/label/layer/x/y/stocks/group_name/desc/icon/ticker/market）
 - industry_edge：新增与现有节点的连接边（industry_id/edge_id/source/target/layer/label）
-- stock_meta：新节点中所有 A 股的基本信息（code/name/market/industry_ids）
-- stock_quote：对应股票的行情缓存（新增时写入默认值0）
-- stock_kline：调用 routers/industry.py 中的 \_sync_klines(code, "daily")，获取至少 266 个交易日 K 线
-- stock_fundamental：调用 routers/industry.py 中的 \_sync_fundamental(code)
 - industry_list.company_count：重新统计产业内 stocks 字段去重后的 A 股数量并更新
+- 行情/K线/基本面数据无需预存，实时获取
 - 如果新增节点属于 upstream 层且 x 坐标与现有节点重叠，需重新均匀分布所有同层节点的 x 坐标（范围 100-1800）
 
 9、编译 codex-rs 规则：

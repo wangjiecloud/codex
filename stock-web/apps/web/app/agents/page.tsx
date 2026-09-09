@@ -36,6 +36,13 @@ import {
   TeamReport,
   upsertTeamReport,
 } from "@/lib/teamReports";
+import {
+  loadScreenQueries,
+  addScreenQuery,
+  updateScreenQuery,
+  removeScreenQuery,
+  type ScreenQuery,
+} from "@/lib/screenQueries";
 import { XmindTool } from "@/components/agents/XmindTool";
 
 const AGENTS = [
@@ -90,16 +97,33 @@ const AGENTS = [
     label: "Team 协同分析",
     emoji: "⚡",
     description:
-      "Orchestrator 主控调度，串联数据采集→技术→盘面→基本面→舆情→投资建议，流式展示每阶段进度，最终输出综合分析报告",
+      "两种模式：①输入自然语言选股条件（如「筛选出换手率低于1%、PE小于30的半导体股票」），自动筛股+盘面定调+标的点评；②输入股票代码，串联全流程分析输出综合报告",
     color: "#f5a623",
   },
 ];
+
+const AGENT_MAP: Record<
+  string,
+  { emoji: string; label: string; color: string }
+> = Object.fromEntries(
+  AGENTS.map((a) => [a.id, { emoji: a.emoji, label: a.label, color: a.color }]),
+);
+
+interface TeamProgressItem {
+  agentId: string;
+  agentLabel: string;
+  status: "working" | "done";
+  result?: string;
+  streamContent?: string;
+}
 
 interface ChatMessage {
   id?: number;
   role: "user" | "agent";
   content: string;
   image?: string;
+  _id?: string;
+  teamProgress?: TeamProgressItem[];
 }
 
 interface Session {
@@ -111,15 +135,15 @@ interface Session {
   messageCount?: number;
   loadedCount?: number;
   sessionId?: string;
+  loading?: boolean;
+  currentTaskId?: string;
 }
 
 interface AgentState {
   sessions: Session[];
   activeSessionId: string;
   input: string;
-  loading: boolean;
   pastedImage?: string;
-  currentTaskId?: string;
 }
 
 interface StockSearchResult {
@@ -175,6 +199,8 @@ function normalizeSession(
     messages,
     messageCount: session.messageCount ?? messages.length,
     loadedCount: messages.length,
+    loading: false,
+    currentTaskId: undefined,
   };
 }
 
@@ -190,8 +216,6 @@ export default function AgentsPage() {
             sessions: [],
             activeSessionId: "",
             input: "",
-            loading: false,
-            currentTaskId: undefined,
           },
         ]),
       ),
@@ -214,6 +238,9 @@ export default function AgentsPage() {
   const [teamSearchOpen, setTeamSearchOpen] = useState(false);
   const [teamSearchLoading, setTeamSearchLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<"stock" | "tools">("stock");
+  const [screenQueries, setScreenQueries] = useState<ScreenQuery[]>([]);
+  const [editingQueryId, setEditingQueryId] = useState<string | null>(null);
+  const [editingQueryText, setEditingQueryText] = useState("");
 
   const persistSession = useCallback((agentId: string, session: Session) => {
     fetch("/api/agents/sessions", {
@@ -258,6 +285,7 @@ export default function AgentsPage() {
 
   useEffect(() => {
     setTeamReports(loadTeamReports());
+    setScreenQueries(loadScreenQueries());
   }, []);
 
   useEffect(() => {
@@ -631,6 +659,11 @@ export default function AgentsPage() {
 
   const deleteSession = (agentId: string, sessionId: string) => {
     removeSessionFromDb(sessionId);
+    const sse = streamRefs.current[sessionId];
+    if (sse) {
+      sse.close();
+      streamRefs.current[sessionId] = null;
+    }
     setAgentStates((prev) => {
       const state = prev[agentId];
       const remaining = state.sessions.filter((s) => s.id !== sessionId);
@@ -710,9 +743,10 @@ export default function AgentsPage() {
   ) => {
     const state = agentStates[agentId];
     const inputText = overrideText ?? state.input;
-    if ((!inputText.trim() && !state.pastedImage) || state.loading) return;
-    const session = state.sessions.find((s) => s.id === state.activeSessionId);
+    const session = state.sessions.find((s) => s.id === sessionId);
     if (!session) return;
+    if ((!inputText.trim() && !state.pastedImage) || session.loading) return;
+    const sessionId = state.activeSessionId;
 
     const userText = inputText;
     const pastedImage = overrideText ? undefined : state.pastedImage;
@@ -726,6 +760,7 @@ export default function AgentsPage() {
       role: "agent",
       content: "",
       _id: placeholderId,
+      ...(agentId === "team" ? { teamProgress: [] as TeamProgressItem[] } : {}),
     };
 
     const isFirstUserMsg =
@@ -740,12 +775,12 @@ export default function AgentsPage() {
         ...prev[agentId],
         input: "",
         pastedImage: undefined,
-        loading: true,
         sessions: prev[agentId].sessions.map((s) =>
-          s.id === state.activeSessionId
+          s.id === sessionId
             ? {
                 ...s,
                 title: newTitle,
+                loading: true,
                 messages: [
                   ...(truncateBeforeIndex !== undefined
                     ? s.messages.slice(0, truncateBeforeIndex)
@@ -771,6 +806,15 @@ export default function AgentsPage() {
             ? `${userText}（附带图片）`
             : userText;
 
+      // Team 选股模式：保存查询到 localStorage
+      if (agentId === "team" && userText.trim()) {
+        const screenRe =
+          /(筛选|筛出|找出|选出|选股|符合条件|满足条件|帮我找|找一下|查找|有哪些股票|哪些股票|过滤|找.*股票|筛.*股票)/;
+        if (screenRe.test(userText.trim())) {
+          setScreenQueries((prev) => addScreenQuery(prev, userText.trim()));
+        }
+      }
+
       const endpoint =
         agentId === "team" ? "/api/agents/team" : `/api/agents/${agentId}`;
       const payload =
@@ -795,12 +839,14 @@ export default function AgentsPage() {
         ...prev,
         [agentId]: {
           ...prev[agentId],
-          currentTaskId: taskId,
+          sessions: prev[agentId].sessions.map((s) =>
+            s.id === sessionId ? { ...s, currentTaskId: taskId } : s,
+          ),
         },
       }));
 
       const sse = new EventSource(`/api/agents/stream/${taskId}`);
-      streamRefs.current[agentId] = sse;
+      streamRefs.current[sessionId] = sse;
 
       sse.onmessage = (event) => {
         const data = JSON.parse(event.data) as {
@@ -812,13 +858,14 @@ export default function AgentsPage() {
           agentId?: string;
           agentLabel?: string;
           sessionId?: string;
+          result?: string;
         };
 
         if (data.type === "session_id" && data.sessionId) {
           const sid = data.sessionId;
           setAgentStates((prev) => {
             const sessions = prev[agentId].sessions.map((s) => {
-              if (s.id !== state.activeSessionId) return s;
+              if (s.id !== sessionId) return s;
               const updated = { ...s, sessionId: sid };
               persistSession(agentId, updated);
               return updated;
@@ -831,7 +878,7 @@ export default function AgentsPage() {
             [agentId]: {
               ...prev[agentId],
               sessions: prev[agentId].sessions.map((s) =>
-                s.id === state.activeSessionId
+                s.id === sessionId
                   ? {
                       ...s,
                       messages: s.messages.map((m) =>
@@ -839,9 +886,16 @@ export default function AgentsPage() {
                         placeholderId
                           ? {
                               ...m,
-                              content:
-                                m.content ||
-                                `正在协调 ${data.agentLabel || data.agentId}...`,
+                              teamProgress: [
+                                ...(m.teamProgress || []),
+                                {
+                                  agentId: data.agentId || "",
+                                  agentLabel:
+                                    data.agentLabel || data.agentId || "",
+                                  status: "working" as const,
+                                  streamContent: "",
+                                },
+                              ],
                             }
                           : m,
                       ),
@@ -856,20 +910,27 @@ export default function AgentsPage() {
             [agentId]: {
               ...prev[agentId],
               sessions: prev[agentId].sessions.map((s) =>
-                s.id === state.activeSessionId
+                s.id === sessionId
                   ? {
                       ...s,
-                      messages: s.messages.map((m) =>
-                        (m as ChatMessage & { _id?: string })._id ===
-                        placeholderId
-                          ? {
-                              ...m,
-                              content:
-                                m.content ||
-                                `${data.agentLabel || data.agentId} 已完成，继续汇总中...`,
-                            }
-                          : m,
-                      ),
+                      messages: s.messages.map((m) => {
+                        if (
+                          (m as ChatMessage & { _id?: string })._id !==
+                          placeholderId
+                        )
+                          return m;
+                        const progress = m.teamProgress || [];
+                        const updated = progress.map((p) =>
+                          p.agentId === data.agentId && p.status === "working"
+                            ? {
+                                ...p,
+                                status: "done" as const,
+                                result: data.result || "完成",
+                              }
+                            : p,
+                        );
+                        return { ...m, teamProgress: updated };
+                      }),
                     }
                   : s,
               ),
@@ -878,20 +939,31 @@ export default function AgentsPage() {
         } else if (agentId === "team" && data.type === "team_done") {
           setAgentStates((prev) => {
             const sessions = prev[agentId].sessions.map((s) => {
-              if (s.id !== state.activeSessionId) return s;
+              if (s.id !== sessionId) return s;
               const msgs = s.messages.map((m) => {
                 if (
                   (m as ChatMessage & { _id?: string })._id !== placeholderId
                 ) {
                   return m;
                 }
+                const progress = (m.teamProgress || []).map((p) =>
+                  p.status === "working"
+                    ? { ...p, status: "done" as const }
+                    : p,
+                );
                 return {
                   ...m,
                   content:
                     data.advice || data.message || data.text || "分析完成",
+                  teamProgress: progress,
                 };
               });
-              const updatedSession = { ...s, messages: msgs };
+              const updatedSession = {
+                ...s,
+                messages: msgs,
+                loading: false,
+                currentTaskId: undefined,
+              };
               persistSession(agentId, updatedSession);
               return updatedSession;
             });
@@ -899,21 +971,55 @@ export default function AgentsPage() {
               ...prev,
               [agentId]: {
                 ...prev[agentId],
-                loading: false,
-                currentTaskId: undefined,
                 sessions,
               },
             };
           });
-          streamRefs.current[agentId] = null;
+          streamRefs.current[sessionId] = null;
           sse.close();
+        } else if (
+          agentId === "team" &&
+          data.type === "stream_delta" &&
+          data.delta
+        ) {
+          setAgentStates((prev) => ({
+            ...prev,
+            [agentId]: {
+              ...prev[agentId],
+              sessions: prev[agentId].sessions.map((s) =>
+                s.id === sessionId
+                  ? {
+                      ...s,
+                      messages: s.messages.map((m) => {
+                        if (
+                          (m as ChatMessage & { _id?: string })._id !==
+                          placeholderId
+                        )
+                          return m;
+                        const progress = m.teamProgress || [];
+                        const updated = progress.map((p, idx) =>
+                          idx === progress.length - 1 && p.status === "working"
+                            ? {
+                                ...p,
+                                streamContent:
+                                  (p.streamContent || "") + data.delta,
+                              }
+                            : p,
+                        );
+                        return { ...m, teamProgress: updated };
+                      }),
+                    }
+                  : s,
+              ),
+            },
+          }));
         } else if (data.type === "stream_delta" && data.delta) {
           setAgentStates((prev) => ({
             ...prev,
             [agentId]: {
               ...prev[agentId],
               sessions: prev[agentId].sessions.map((s) =>
-                s.id === state.activeSessionId
+                s.id === sessionId
                   ? {
                       ...s,
                       messages: s.messages.map((m) =>
@@ -934,7 +1040,7 @@ export default function AgentsPage() {
         ) {
           setAgentStates((prev) => {
             const sessions = prev[agentId].sessions.map((s) => {
-              if (s.id !== state.activeSessionId) return s;
+              if (s.id !== sessionId) return s;
               const msgs = s.messages.map((m) => {
                 if ((m as ChatMessage & { _id?: string })._id !== placeholderId)
                   return m;
@@ -947,7 +1053,12 @@ export default function AgentsPage() {
                       : currentContent || "分析完成";
                 return { ...m, content: finalContent };
               });
-              const updatedSession = { ...s, messages: msgs };
+              const updatedSession = {
+                ...s,
+                messages: msgs,
+                loading: false,
+                currentTaskId: undefined,
+              };
               persistSession(agentId, updatedSession);
               return updatedSession;
             });
@@ -955,13 +1066,11 @@ export default function AgentsPage() {
               ...prev,
               [agentId]: {
                 ...prev[agentId],
-                loading: false,
-                currentTaskId: undefined,
                 sessions,
               },
             };
           });
-          streamRefs.current[agentId] = null;
+          streamRefs.current[sessionId] = null;
           sse.close();
         }
       };
@@ -970,12 +1079,12 @@ export default function AgentsPage() {
           ...prev,
           [agentId]: {
             ...prev[agentId],
-            loading: false,
-            currentTaskId: undefined,
             sessions: prev[agentId].sessions.map((s) =>
-              s.id === state.activeSessionId
+              s.id === sessionId
                 ? {
                     ...s,
+                    loading: false,
+                    currentTaskId: undefined,
                     messages: s.messages.map((m) =>
                       (m as ChatMessage & { _id?: string })._id ===
                       placeholderId
@@ -987,7 +1096,7 @@ export default function AgentsPage() {
             ),
           },
         }));
-        streamRefs.current[agentId] = null;
+        streamRefs.current[sessionId] = null;
         sse.close();
       };
     } catch (error) {
@@ -997,12 +1106,12 @@ export default function AgentsPage() {
         ...prev,
         [agentId]: {
           ...prev[agentId],
-          loading: false,
-          currentTaskId: undefined,
           sessions: prev[agentId].sessions.map((s) =>
-            s.id === state.activeSessionId
+            s.id === sessionId
               ? {
                   ...s,
+                  loading: false,
+                  currentTaskId: undefined,
                   messages: s.messages.map((m) =>
                     (m as ChatMessage & { _id?: string })._id === placeholderId
                       ? { ...m, content: message }
@@ -1018,12 +1127,17 @@ export default function AgentsPage() {
 
   const stopMessage = useCallback(
     async (agentId: string) => {
-      const taskId = agentStates[agentId]?.currentTaskId;
-      const sse = streamRefs.current[agentId];
+      const agentState = agentStates[agentId];
+      if (!agentState) return;
+      const session = agentState.sessions.find(
+        (s) => s.id === agentState.activeSessionId,
+      );
+      const taskId = session?.currentTaskId;
       if (!taskId) return;
+      const sse = streamRefs.current[agentState.activeSessionId];
       if (sse) {
         sse.close();
-        streamRefs.current[agentId] = null;
+        streamRefs.current[agentState.activeSessionId] = null;
       }
       try {
         await fetch(`/api/agents/stream/${taskId}/cancel`, { method: "POST" });
@@ -1032,12 +1146,12 @@ export default function AgentsPage() {
         ...prev,
         [agentId]: {
           ...prev[agentId],
-          loading: false,
-          currentTaskId: undefined,
           sessions: prev[agentId].sessions.map((s) => {
             if (s.id !== prev[agentId].activeSessionId) return s;
             return {
               ...s,
+              loading: false,
+              currentTaskId: undefined,
               messages: s.messages.map((m) => {
                 if ((m as ChatMessage & { _id?: string })._id) {
                   return {
@@ -1373,6 +1487,122 @@ export default function AgentsPage() {
                   )}
                 </div>
               </div>
+
+              {/* 选股查询历史 */}
+              {screenQueries.length > 0 && (
+                <div className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)] p-5">
+                  <div className="mb-3 flex items-center gap-2">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#38bdf8]/10 text-[#38bdf8]">
+                      <Search size={18} />
+                    </div>
+                    <div>
+                      <div className="font-medium text-[var(--text-primary)]">
+                        选股查询
+                      </div>
+                      <p className="text-xs text-[var(--text-tertiary)] leading-relaxed">
+                        点击重发选股条件，支持编辑和删除
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    {screenQueries.map((sq) => (
+                      <div
+                        key={sq.id}
+                        className="flex items-center gap-1.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] px-2.5 py-1.5 text-xs group"
+                      >
+                        {editingQueryId === sq.id ? (
+                          <>
+                            <input
+                              value={editingQueryText}
+                              onChange={(e) =>
+                                setEditingQueryText(e.target.value)
+                              }
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  setScreenQueries((prev) =>
+                                    updateScreenQuery(
+                                      prev,
+                                      sq.id,
+                                      editingQueryText,
+                                    ),
+                                  );
+                                  setEditingQueryId(null);
+                                } else if (e.key === "Escape") {
+                                  setEditingQueryId(null);
+                                }
+                              }}
+                              className="flex-1 bg-transparent text-[var(--text-primary)] outline-none text-xs min-w-0"
+                              autoFocus
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setScreenQueries((prev) =>
+                                  updateScreenQuery(
+                                    prev,
+                                    sq.id,
+                                    editingQueryText,
+                                  ),
+                                );
+                                setEditingQueryId(null);
+                              }}
+                              className="text-emerald-400 hover:text-emerald-300 shrink-0"
+                              title="保存"
+                            >
+                              <Check size={12} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEditingQueryId(null)}
+                              className="text-[var(--text-tertiary)] hover:text-[var(--text-primary)] shrink-0"
+                              title="取消"
+                            >
+                              <X size={12} />
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                void sendMessage("team", sq.query);
+                              }}
+                              className="flex-1 text-left text-[var(--text-secondary)] hover:text-[#38bdf8] truncate transition-colors"
+                              title={sq.query}
+                            >
+                              {sq.query}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingQueryId(sq.id);
+                                setEditingQueryText(sq.query);
+                              }}
+                              className="text-[var(--text-tertiary)] hover:text-[#38bdf8] opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                              title="编辑"
+                            >
+                              <Pencil size={10} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setScreenQueries((prev) =>
+                                  removeScreenQuery(prev, sq.id),
+                                )
+                              }
+                              className="text-[var(--text-tertiary)] hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                              title="删除"
+                            >
+                              <Trash2 size={10} />
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -1511,13 +1741,16 @@ export default function AgentsPage() {
                           <div className="min-w-0 flex-1">
                             <div
                               className={cn(
-                                "text-xs truncate",
+                                "text-xs truncate flex items-center gap-1",
                                 s.id ===
                                   agentStates[activeAgent.id].activeSessionId
                                   ? "text-[#f5a623] font-medium"
                                   : "text-[var(--text-secondary)]",
                               )}
                             >
+                              {s.loading && (
+                                <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#f5a623] animate-pulse shrink-0" />
+                              )}
                               {s.title}
                             </div>
                             <div className="text-[9px] text-[var(--text-tertiary)] mt-0.5">
@@ -1617,7 +1850,7 @@ export default function AgentsPage() {
                 }
               />
             ))}
-            {activeAgentState?.loading && (
+            {activeSession?.loading && activeAgentId !== "team" && (
               <div className="flex justify-start">
                 <div
                   className="w-7 h-7 rounded-full flex items-center justify-center text-sm shrink-0 mr-2"
@@ -1718,24 +1951,24 @@ export default function AgentsPage() {
               />
               <button
                 onClick={() =>
-                  activeAgentState?.loading
+                  activeSession?.loading
                     ? stopMessage(activeAgent.id)
                     : sendMessage(activeAgent.id)
                 }
                 disabled={
-                  !activeAgentState?.loading &&
+                  !activeSession?.loading &&
                   !activeAgentState?.input.trim() &&
                   !activeAgentState?.pastedImage
                 }
                 className={cn(
                   "p-2.5 disabled:bg-[var(--bg-tertiary)] disabled:text-[var(--text-tertiary)] rounded-lg transition-colors shrink-0 mb-0",
-                  activeAgentState?.loading
+                  activeSession?.loading
                     ? "bg-red-500 hover:bg-red-600 text-white"
                     : "bg-[#f5a623] hover:bg-[#e8961a] text-black",
                 )}
-                title={activeAgentState?.loading ? "停止生成" : "发送消息"}
+                title={activeSession?.loading ? "停止生成" : "发送消息"}
               >
-                {activeAgentState?.loading ? (
+                {activeSession?.loading ? (
                   <Square size={15} fill="currentColor" />
                 ) : (
                   <Send size={15} />
@@ -1763,6 +1996,74 @@ export default function AgentsPage() {
   );
 }
 
+// ─── Team 协同分析进度面板 ─────────────────────────────────────────────────────
+function TeamProgressPanel({ progress }: { progress: TeamProgressItem[] }) {
+  const doneCount = progress.filter((p) => p.status === "done").length;
+  const allDone = doneCount === progress.length && progress.length > 0;
+  const workingAgent = progress.find((p) => p.status === "working");
+
+  return (
+    <div className="mb-3 rounded-lg border border-[var(--border-color)] overflow-hidden">
+      {/* Header */}
+      <div className="flex items-center gap-2 px-3 py-2 bg-[var(--bg-secondary)]">
+        {allDone ? (
+          <Check size={12} className="text-green-400 shrink-0" />
+        ) : (
+          <Loader2 size={12} className="animate-spin text-[#f5a623] shrink-0" />
+        )}
+        <span className="font-medium text-xs">Team 协同分析</span>
+        <span className="text-[var(--text-tertiary)] text-xs">
+          {doneCount}/{progress.length} 已完成
+        </span>
+      </div>
+
+      {/* Agent steps */}
+      <div className="px-3 py-2 space-y-1.5">
+        {progress.map((item) => {
+          const agent = AGENT_MAP[item.agentId];
+          return (
+            <div key={item.agentId} className="flex items-start gap-2 text-xs">
+              <div
+                className="flex items-center gap-1 shrink-0"
+                style={{ minWidth: "82px" }}
+              >
+                {item.status === "done" ? (
+                  <Check size={11} className="text-green-400 shrink-0" />
+                ) : (
+                  <Loader2
+                    size={11}
+                    className="animate-spin text-[#f5a623] shrink-0"
+                  />
+                )}
+                <span style={{ color: agent?.color }}>
+                  {agent?.emoji || "\u{1F527}"} {item.agentLabel}
+                </span>
+              </div>
+              {item.status === "done" && item.result && (
+                <span className="text-[var(--text-tertiary)] truncate flex-1">
+                  {item.result}
+                </span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Currently working agent's streaming content */}
+      {workingAgent && workingAgent.streamContent && (
+        <div className="border-t border-[var(--border-color)] px-3 py-2 max-h-40 overflow-y-auto">
+          <div className="text-[10px] text-[var(--text-tertiary)] mb-1">
+            {workingAgent.agentLabel} 正在工作...
+          </div>
+          <div className="text-xs text-[var(--text-secondary)] whitespace-pre-wrap break-words">
+            {workingAgent.streamContent}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── 单条消息气泡（支持复制为图片） ────────────────────────────────────────────
 function AgentMessage({
   msg,
@@ -1770,7 +2071,7 @@ function AgentMessage({
   onEdit,
   onResend,
 }: {
-  msg: { role: string; content: string; image?: string };
+  msg: ChatMessage;
   activeAgent: { emoji: string; color: string; label: string };
   onEdit?: (newContent: string) => void;
   onResend?: (content: string) => void;
@@ -1911,25 +2212,31 @@ function AgentMessage({
               )}
             </div>
           ) : (
-            <MarkdownMessage content={msg.content} />
+            <>
+              {msg.teamProgress && msg.teamProgress.length > 0 && (
+                <TeamProgressPanel progress={msg.teamProgress} />
+              )}
+              {msg.content && <MarkdownMessage content={msg.content} />}
+              {msg.content && (
+                <div className="flex justify-end mt-1 -mb-0.5">
+                  <button
+                    onClick={handlePreview}
+                    title="Markdown 预览"
+                    className={cn(
+                      "shrink-0 w-5 h-5 rounded-md flex items-center justify-center transition-all duration-150",
+                      "text-[var(--text-tertiary)] hover:text-[#f5a623]",
+                      "opacity-0 group-hover:opacity-100",
+                    )}
+                  >
+                    <ExternalLink size={11} />
+                  </button>
+                </div>
+              )}
+            </>
           )}
         </div>
 
-        {/* Markdown 预览按钮：hover 时显示，与气泡并排 */}
-        <button
-          onClick={handlePreview}
-          title="Markdown 预览"
-          className={cn(
-            "shrink-0 mt-1 w-6 h-6 rounded-md flex items-center justify-center transition-all duration-150",
-            "bg-[var(--bg-secondary)] border border-[var(--border-color)] shadow-sm",
-            "text-[var(--text-tertiary)] hover:text-[#f5a623] hover:border-[#f5a623]",
-            "opacity-0 group-hover:opacity-100",
-            msg.role === "user" && "hidden",
-          )}
-        >
-          <ExternalLink size={12} />
-        </button>
-
+        {/* 复制为图片按钮：hover 时显示，与气泡并排 */}
         <button
           onClick={handleCopyImage}
           title="复制为图片"

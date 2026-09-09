@@ -1137,43 +1137,11 @@ function FundFlowModal({ onClose }: { onClose: () => void }) {
   const [sortOrder, setSortOrderFF] = useState<"desc" | "asc">("desc");
   const [items, setItems] = useState<FundFlowItem[]>([]);
   const [loading, setLoading] = useState(false);
-  const [syncing, setSyncing] = useState(false);
-  const [syncMsg, setSyncMsg] = useState("");
   const [error, setError] = useState("");
   const [searchText, setSearchText] = useState("");
 
-  // 组件挂载时：1) 触发后台异步快照 2) 获取各 period 的已有快照日期
-  useEffect(() => {
-    // 后台静默拉取最新数据入库，不阻塞 UI
-    fetch(`${API}/api/fund-flow/snapshot`, {
-      method: "POST",
-      cache: "no-store",
-    }).catch(() => {});
-    // 获取日期列表
-    fetch(`${API}/api/fund-flow/dates`, { cache: "no-store" })
-      .then((r) => r.json())
-      .then((d: DatesMap) => setDatesMap(d))
-      .catch(() => {});
-  }, []);
-
-  // 同步快照 + 刷新数据
   const handleRefresh = async () => {
-    if (syncing || loading) return;
-    if (!selectedDate) {
-      setSyncing(true);
-      setSyncMsg("正在从同花顺拉取最新数据…");
-      try {
-        await fetch(`${API}/api/fund-flow/snapshot/sync`, {
-          method: "POST",
-          cache: "no-store",
-        });
-        setSyncMsg("");
-      } catch {
-        setSyncMsg("");
-      } finally {
-        setSyncing(false);
-      }
-    }
+    if (loading) return;
     await fetchData();
   };
 
@@ -1277,11 +1245,6 @@ function FundFlowModal({ onClose }: { onClose: () => void }) {
             <span className="text-[11px] text-[var(--text-tertiary)]">
               来源：同花顺数据中心
             </span>
-            {syncMsg && (
-              <span className="text-[10px] text-[var(--accent)] animate-pulse ml-1">
-                {syncMsg}
-              </span>
-            )}
 
             {/* 板块类型 */}
             <div className="flex items-center gap-1 ml-2">
@@ -1300,7 +1263,6 @@ function FundFlowModal({ onClose }: { onClose: () => void }) {
                 </button>
               ))}
             </div>
-
             <div className="ml-auto flex items-center gap-2">
               <input
                 type="text"
@@ -1311,14 +1273,14 @@ function FundFlowModal({ onClose }: { onClose: () => void }) {
               />
               <button
                 onClick={handleRefresh}
-                disabled={loading || syncing}
+                disabled={loading}
                 className="flex items-center gap-1 px-2 py-0.5 rounded border border-[var(--border-color)] text-[11px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors disabled:opacity-50"
               >
                 <RefreshCw
                   size={11}
-                  className={cn((loading || syncing) && "animate-spin")}
+                  className={cn(loading && "animate-spin")}
                 />
-                {syncing ? "同步中…" : "刷新"}
+                {loading ? "加载中…" : "刷新"}
               </button>
               <button
                 onClick={onClose}
@@ -1632,7 +1594,6 @@ function RotationModal({ onClose }: { onClose: () => void }) {
   );
   const [onlyIndustry, setOnlyIndustry] = useState(false);
   const [searchText, setSearchText] = useState("");
-  const [syncing, setSyncingRotation] = useState(false);
   // 三层折叠状态：key 为 L1 标签 / industryId / "industryId_layer"
   const [expandedL1, setExpandedL1] = useState<Set<string>>(new Set());
   const [expandedL2, setExpandedL2] = useState<Set<string>>(new Set());
@@ -1664,31 +1625,8 @@ function RotationModal({ onClose }: { onClose: () => void }) {
   }
 
   const handleForceSync = async () => {
-    setSyncingRotation(true);
     try {
-      // Step 1: 同时触发申万 K 线同步 + 产业成分股缺失 K 线补全
-      await Promise.all([
-        fetch(`${API}/api/sw-industry/sync-klines?force=true`, {
-          method: "POST",
-          cache: "no-store",
-        }),
-        fetch(`${API}/api/board/sync-industry-stocks`, {
-          method: "POST",
-          cache: "no-store",
-        }),
-      ]);
-      // 等待成分股 K 线补全（新产业较多时可能需要更长时间）
-      await new Promise((r) => setTimeout(r, 30000));
-
-      // Step 2: 强制重算产业板块聚合 K 线
-      await fetch(`${API}/api/board/calc-industry-kline?force=true&days=60`, {
-        method: "POST",
-        cache: "no-store",
-      });
-      // 等待聚合计算完成
-      await new Promise((r) => setTimeout(r, 15000));
-
-      // Step 3: 重新拉取热力图数据
+      // 重新拉取热力图数据
       setLoading(true);
       const endpoint = onlyIndustry
         ? `${API}/api/board/industry-rotation?days=${days}`
@@ -1699,28 +1637,9 @@ function RotationModal({ onClose }: { onClose: () => void }) {
     } catch {
       // ignore
     } finally {
-      setSyncingRotation(false);
       setLoading(false);
     }
   };
-
-  useEffect(() => {
-    // 申万板块 K 线（常规补全）
-    fetch(`${API}/api/sw-industry/sync-klines`, {
-      method: "POST",
-      cache: "no-store",
-    }).catch(() => {});
-    // 产业板块成分股缺失 K 线补全（新增产业后会自动补）
-    fetch(`${API}/api/board/sync-industry-stocks`, {
-      method: "POST",
-      cache: "no-store",
-    }).catch(() => {});
-    // 产业板块 K 线聚合计算（含新产业检测）
-    fetch(`${API}/api/board/calc-industry-kline`, {
-      method: "POST",
-      cache: "no-store",
-    }).catch(() => {});
-  }, []);
 
   useEffect(() => {
     setLoading(true);
@@ -2048,16 +1967,16 @@ function RotationModal({ onClose }: { onClose: () => void }) {
             {/* 补全数据 — 推到最右 */}
             <button
               onClick={handleForceSync}
-              disabled={syncing}
+              disabled={loading}
               className={cn(
                 "ml-auto flex items-center gap-1 px-2.5 py-0.5 rounded border text-[11px] transition-colors whitespace-nowrap flex-shrink-0",
-                syncing
+                loading
                   ? "border-[var(--accent)]/40 text-[var(--accent)] opacity-70 cursor-not-allowed"
                   : "border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--accent)] hover:border-[var(--accent)]/50",
               )}
             >
-              <RefreshCw size={11} className={cn(syncing && "animate-spin")} />
-              {syncing ? "同步中..." : "补全数据"}
+              <RefreshCw size={11} className={cn(loading && "animate-spin")} />
+              {loading ? "加载中..." : "刷新"}
             </button>
           </div>
         </div>
@@ -2781,6 +2700,307 @@ function RotationModal({ onClose }: { onClose: () => void }) {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// 游资龙虎榜弹窗
+// ──────────────────────────────────────────────────────────────────────────────
+
+interface LhbStock {
+  code: string;
+  name: string;
+  buy: number;
+  sell: number;
+  net: number;
+}
+
+interface LhbGroup {
+  dept: string;
+  shortName: string;
+  totalNet: number;
+  stockCount: number;
+  stocks: LhbStock[];
+}
+
+interface LhbHotmoneyData {
+  date: string;
+  totalCount: number;
+  groups: LhbGroup[];
+}
+
+function fmtYi2(v: number): string {
+  const yi = v / 1e8;
+  if (Math.abs(yi) >= 1) return yi.toFixed(2);
+  return yi.toFixed(4);
+}
+
+const KNOWN_HOTMONEY = new Set([
+  "章盟主",
+  "赵老哥",
+  "炒股养家",
+  "作手新一",
+  "方新侠",
+  "孙哥",
+  "欢乐海岸",
+  "小鳄鱼",
+  "陈小群",
+  "深南哥",
+  "佛山无影脚",
+  "佛山系",
+  "拉萨天团",
+  "92科比",
+  "上塘路",
+  "呼家楼",
+  "六一中路",
+  "消闲派",
+  "余哥",
+  "乔帮主",
+  "宁波桑田路",
+  "思明南路",
+  "腾得系",
+  "紫阳东路",
+  "量化基金",
+  "葛老大",
+  "著名刺客",
+  "炒新一族",
+  "北京炒家",
+  "职业炒手",
+  "瑞鹤仙",
+  "猪肉荣",
+]);
+
+function LhbHotmoneyModal({ onClose }: { onClose: () => void }) {
+  const router = useRouter();
+  const [data, setData] = useState<LhbHotmoneyData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const [queryDate, setQueryDate] = useState("");
+
+  const fetchData = useCallback(async (date?: string) => {
+    setLoading(true);
+    setError("");
+    try {
+      const params = date ? `?date_str=${date.replace(/-/g, "")}` : "";
+      const res = await fetch(`${API}/api/sw-industry/lhb-hotmoney${params}`, {
+        cache: "no-store",
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json: LhbHotmoneyData = await res.json();
+      setData(json);
+    } catch {
+      setError("数据获取失败，请稍后重试");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  const formatDate = (d: string) => {
+    if (!d) return "";
+    const m = d.slice(5, 7);
+    const day = d.slice(8, 10);
+    return `${parseInt(m)}月${parseInt(day)}日`;
+  };
+
+  const filteredGroups = data?.groups.filter(
+    (g) =>
+      !searchQuery ||
+      g.shortName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      g.stocks.some(
+        (s) =>
+          s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          s.code.includes(searchQuery),
+      ),
+  );
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70"
+      onClick={onClose}
+    >
+      <div
+        className="relative flex flex-col bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-xl shadow-2xl overflow-hidden"
+        style={{ width: "min(1000px, 96vw)", maxHeight: "92vh" }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* ── 标题栏 ── */}
+        <div className="flex items-center gap-3 px-5 py-3 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] flex-shrink-0">
+          <Layers size={15} className="text-[#e850e8] flex-shrink-0" />
+          <span className="text-[14px] font-bold text-[var(--text-primary)]">
+            {data ? `${formatDate(data.date)} 游资龙虎榜` : "游资龙虎榜"}
+          </span>
+          {data && (
+            <span className="text-[11px] text-[var(--text-tertiary)]">
+              上榜 {data.totalCount} 只 · {data.groups.length} 个席位
+            </span>
+          )}
+          <div className="ml-auto flex items-center gap-2">
+            <button
+              onClick={() => {
+                const cur = queryDate || todayStr;
+                const d = new Date(cur);
+                d.setDate(d.getDate() - 1);
+                while (d.getDay() === 0 || d.getDay() === 6)
+                  d.setDate(d.getDate() - 1);
+                const ds = d.toISOString().slice(0, 10);
+                setQueryDate(ds);
+                fetchData(ds);
+              }}
+              disabled={loading}
+              className="flex items-center text-[11px] text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors px-1.5 py-1 rounded border border-[var(--border-color)]"
+            >
+              <ChevronDown size={11} className="rotate-90" />
+            </button>
+            <input
+              type="date"
+              value={queryDate || todayStr}
+              max={todayStr}
+              onChange={(e) => {
+                const ds = e.target.value;
+                setQueryDate(ds);
+                fetchData(ds);
+              }}
+              disabled={loading}
+              className="px-2 py-1 text-[11px] bg-[var(--bg-primary)] border border-[var(--border-color)] rounded text-[var(--text-primary)] focus:outline-none focus:border-[#e850e8]/50"
+            />
+            <button
+              onClick={() => {
+                if (queryDate) {
+                  setQueryDate("");
+                  fetchData();
+                } else {
+                  fetchData();
+                }
+              }}
+              disabled={loading || !queryDate}
+              className="flex items-center gap-1 text-[11px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors disabled:opacity-30"
+            >
+              <RefreshCw size={11} className={loading ? "animate-spin" : ""} />
+              {queryDate ? "今日" : "刷新"}
+            </button>
+            {data && (
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="搜索游资/股票..."
+                className="w-36 px-2 py-1 text-[11px] bg-[var(--bg-primary)] border border-[var(--border-color)] rounded text-[var(--text-primary)] focus:outline-none focus:border-[#e850e8]/50"
+              />
+            )}
+            <button
+              onClick={onClose}
+              className="text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors"
+            >
+              <X size={16} />
+            </button>
+          </div>
+        </div>
+
+        {/* ── 内容区 ── */}
+        <div className="flex-1 overflow-y-auto p-3">
+          {loading ? (
+            <div className="flex items-center justify-center h-40 text-[var(--text-tertiary)] text-sm">
+              <RefreshCw size={16} className="animate-spin mr-2" />
+              正在获取龙虎榜数据...
+            </div>
+          ) : error ? (
+            <div className="flex items-center justify-center h-40 text-[#e84444] text-sm">
+              {error}
+            </div>
+          ) : !data || !data.groups.length ? (
+            <div className="flex items-center justify-center h-40 text-[var(--text-tertiary)] text-sm">
+              今日暂无龙虎榜数据
+            </div>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {filteredGroups?.map((g, idx) => {
+                const totalYi = g.totalNet / 1e8;
+                const isPositive = g.totalNet >= 0;
+                const isKnown = KNOWN_HOTMONEY.has(g.shortName);
+                return (
+                  <div
+                    key={g.dept + idx}
+                    className="flex items-start gap-3 p-2.5 rounded-lg border transition-colors bg-[var(--bg-secondary)]"
+                    style={{
+                      borderColor: isKnown
+                        ? "rgba(232,80,232,0.25)"
+                        : "var(--border-color)",
+                    }}
+                  >
+                    {/* 左边：游资名称 */}
+                    <div
+                      className="flex-shrink-0 w-32 cursor-pointer"
+                      title={g.dept}
+                      onClick={() => {
+                        const code = g.stocks[0]?.code;
+                        if (code) {
+                          router.push(`/stock/${code}?tab=chain&layer=`);
+                        }
+                      }}
+                    >
+                      <div
+                        className="text-[13px] font-bold leading-tight"
+                        style={{
+                          color: isKnown ? "#e850e8" : "var(--text-primary)",
+                        }}
+                      >
+                        {g.shortName}
+                      </div>
+                      <div className="text-[10px] text-[var(--text-tertiary)] mt-0.5">
+                        {g.stockCount}只 ·{" "}
+                        <span
+                          className={
+                            isPositive ? "text-[#e84444]" : "text-[#22aa22]"
+                          }
+                        >
+                          {isPositive ? "+" : ""}
+                          {fmtYi2(g.totalNet)}亿
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* 右边：上榜股票 */}
+                    <div className="flex-1 flex flex-wrap gap-1.5">
+                      {g.stocks.map((s) => {
+                        const netYi = s.net / 1e8;
+                        const pos = s.net >= 0;
+                        return (
+                          <span
+                            key={s.code}
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] border cursor-pointer transition-colors hover:bg-[var(--bg-primary)]"
+                            style={{
+                              borderColor: pos
+                                ? "rgba(232,68,68,0.2)"
+                                : "rgba(34,170,34,0.2)",
+                              color: pos ? "#e84444" : "#22aa22",
+                            }}
+                            onClick={() => {
+                              router.push(`/stock/${s.code}?tab=chain`);
+                            }}
+                          >
+                            {s.name}
+                            <span className="font-medium">
+                              ({pos ? "+" : ""}
+                              {fmtYi2(s.net)}亿)
+                            </span>
+                          </span>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // 连板天梯弹窗
 // ──────────────────────────────────────────────────────────────────────────────
 
@@ -3245,11 +3465,11 @@ export default function SwIndustryPage() {
     const s = loadSwPageState();
     return s?.consSortOrder ?? "desc";
   });
-  const [syncing, setSyncing] = useState(false);
   const [showRotation, setShowRotation] = useState(false);
   const [showFundFlow, setShowFundFlow] = useState(false);
   const [showLiveFlow, setShowLiveFlow] = useState(false);
   const [showLimitUpLadder, setShowLimitUpLadder] = useState(false);
+  const [showLhbHotmoney, setShowLhbHotmoney] = useState(false);
   const [onlyIndustryBoards, setOnlyIndustryBoards] = useState(() => {
     const s = loadSwPageState();
     return s?.onlyIndustryBoards ?? false;
@@ -3566,26 +3786,11 @@ export default function SwIndustryPage() {
     }
   };
 
-  const handleSync = async () => {
-    setSyncing(true);
-    try {
-      if (onlyIndustryBoards) {
-        // 产业板块模式：同步成分股行情（stock_quote），完成后刷新产业板块列表
-        await fetch(`${API}/api/sync/quotes`, { method: "POST" });
-        setTimeout(() => {
-          fetchIndustryBoards();
-          setSyncing(false);
-        }, 5000);
-      } else {
-        // 申万模式：同步申万行业指数
-        await fetch(`${API}/api/sw-industry/sync`, { method: "POST" });
-        setTimeout(() => {
-          fetchBoards();
-          setSyncing(false);
-        }, 4000);
-      }
-    } catch {
-      setSyncing(false);
+  const handleRefresh = async () => {
+    if (onlyIndustryBoards) {
+      await fetchIndustryBoards();
+    } else {
+      await fetchBoards();
     }
   };
 
@@ -3943,6 +4148,14 @@ export default function SwIndustryPage() {
           连板分析
         </button>
 
+        <button
+          onClick={() => setShowLhbHotmoney(true)}
+          className="flex items-center gap-1.5 text-xs text-[var(--text-secondary)] hover:text-[#e850e8] transition-colors border border-[var(--border-color)] hover:border-[#e850e8]/50 px-2.5 py-1 rounded-md"
+        >
+          <Layers size={13} />
+          游资龙虎榜
+        </button>
+
         <label className="flex items-center gap-1.5 cursor-pointer select-none">
           <input
             type="checkbox"
@@ -3956,12 +4169,12 @@ export default function SwIndustryPage() {
         </label>
 
         <button
-          onClick={handleSync}
-          disabled={syncing}
+          onClick={handleRefresh}
+          disabled={loading}
           className="ml-auto flex items-center gap-1.5 text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
         >
-          <RefreshCw size={13} className={syncing ? "animate-spin" : ""} />
-          {syncing ? "同步中..." : "刷新"}
+          <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
+          刷新
         </button>
       </div>
 
@@ -4578,6 +4791,9 @@ export default function SwIndustryPage() {
       {showLiveFlow && <LiveFlowModal onClose={() => setShowLiveFlow(false)} />}
       {showLimitUpLadder && (
         <LimitUpLadderModal onClose={() => setShowLimitUpLadder(false)} />
+      )}
+      {showLhbHotmoney && (
+        <LhbHotmoneyModal onClose={() => setShowLhbHotmoney(false)} />
       )}
     </div>
   );

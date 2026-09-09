@@ -15,14 +15,3 @@ export async function GET(req: Request) {
   const data = await res.json();
   return NextResponse.json(data);
 }
-
-export async function POST(req: Request) {
-  const { searchParams } = new URL(req.url);
-  const date = searchParams.get("date") || "";
-  const url = date
-    ? `${DATA_SERVICE_URL}/api/market-breadth/sync?date=${date}`
-    : `${DATA_SERVICE_URL}/api/market-breadth/sync`;
-  const res = await fetch(url, { method: "POST", cache: "no-store" });
-  const data = await res.json();
-  return NextResponse.json(data);
-}

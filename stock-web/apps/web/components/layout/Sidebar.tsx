@@ -8,7 +8,6 @@ import {
   LineChart,
   Bot,
   TrendingUp,
-  Activity,
   Globe,
   Star,
   Layers,
@@ -91,12 +90,6 @@ const navItems = [
     label: "AI Agent",
     icon: Bot,
     match: (p: string) => p.startsWith("/agents"),
-  },
-  {
-    href: "/system",
-    label: "系统监控",
-    icon: Activity,
-    match: (p: string) => p.startsWith("/system"),
   },
 ];
 

@@ -398,8 +398,7 @@ export default function StockDetailPage() {
   const [financeLoading, setFinanceLoading] = useState(false);
   const [gubaNews, setGubaNews] = useState<GubaItem[]>([]);
   const [gubaNotice, setGubaNotice] = useState<GubaItem[]>([]);
-  const [gubaLoading, setGubaLoading] = useState(false); // 首次加载（无数据时）
-  const [gubaSyncing, setGubaSyncing] = useState(false); // 后台静默同步中
+  const [gubaLoading, setGubaLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<StockSearchResult[]>([]);
   const [showSearchDropdown, setShowSearchDropdown] = useState(false);
@@ -415,56 +414,12 @@ export default function StockDetailPage() {
   // 分时图弹框状态
   const [minuteModalOpen, setMinuteModalOpen] = useState(false);
   const [minuteModalDate, setMinuteModalDate] = useState("");
-  const [minuteSyncing, setMinuteSyncing] = useState(false);
-  const [minuteSyncMsg, setMinuteSyncMsg] = useState<string | null>(null);
 
   // 双击K线：打开分时弹框
   const handleBarDoubleClick = useCallback((bar: KLineBar) => {
     setMinuteModalDate(bar.time);
     setMinuteModalOpen(true);
   }, []);
-
-  // 同步分时数据按钮：同步自选股（watchlist）中所有A股当日分时数据到DB
-  const handleSyncMinute = useCallback(async () => {
-    if (minuteSyncing) return;
-    setMinuteSyncing(true);
-    setMinuteSyncMsg(null);
-    try {
-      // 收集 watchlist 中的 A 股 codes（加上当前股票）
-      const watchlistCodes = watchlist.map((s) => s.code);
-      const allCodes = Array.from(new Set([code, ...watchlistCodes])).filter(
-        (c) => /^[036]\d{5}$/.test(c),
-      );
-      const res = await fetch("/api/minute/sync-batch", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ codes: allCodes }),
-      });
-      const json = await res.json();
-      if (res.ok) {
-        const { ok = 0, cached = 0, error = 0, total = 0 } = json;
-        const newCount = ok;
-        if (total === 0) {
-          setMinuteSyncMsg("无可同步股票");
-        } else if (error > 0) {
-          setMinuteSyncMsg(`同步完成：新增${newCount}条，${error}只失败`);
-        } else {
-          setMinuteSyncMsg(
-            cached === total
-              ? `${total}只已有缓存`
-              : `新增${newCount}只，共${total}只`,
-          );
-        }
-      } else {
-        setMinuteSyncMsg(json.detail ?? "同步失败");
-      }
-    } catch {
-      setMinuteSyncMsg("同步失败");
-    } finally {
-      setMinuteSyncing(false);
-      setTimeout(() => setMinuteSyncMsg(null), 4000);
-    }
-  }, [code, minuteSyncing, watchlist]);
 
   useEffect(() => {
     setWatchlist(getRecentlyViewed());
@@ -548,33 +503,6 @@ export default function StockDetailPage() {
     fetchFinanceView();
   }, [code, activeTab]);
 
-  useEffect(() => {
-    if (activeTab !== "财务") return;
-    if (!financeView?.syncing) return;
-    let cancelled = false;
-    const pollInterval = setInterval(async () => {
-      if (cancelled) return;
-      try {
-        const r = await fetch(
-          `http://localhost:8000/api/fundamental/${code}/finance-view`,
-        );
-        if (!r.ok) return;
-        const data = await r.json();
-        if (cancelled) return;
-        if (data) {
-          setFinanceView(data as FinanceViewData);
-          if (!data.syncing || data.has_data) {
-            clearInterval(pollInterval);
-          }
-        }
-      } catch {}
-    }, 5000);
-    return () => {
-      cancelled = true;
-      clearInterval(pollInterval);
-    };
-  }, [code, activeTab, financeView?.syncing]);
-
   // 当切换到资讯/公告 tab 时：先读库展示已有数据，同时后台静默同步
   useEffect(() => {
     if (activeTab !== "资讯" && activeTab !== "公告") return;
@@ -594,20 +522,8 @@ export default function StockDetailPage() {
         })
         .catch(() => [] as GubaItem[]);
 
-    // 先从数据库加载：有数据直接展示，无数据显示 loading
-    loadFromDb().then((items) => {
-      if (items.length === 0) setGubaLoading(true);
-
-      // 后台静默同步（不影响列表展示）
-      setGubaSyncing(true);
-      fetch(`http://localhost:8000/api/guba/sync/${code}`, { method: "POST" })
-        .then(() => loadFromDb())
-        .catch(() => {})
-        .finally(() => {
-          setGubaLoading(false);
-          setGubaSyncing(false);
-        });
-    });
+    setGubaLoading(true);
+    loadFromDb().finally(() => setGubaLoading(false));
   }, [code, activeTab]);
 
   const toggleIndicator = (ind: string) => {
@@ -844,59 +760,6 @@ export default function StockDetailPage() {
             {p}
           </button>
         ))}
-
-        {/* 同步分时按钮 */}
-        <div className="w-px h-4 bg-[var(--border-color)] mx-1 shrink-0" />
-        <button
-          onClick={handleSyncMinute}
-          disabled={minuteSyncing}
-          className={cn(
-            "flex items-center gap-1 px-2 py-1 rounded border whitespace-nowrap transition-colors shrink-0 text-[11px]",
-            minuteSyncing
-              ? "border-[var(--border-color)] text-[var(--text-tertiary)] opacity-60 cursor-wait"
-              : "border-[var(--border-color)] text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:border-[#f5a623]/50",
-          )}
-          title="同步自选股当日分时数据到数据库（每日收盘后自动执行，也可手动触发）"
-        >
-          {minuteSyncing ? (
-            <span
-              style={{
-                display: "inline-block",
-                width: 10,
-                height: 10,
-                border: "1.5px solid var(--border-color)",
-                borderTopColor: "#e84444",
-                borderRadius: "50%",
-                animation: "spin 0.8s linear infinite",
-              }}
-            />
-          ) : (
-            <svg
-              width="11"
-              height="11"
-              viewBox="0 0 12 12"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.5"
-            >
-              <path d="M10 6A4 4 0 1 1 6 2" strokeLinecap="round" />
-              <path d="M6 1v3l2-1.5L6 1z" fill="currentColor" stroke="none" />
-            </svg>
-          )}
-          同步分时
-        </button>
-        {minuteSyncMsg && (
-          <span
-            className={cn(
-              "text-[10px] shrink-0",
-              minuteSyncMsg.includes("失败")
-                ? "text-[#e84444]"
-                : "text-[#09d464]",
-            )}
-          >
-            {minuteSyncMsg}
-          </span>
-        )}
       </div>
 
       <div className="flex flex-1 overflow-hidden">
@@ -1264,14 +1127,7 @@ export default function StockDetailPage() {
                   </div>
                 ) : !financeView || !financeView.has_data ? (
                   <div className="flex flex-col items-center justify-center h-full gap-2 text-[var(--text-tertiary)]">
-                    <span className="text-[11px]">
-                      暂无财务数据，正在后台同步...
-                    </span>
-                    {financeView?.syncing && (
-                      <span className="text-[10px] opacity-60">
-                        首次加载约需 2-3 分钟，请稍后刷新
-                      </span>
-                    )}
+                    <span className="text-[11px]">暂无财务数据</span>
                   </div>
                 ) : (
                   <div className="flex gap-0 h-full">
@@ -1540,9 +1396,6 @@ export default function StockDetailPage() {
         name={quote.name || undefined}
         date={minuteModalDate}
       />
-
-      {/* 旋转动画（同步分时按钮用） */}
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 }

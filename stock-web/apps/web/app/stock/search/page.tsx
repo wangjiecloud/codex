@@ -14,12 +14,7 @@ import {
   saveStockSearchPageState,
   loadStockSearchPageState,
 } from "@/lib/navStore";
-import {
-  clearSessionCache,
-  clearSessionCacheByPrefix,
-  readSessionCache,
-  writeSessionCache,
-} from "@/lib/sessionCache";
+import { readSessionCache, writeSessionCache } from "@/lib/sessionCache";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
@@ -39,7 +34,6 @@ import {
   ExternalLink,
   ChevronDown,
   Network,
-  DatabaseZap,
   BookOpen,
   Pin,
   PinOff,
@@ -565,55 +559,7 @@ function RelationPanel() {
     name: string;
   } | null>(null);
   const [loading, setLoading] = useState(false);
-  const [syncing, setSyncing] = useState(false);
-  const [syncProgress, setSyncProgress] = useState<{
-    done: number; // 产业：已完成股票数 / 单股：帖子已抓数
-    total: number; // 产业：总股票数 / 单股：总帖子数
-    message: string;
-    // 产业同步时额外携带的当前股票帖子进度
-    postDone?: number;
-    postTotal?: number;
-    currentCode?: string;
-    industryMode?: boolean;
-  } | null>(null);
   const [error, setError] = useState("");
-
-  // 解析后端 status 响应，提取产业层面进度和帖子层面进度
-  const parseStatus = (s: {
-    done: number;
-    total: number;
-    message: string;
-    mode?: string;
-    post_done?: number;
-    post_total?: number;
-    code?: string;
-  }) => {
-    // 直接读后端 mode 字段；兜底用 message 中是否含 [产业同步] 前缀
-    const isIndustry =
-      s.mode === "industry" || s.message.includes("[产业同步]");
-    // 直接读后端帖子层进度字段，不再靠 message 解析
-    const postDone = (s.post_done ?? 0) > 0 ? s.post_done : undefined;
-    const postTotal = (s.post_total ?? 0) > 0 ? s.post_total : undefined;
-    // currentCode 从 message 里提取（格式：正在抓取 CODE...）或直接用 s.code
-    const codeMatch = s.message.match(/抓取正文\s+(\w+)/);
-    return {
-      done: s.done,
-      total: s.total,
-      message: s.message,
-      industryMode: isIndustry,
-      postDone,
-      postTotal,
-      currentCode: codeMatch ? codeMatch[1] : s.code,
-    };
-  };
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  // ── 产业同步 ──
-  const [showIndustryPicker, setShowIndustryPicker] = useState(false);
-  const [industryList, setIndustryList] = useState<
-    { id: string; name: string }[]
-  >([]);
-  const industryPickerRef = useRef<HTMLDivElement>(null);
 
   // 点击搜索框外部关闭下拉（与个股页完全相同）
   useEffect(() => {
@@ -624,36 +570,6 @@ function RelationPanel() {
     };
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
-  }, []);
-
-  // 点击产业选择器外部关闭
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (
-        industryPickerRef.current &&
-        !industryPickerRef.current.contains(e.target as Node)
-      ) {
-        setShowIndustryPicker(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
-  // 拉取产业列表
-  useEffect(() => {
-    fetch(`${REL_API}/api/industry/list`)
-      .then((r) => r.json())
-      .then((d) => {
-        const list = (d.industries ?? [])
-          .filter((i: { id: string }) => i.id !== "overview")
-          .map((i: { id: string; name: string }) => ({
-            id: i.id,
-            name: i.name,
-          }));
-        setIndustryList(list);
-      })
-      .catch(() => {});
   }, []);
 
   // 搜索输入处理（与个股页完全相同）
@@ -701,104 +617,51 @@ function RelationPanel() {
     setLoading(true);
     setError("");
     try {
-      const res = await fetch(`/api/relation/${code}`, { cache: "no-store" });
+      const res = await fetch(
+        `${REL_API}/api/industry/stock-industry-map?code=${code}`,
+        { cache: "no-store" },
+      );
       if (!res.ok) throw new Error("查询失败");
-      const data = await res.json();
-      setGraphData(data);
-    } catch (e) {
-      setError(String(e));
+      const raw = await res.json();
+      const industryId = raw.industry_id;
+      if (!industryId) {
+        setGraphData(null);
+        setError("未找到该股票的产业链关联");
+        return;
+      }
+      const graphRes = await fetch(
+        `${REL_API}/api/industry/graph/${industryId}`,
+        { cache: "no-store" },
+      );
+      if (!graphRes.ok) throw new Error("查询失败");
+      const graph = await graphRes.json();
+      const nodes: RelNode[] = (graph.nodes || []).map(
+        (n: { node_id: string; label: string; stocks?: string[] }) => ({
+          id: n.node_id,
+          name: n.label,
+          size: (n.stocks || []).length || 1,
+          isCenter: (n.stocks || []).includes(code),
+        }),
+      );
+      const links: RelLink[] = (graph.edges || []).map(
+        (e: { source: string; target: string; label?: string }) => ({
+          source: e.source,
+          target: e.target,
+          value: 1,
+        }),
+      );
+      setGraphData({
+        nodes,
+        links,
+        synced: true,
+        updatedAt: new Date().toISOString(),
+        name: raw.industry_name || code,
+      });
+    } catch {
+      setGraphData(null);
+      setError("关联图数据获取失败");
     } finally {
       setLoading(false);
-    }
-  };
-
-  const stopPoll = () => {
-    if (pollRef.current) {
-      clearInterval(pollRef.current);
-      pollRef.current = null;
-    }
-  };
-
-  const getActiveCode = () => {
-    if (centerCode) return centerCode;
-    const raw = searchQuery.trim();
-    const m = raw.match(/[（(](\d{6})[）)]$/);
-    if (m) return m[1];
-    if (/^\d{6}$/.test(raw)) return raw;
-    return "";
-  };
-
-  // 同步：有选中股票则只同步该股票，否则全量同步未完成的
-  const startSync = async () => {
-    const code = getActiveCode();
-    const url = code ? `/api/relation/sync/${code}` : "/api/relation/sync/all";
-    setSyncing(true);
-    setSyncProgress({
-      done: 0,
-      total: code ? -1 : 0,
-      message: code ? `正在获取 ${code} 帖子列表...` : "启动中...",
-    });
-    try {
-      await fetch(url, { method: "POST" });
-      stopPoll();
-      pollRef.current = setInterval(async () => {
-        try {
-          const res = await fetch("/api/relation/status", {
-            cache: "no-store",
-          });
-          const s = await res.json();
-          setSyncProgress({ done: s.done, total: s.total, message: s.message });
-          if (!s.running) {
-            stopPoll();
-            setSyncing(false);
-            if (code) await fetchGraph(code);
-          }
-        } catch {
-          stopPoll();
-          setSyncing(false);
-        }
-      }, 1000);
-    } catch {
-      setSyncing(false);
-    }
-  };
-
-  // 产业同步：对产业内所有 A 股逐一抓取股吧帖子，统计关联关系（复用 syncing/syncProgress/pollRef）
-  const startIndustrySync = async (
-    industryId: string,
-    industryName: string,
-  ) => {
-    setShowIndustryPicker(false);
-    setSyncing(true);
-    setSyncProgress({
-      done: 0,
-      total: 0,
-      message: `正在启动 ${industryName} 产业关联同步...`,
-      industryMode: true,
-    });
-    try {
-      await fetch(`${REL_API}/api/relation/sync/industry/${industryId}`, {
-        method: "POST",
-      });
-      stopPoll();
-      pollRef.current = setInterval(async () => {
-        try {
-          const res = await fetch(`${REL_API}/api/relation/status`, {
-            cache: "no-store",
-          });
-          const s = await res.json();
-          setSyncProgress(parseStatus(s));
-          if (!s.running) {
-            stopPoll();
-            setSyncing(false);
-          }
-        } catch {
-          stopPoll();
-          setSyncing(false);
-        }
-      }, 1000);
-    } catch {
-      setSyncing(false);
     }
   };
 
@@ -806,66 +669,48 @@ function RelationPanel() {
     setLoading(true);
     setError("");
     try {
-      const res = await fetch("/api/relation/all?top=5&min_count=2", {
+      const res = await fetch(`${REL_API}/api/industry/list`, {
         cache: "no-store",
       });
       if (!res.ok) throw new Error("查询失败");
-      const data = await res.json();
-      setGraphData(data);
-    } catch (e) {
-      setError(String(e));
+      const industries = await res.json();
+      const nodes: RelNode[] = (
+        Array.isArray(industries) ? industries : []
+      ).map(
+        (ind: {
+          industry_id: string;
+          name: string;
+          company_count?: number;
+        }) => ({
+          id: ind.industry_id,
+          name: ind.name,
+          size: ind.company_count || 1,
+          isCenter: false,
+        }),
+      );
+      setGraphData({
+        nodes,
+        links: [],
+        synced: true,
+        updatedAt: new Date().toISOString(),
+        name: "产业链全景",
+      });
+    } catch {
+      setGraphData(null);
+      setError("产业链数据获取失败");
     } finally {
       setLoading(false);
     }
   };
 
   const handleRefresh = () => {
-    const code = getActiveCode();
-    if (code) fetchGraph(code);
+    if (centerCode) fetchGraph(centerCode);
     else fetchAllGraph();
   };
-
-  // 挂载时检查后端是否有正在进行的同步，有则立即恢复轮询
-  useEffect(() => {
-    const checkOnMount = async () => {
-      try {
-        const res = await fetch("/api/relation/status", { cache: "no-store" });
-        const s = await res.json();
-        if (!s.running) return;
-        // 后端正在同步，恢复 UI 状态
-        setSyncing(true);
-        setSyncProgress(parseStatus(s));
-        stopPoll();
-        pollRef.current = setInterval(async () => {
-          try {
-            const r = await fetch("/api/relation/status", {
-              cache: "no-store",
-            });
-            const st = await r.json();
-            setSyncProgress(parseStatus(st));
-            if (!st.running) {
-              stopPoll();
-              setSyncing(false);
-              const code = getActiveCode();
-              if (code) await fetchGraph(code);
-            }
-          } catch {
-            stopPoll();
-            setSyncing(false);
-          }
-        }, 1000);
-      } catch {
-        // 忽略
-      }
-    };
-    checkOnMount();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   // 清理
   useEffect(
     () => () => {
-      stopPoll();
       if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
     },
     [],
@@ -1101,30 +946,14 @@ function RelationPanel() {
           )}
         </div>
 
-        {/* 数据同步 — 有选中股票则只同步该股，否则全量同步 */}
-        <button
-          type="button"
-          onClick={startSync}
-          disabled={syncing}
-          title={
-            getActiveCode()
-              ? `同步 ${getActiveCode()} 的股吧帖子`
-              : "全量同步所有未完成股票的股吧帖子"
-          }
-          className="flex items-center gap-1.5 border border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[#f5a623]/50 disabled:opacity-40 disabled:cursor-not-allowed px-4 py-3 rounded-xl text-sm transition-all whitespace-nowrap"
-        >
-          <DatabaseZap size={14} />
-          {syncing ? "同步中..." : "数据同步"}
-        </button>
-
         {/* 刷新 — 始终可点：有选中股票时刷新单股图，否则刷新全图 */}
         <button
           type="button"
           onClick={handleRefresh}
           disabled={loading}
           title={
-            getActiveCode()
-              ? `刷新 ${centerName || getActiveCode()} 的关联图`
+            centerCode
+              ? `刷新 ${centerName || centerCode} 的关联图`
               : "刷新全部股票关联图"
           }
           className="flex items-center gap-1.5 border border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[#f5a623]/50 disabled:opacity-40 disabled:cursor-not-allowed px-4 py-3 rounded-xl text-sm transition-all whitespace-nowrap"
@@ -1132,41 +961,6 @@ function RelationPanel() {
           <RefreshCw size={14} className={cn(loading && "animate-spin")} />
           刷新
         </button>
-
-        {/* 产业同步 — 选择产业后批量同步该产业内所有个股的 kline + fundamental */}
-        <div className="relative" ref={industryPickerRef}>
-          <button
-            type="button"
-            onClick={() => setShowIndustryPicker((v) => !v)}
-            disabled={syncing}
-            title="选择产业，抓取该产业内所有个股的股吧帖子并分析关联关系"
-            className="flex items-center gap-1.5 border border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[#f5a623]/50 disabled:opacity-40 disabled:cursor-not-allowed px-4 py-3 rounded-xl text-sm transition-all whitespace-nowrap"
-          >
-            <Network size={14} />
-            {syncing ? "同步中..." : "产业同步"}
-            <ChevronDown
-              size={12}
-              className={cn(
-                "transition-transform",
-                showIndustryPicker && "rotate-180",
-              )}
-            />
-          </button>
-          {showIndustryPicker && industryList.length > 0 && (
-            <div className="absolute right-0 top-full mt-1 w-56 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-xl shadow-lg z-50 py-1 max-h-72 overflow-y-auto">
-              {industryList.map((ind) => (
-                <button
-                  key={ind.id}
-                  type="button"
-                  onClick={() => startIndustrySync(ind.id, ind.name)}
-                  className="w-full text-left px-4 py-2 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-secondary)] transition-colors"
-                >
-                  {ind.name}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
       </div>
 
       {/* 已选中股票标签 */}
@@ -1175,69 +969,7 @@ function RelationPanel() {
           <span className="bg-[#f5a623]/10 text-[#f5a623] border border-[#f5a623]/20 px-2 py-0.5 rounded-full font-medium">
             {centerName}（{centerCode}）
           </span>
-          <span>点击「刷新」加载关联图，或先「数据同步」后再刷新</span>
-        </div>
-      )}
-
-      {/* 同步进度条 */}
-      {syncing && syncProgress && (
-        <div className="bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-xl px-4 py-3 space-y-2.5">
-          {/* 产业整体进度（仅产业同步模式） */}
-          {syncProgress.industryMode && syncProgress.total > 0 && (
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-xs font-medium text-[var(--text-primary)]">
-                  产业整体进度
-                </span>
-                <span className="text-xs text-[var(--text-tertiary)] tabular-nums">
-                  {syncProgress.done}/{syncProgress.total} 只股票
-                </span>
-              </div>
-              <div className="h-2 bg-[var(--bg-tertiary)] rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-[var(--accent)] rounded-full transition-all duration-300"
-                  style={{
-                    width: `${Math.min(100, (syncProgress.done / syncProgress.total) * 100)}%`,
-                  }}
-                />
-              </div>
-            </div>
-          )}
-          {/* 当前股票帖子进度 */}
-          <div>
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-xs text-[var(--text-secondary)] truncate max-w-[75%]">
-                {syncProgress.industryMode && syncProgress.currentCode
-                  ? `正在抓取 ${syncProgress.currentCode}`
-                  : syncProgress.message}
-              </span>
-              <span className="text-xs text-[var(--text-tertiary)] tabular-nums shrink-0">
-                {syncProgress.postTotal && syncProgress.postDone !== undefined
-                  ? `${syncProgress.postDone}/${syncProgress.postTotal}`
-                  : syncProgress.total === -1
-                    ? "获取列表中..."
-                    : syncProgress.total === 0
-                      ? ""
-                      : !syncProgress.industryMode
-                        ? `${syncProgress.done}/${syncProgress.total}`
-                        : ""}
-              </span>
-            </div>
-            {(syncProgress.postTotal ?? syncProgress.total) > 0 && (
-              <div className="h-1.5 bg-[var(--bg-tertiary)] rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-[#f5a623] rounded-full transition-all duration-300"
-                  style={{
-                    width:
-                      syncProgress.postTotal &&
-                      syncProgress.postDone !== undefined
-                        ? `${Math.min(100, (syncProgress.postDone / syncProgress.postTotal) * 100)}%`
-                        : `${Math.min(100, (syncProgress.done / syncProgress.total) * 100)}%`,
-                  }}
-                />
-              </div>
-            )}
-          </div>
+          <span>点击「刷新」加载关联图</span>
         </div>
       )}
 
@@ -1359,33 +1091,6 @@ function AISearchPanel() {
   const [expandedBoards, setExpandedBoards] = useState<Record<string, boolean>>(
     {},
   );
-
-  // 市值同步
-  const [marketCapSyncing, setMarketCapSyncing] = useState(false);
-  const [marketCapMsg, setMarketCapMsg] = useState("");
-
-  const handleSyncMarketCap = async () => {
-    if (marketCapSyncing) return;
-    setMarketCapSyncing(true);
-    setMarketCapMsg("启动中...");
-    try {
-      const res = await fetch(
-        "http://localhost:8000/api/quote/sync-market-cap",
-        { method: "POST" },
-      );
-      if (res.ok) {
-        const d = (await res.json()) as { total?: number };
-        setMarketCapMsg(`后台同步 ${d.total ?? "?"} 只股票市值，约90分钟完成`);
-      } else {
-        setMarketCapMsg("启动失败，请检查后端服务");
-      }
-    } catch {
-      setMarketCapMsg("请求失败，请检查后端是否运行");
-    } finally {
-      setMarketCapSyncing(false);
-      setTimeout(() => setMarketCapMsg(""), 8000);
-    }
-  };
 
   // 模型选择
   const [modelInfo, setModelInfo] = useState<{
@@ -1636,20 +1341,6 @@ function AISearchPanel() {
 
         {/* 右侧操作区 */}
         <div className="flex items-center gap-2">
-          {/* 同步市值按钮 */}
-          <button
-            onClick={handleSyncMarketCap}
-            disabled={marketCapSyncing}
-            title="后台异步同步全部股票市值（约90分钟）"
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-[var(--bg-secondary)] border border-[var(--border-color)] hover:border-[#f5a623]/50 transition-all disabled:opacity-60 text-xs text-[var(--text-tertiary)] hover:text-[var(--text-primary)] whitespace-nowrap"
-          >
-            <DatabaseZap
-              size={11}
-              className={cn(marketCapSyncing && "animate-pulse text-[#f5a623]")}
-            />
-            {marketCapSyncing ? "启动中..." : "同步市值"}
-          </button>
-
           {/* 模型选择 */}
           {modelInfo && (
             <div className="relative" ref={dropdownRef}>
@@ -1696,13 +1387,6 @@ function AISearchPanel() {
           )}
         </div>
       </div>
-
-      {/* 市值同步提示 */}
-      {marketCapMsg && (
-        <div className="text-[11px] text-[var(--text-secondary)] bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg px-3 py-2 mb-3">
-          {marketCapMsg}
-        </div>
-      )}
 
       {/* 搜索框 */}
       <form onSubmit={handleAISearch} className="mb-4">
@@ -2089,8 +1773,6 @@ function AISearchPanel() {
 // 资讯 Tab 内容
 // ─────────────────────────────────────────────────────────────────────────────
 function NewsPanel() {
-  const THEME_STATS_CACHE_KEY = "stock-search:theme-news-stats";
-  const THEME_STATS_TTL = 5 * 60 * 1000;
   const NEWS_LIST_TTL = 2 * 60 * 1000;
   const [searchKeyword, setSearchKeyword] = useState("");
   const [inputValue, setInputValue] = useState("");
@@ -2102,14 +1784,8 @@ function NewsPanel() {
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [syncing, setSyncing] = useState(false);
-  const [syncMode, setSyncMode] = useState<"incremental" | "full">(
-    "incremental",
-  );
-  const [syncMenuOpen, setSyncMenuOpen] = useState(false);
   const [themeDropdownOpen, setThemeDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
-  const syncMenuRef = useRef<HTMLDivElement>(null);
   const PAGE_SIZE = 30;
   const newsCacheKey = useCallback(
     (themeId: string, keyword: string, pageNum: number) =>
@@ -2126,12 +1802,6 @@ function NewsPanel() {
       ) {
         setThemeDropdownOpen(false);
       }
-      if (
-        syncMenuRef.current &&
-        !syncMenuRef.current.contains(e.target as Node)
-      ) {
-        setSyncMenuOpen(false);
-      }
     };
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
@@ -2139,23 +1809,9 @@ function NewsPanel() {
 
   // 加载板块列表
   useEffect(() => {
-    const cached = readSessionCache<ThemeOption[]>(THEME_STATS_CACHE_KEY);
-    if (cached?.length) {
-      setThemeOptions(cached);
-      return;
-    }
-
-    fetch("/api/theme/news-stats", { cache: "no-store" })
+    fetch("/api/theme/popular-stocks?sort=hot", { cache: "no-store" })
       .then((r) => r.json())
-      .then((data) => {
-        const themes = (data.themes || []).map((t: ThemeOption) => ({
-          themeId: t.themeId,
-          themeName: t.themeName,
-          count: t.count,
-        }));
-        setThemeOptions(themes);
-        writeSessionCache(THEME_STATS_CACHE_KEY, themes, THEME_STATS_TTL);
-      })
+      .then(() => {})
       .catch(() => {});
   }, []);
 
@@ -2182,17 +1838,44 @@ function NewsPanel() {
 
         const params = new URLSearchParams({
           page: String(pageNum),
-          page_size: String(PAGE_SIZE),
+          size: String(PAGE_SIZE),
         });
-        if (selectedTheme) params.set("theme_id", selectedTheme);
         if (searchKeyword) params.set("q", searchKeyword);
 
-        const res = await fetch(`/api/theme/news-db?${params.toString()}`, {
+        const themePath = selectedTheme
+          ? `/api/theme/${selectedTheme}/news`
+          : `/api/theme/headline`;
+        const res = await fetch(`${themePath}?${params.toString()}`, {
           cache: "no-store",
         });
         if (!res.ok) throw new Error("fetch error");
         const data = await res.json();
-        const items: ThemeNewsItem[] = data.items || [];
+        const items: ThemeNewsItem[] = (data.items || []).map(
+          (it: {
+            id?: string;
+            themeId?: string;
+            themeName?: string;
+            title: string;
+            source?: string;
+            pubTime?: string;
+            time?: number;
+            url?: string;
+          }) => ({
+            id: String(it.id ?? ""),
+            themeId: it.themeId ?? "",
+            themeName: it.themeName ?? "",
+            title: it.title,
+            source: it.source ?? "",
+            pubTime:
+              it.pubTime ??
+              (it.time
+                ? new Date(
+                    it.time < 1e12 ? it.time * 1000 : it.time,
+                  ).toISOString()
+                : ""),
+            url: it.url ?? "",
+          }),
+        );
         writeSessionCache(
           cacheKey,
           {
@@ -2231,47 +1914,6 @@ function NewsPanel() {
     const nextPage = page + 1;
     setPage(nextPage);
     fetchNews(nextPage, true);
-  };
-
-  // 触发同步（增量或全量），完成后刷新列表和板块统计
-  const handleSync = async (mode: "incremental" | "full" = syncMode) => {
-    if (syncing) return;
-    setSyncing(true);
-    setSyncMenuOpen(false);
-    const endpoint =
-      mode === "full" ? "/api/theme/sync-news-full" : "/api/theme/sync-news";
-    try {
-      await fetch(endpoint, {
-        method: "POST",
-        cache: "no-store",
-      });
-      clearSessionCache(THEME_STATS_CACHE_KEY);
-      clearSessionCacheByPrefix("stock-search:theme-news:");
-      // 全量同步等待更长时间
-      await new Promise((r) => setTimeout(r, mode === "full" ? 8000 : 4000));
-      // 重新加载板块统计
-      const statsRes = await fetch("/api/theme/news-stats", {
-        cache: "no-store",
-      });
-      if (statsRes.ok) {
-        const data = await statsRes.json();
-        setThemeOptions(
-          (data.themes || []).map((t: ThemeOption) => ({
-            themeId: t.themeId,
-            themeName: t.themeName,
-            count: t.count,
-          })),
-        );
-      }
-      // 重新加载新闻列表（回第1页）
-      setPage(1);
-      setNews([]);
-      fetchNews(1, false);
-    } catch {
-      // 静默失败
-    } finally {
-      setSyncing(false);
-    }
   };
 
   const formatTime = (t: string) => {
@@ -2374,83 +2016,6 @@ function NewsPanel() {
                   </button>
                 ))}
               </div>
-            </div>
-          )}
-        </div>
-
-        {/* 同步按钮（分裂按钮：左侧触发、右侧下拉选模式） */}
-        <div className="relative flex flex-shrink-0" ref={syncMenuRef}>
-          <button
-            onClick={() => handleSync(syncMode)}
-            disabled={syncing}
-            className={cn(
-              "flex items-center gap-1.5 pl-3.5 pr-2.5 py-2.5 rounded-l-xl text-sm font-medium border-y border-l transition-all whitespace-nowrap",
-              syncing
-                ? "bg-[var(--bg-secondary)] border-[var(--border-color)] text-[var(--text-tertiary)] cursor-not-allowed"
-                : "bg-[#f5a623]/10 border-[#f5a623]/30 text-[#f5a623] hover:bg-[#f5a623]/20",
-            )}
-          >
-            <RefreshCw size={13} className={cn(syncing && "animate-spin")} />
-            {syncing
-              ? "同步中..."
-              : syncMode === "full"
-                ? "全量补抓"
-                : "增量同步"}
-          </button>
-          <button
-            onClick={() => !syncing && setSyncMenuOpen((v) => !v)}
-            disabled={syncing}
-            className={cn(
-              "flex items-center px-2 py-2.5 rounded-r-xl text-sm font-medium border transition-all",
-              syncing
-                ? "bg-[var(--bg-secondary)] border-[var(--border-color)] text-[var(--text-tertiary)] cursor-not-allowed"
-                : "bg-[#f5a623]/10 border-[#f5a623]/30 text-[#f5a623] hover:bg-[#f5a623]/20",
-            )}
-          >
-            <ChevronDown
-              size={12}
-              className={cn(
-                "transition-transform",
-                syncMenuOpen && "rotate-180",
-              )}
-            />
-          </button>
-          {syncMenuOpen && (
-            <div className="absolute right-0 top-[calc(100%+6px)] z-50 w-40 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-xl shadow-xl overflow-hidden">
-              <button
-                onClick={() => {
-                  setSyncMode("incremental");
-                  handleSync("incremental");
-                }}
-                className={cn(
-                  "w-full flex flex-col px-3.5 py-2.5 text-sm hover:bg-[var(--bg-hover)] transition-colors text-left",
-                  syncMode === "incremental"
-                    ? "text-[#f5a623] font-medium"
-                    : "text-[var(--text-secondary)]",
-                )}
-              >
-                <span>增量同步</span>
-                <span className="text-[11px] text-[var(--text-tertiary)] mt-0.5">
-                  仅拉取最新数据
-                </span>
-              </button>
-              <button
-                onClick={() => {
-                  setSyncMode("full");
-                  handleSync("full");
-                }}
-                className={cn(
-                  "w-full flex flex-col px-3.5 py-2.5 text-sm hover:bg-[var(--bg-hover)] transition-colors text-left",
-                  syncMode === "full"
-                    ? "text-[#f5a623] font-medium"
-                    : "text-[var(--text-secondary)]",
-                )}
-              >
-                <span>全量补抓</span>
-                <span className="text-[11px] text-[var(--text-tertiary)] mt-0.5">
-                  每板块最多50页
-                </span>
-              </button>
             </div>
           )}
         </div>
@@ -2816,15 +2381,14 @@ export default function StockSearchPage() {
     }
   }, []);
 
-  // 刷新：调后端实时拉取并存库，完成后更新当前榜单
+  // 刷新：直接从实时接口获取最新榜单
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      const res = await fetch(
-        `/api/theme/popular-stocks/refresh?sort=${sortMode}`,
-        { method: "POST", cache: "no-store" },
-      );
-      if (!res.ok) throw new Error("refresh error");
+      const res = await fetch(`/api/theme/popular-stocks?sort=${sortMode}`, {
+        cache: "no-store",
+      });
+      if (!res.ok) throw new Error("fetch error");
       const data = await res.json();
       setStocks(parseStocks(data?.stocks ?? []));
       setUpdatedAt(data?.updatedAt ?? null);
@@ -2838,7 +2402,7 @@ export default function StockSearchPage() {
 
   // 切换选股 Tab 时读缓存并重置可见数量
   useEffect(() => {
-    if (mainTab !== "stock") return;
+    if (mainTab !== "stock" && mainTab !== "popular") return;
     setVisibleCount(VISIBLE_DEFAULT);
     fetchFromCache(sortMode);
   }, [sortMode, fetchFromCache, mainTab]);

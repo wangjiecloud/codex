@@ -25,26 +25,3 @@ export async function GET(
     );
   }
 }
-
-export async function POST(
-  req: NextRequest,
-  { params }: { params: Promise<{ code: string }> },
-) {
-  const { code } = await params;
-  const { searchParams } = new URL(req.url);
-  const date = searchParams.get("date");
-  const url = date
-    ? `${DATA_SERVICE_URL}/api/minute/${code}/sync?date=${date}`
-    : `${DATA_SERVICE_URL}/api/minute/${code}/sync`;
-
-  try {
-    const res = await fetch(url, { method: "POST", cache: "no-store" });
-    const data = await res.json();
-    return NextResponse.json(data, { status: res.status });
-  } catch {
-    return NextResponse.json(
-      { error: "Data service unavailable" },
-      { status: 503 },
-    );
-  }
-}

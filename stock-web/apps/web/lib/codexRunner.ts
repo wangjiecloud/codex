@@ -33,62 +33,63 @@ export const WORKDIR =
 
 export const DB_SCHEMA = `数据库路径: ${DB_PATH}
 
-主要数据表及字段:
-- stock_quote: code, name, price, change(涨跌幅%), change_amt, open, prev_close, high, low, volume, turnover, market_cap(市值字段，单位历史上可能不一致，使用前必须结合价格/股本或其他表校验，严禁直接默认按亿元解释), pe(PE TTM), pb, turnover_rate, amplitude, updated_at
-- stock_kline: code, period('daily'/'weekly'/'monthly'), trade_date, open, high, low, close, volume, turnover, change_pct, turn_rate  (按 trade_date DESC 取最新)
-- stock_indicator: code, trade_date, period('daily'), kdj_k, kdj_d, kdj_j, ma5, ma10, ma20, ma60, macd_diff, macd_dea, macd_hist, rsi14, boll_upper, boll_middle, boll_lower  (已预计算的日线技术指标)
-- sw_industry: code, name, level, price, prev_close, open, high, low, change_pct, volume, turnover, pe_static, pe_ttm, pb, dividend_yield, comp_count, updated_at  (申万行业板块快照)
-- sw_industry_constituent: board_code, stock_code, stock_name, updated_at  (个股所属申万板块映射)
-- stock_minute_kline: code, trade_date, minute_time, open, high, low, close, volume, amount, avg_price, prev_close  (分时/分钟级K线)
-- market_breadth: trade_date, up_count, down_count, flat_count, limit_up, limit_down, st_limit_up, st_limit_down, total  (市场宽度/情绪)
-- market_daily_fund_flow: trade_date, sh_close, sh_change_pct, sz_close, sz_change_pct, main_net, main_net_pct, super_net, super_net_pct, big_net, big_net_pct, mid_net, mid_net_pct, small_net, small_net_pct  (大盘资金流向历史)
-- market_fund_flow_snapshot: trade_date, investor_type(north_bound/main/institution/hot_money/retail), inflow, outflow, netflow, updated_at  (市场资金快照)
-- fund_flow_snapshot: trade_date, board_type(concept/industry), period(today/3d/5d/10d), name, index_val, change_pct, inflow, outflow, netflow, comp_count, top_stock, top_stock_change_pct, updated_at  (板块资金流向)
-- futures_position_snapshot: trade_date, variety(IF/IH/IC/IM), contract, broker, long_position, short_position, net_position, total_oi, updated_at  (股指期货席位持仓)
-- margin_trading_daily: trade_date, market(total/sh/sz/bj), margin_balance, rz_balance, rq_balance, rz_buy, rz_repay, updated_at  (融资融券市场汇总)
-- margin_trading_stock_snapshot: trade_date, code, name, rz_balance, rz_buy, rz_repay, rz_net, rq_qty, rq_sell, rq_balance, margin_balance, updated_at  (个股融资融券快照)
-- global_market_index: code, name, region, price, change_amt, change_pct, open, high, low, prev_close, market_time, updated_at  (全球市场指数快照)
-- global_index_kline: code, period, trade_date, open, high, low, close, volume, change_pct  (全球指数/宽基指数K线)
-- concept_board: code, name, change_pct, change_amt, price, volume, turnover, rise_count, fall_count, lead_stock, lead_stock_pct, updated_at  (概念板块)
-- stock_meta: code, name, market, industry_ids
-- stock_fundamental: code, report_date, eps, roe, revenue(营收), revenue_yoy(营收同比%), net_profit(净利润), net_profit_yoy(净利润同比%), gross_margin(毛利率%), debt_ratio(负债率%), raw_json
-- news_flash: id, title, digest, url, ctime, category(important/a/hk/us/abnormal/notice), updated_at  (东方财富快讯，约19341条)
-- theme_news: id, theme_id, theme_name, title, source, pub_time, url, updated_at  (同花顺板块主题新闻，约29855条)
-- stock_news: code, title, content, pub_time, source  (暂无数据，勿查此表)
+【重要】股票行情/K线/分时/基本面/板块/资金流向/融资融券/新闻/快讯/全球指数等数据已改为实时查询，不存数据库。请使用 curl 调用后端 API（base URL: http://localhost:8000）获取实时数据，sqlite3 仅用于查询以下结构性数据表。
 
-F10 基本面详细数据表（由 f10-scraper skill 爬取写入）:
-- stock_f10_snapshot: code, eps_basic, eps_diluted, nav_per_share, cfps, pe_ttm, pe_static, pb, roe_weighted(加权ROE%), gross_margin(毛利率%), debt_ratio(资产负债率%), revenue_yoy, net_profit_yoy, report_period, updated_at
-- stock_f10_financial_statement: code, statement_type(balance_sheet/income/cashflow), tab_label(按报告期/按年度/按单季度), report_date, content_text(原始文本), updated_at
-- stock_f10_dividend_history: code, report_period, announce_date, dividend_plan, dividend_per_share, ex_div_date, updated_at
-- stock_f10_institution_forecast: code, institution(机构名), year(如2026E), eps_forecast, rating(买入/增持等), report_date, updated_at
-- stock_f10_business_analysis: code, report_date, main_business_breakdown(JSON), rd_expense_ratio, business_review, updated_at
-- stock_f10_shareholder_info: code, report_date, top10_holders(文本), updated_at
-- stock_f10_peer_comparison: code, report_date, content_text, updated_at
-- stock_f10_company_profile: code, main_business, core_competence, industry_background, executives_json, share_structure_json, concept_sectors, capital_operations, updated_at
-- stock_f10_key_events: code, event_date, event_type(股东大会/资本运作/限售解禁等), event_desc, updated_at
-- stock_f10_fund_flow: code, fund_flow_text, margin_balance, dragon_tiger_text, last_dragon_date, updated_at
-- stock_f10_research_report: code, report_date, institution, rating, title, updated_at
+数据库中仅保留的结构性数据表:
+- industry_list: industry_id, name, description, icon, company_count, last_analyzed, representatives(JSON), sort_order, tab, updated_at  (产业链列表)
+- industry_node: industry_id, node_id, x, y, label, icon, desc, layer(upstream/core/downstream/application), ticker, market(A/HK/US), group_name, stocks(JSON数组,A股代码), updated_at  (产业链节点)
+- industry_edge: industry_id, edge_id, source, target, layer, label, updated_at  (产业链连接边)
+- industry_meta: industry_id, title, subtitle, layer_labels(JSON), sort_order, updated_at  (产业链元信息)
+- user_watchlist: id, code, sort_order, added_at  (自选股)
+- portfolio_holding: id, code, name, cost_price, shares, closed_pnl_override, created_at, updated_at  (持仓)
+- portfolio_trade: id, holding_id, trade_type, trade_date, price, shares, note, created_at  (交易记录)
+- memo: id, title, content, pinned, created_at, updated_at  (备忘录)
+- user_strategy: id, name, ...  (用户策略)
+- xmind_file: id, name, description, created_at, updated_at  (XMind文件)
+- xmind_node: id, file_id, parent_id, sheet_id, sheet_title, title, content, url, node_order, source_url, created_at  (XMind节点)
+
+实时数据 API 端点（base URL: http://localhost:8000，用 curl 调用）:
+- 行情: GET /api/quote/{code}  → {code, name, price, change, change_pct, open, prev_close, high, low, volume, turnover, market_cap, pe, pb, turnover_rate, amplitude}
+- 搜索: GET /api/quote/search?q={关键词}  → [{code, name, price, change}]
+- 批量行情: GET /api/quote/batch?codes={code1,code2,...}  → [{code, name, price, change, ...}]
+- K线: GET /api/kline/{code}?period=daily&count=120  → [{trade_date, open, high, low, close, volume, turnover, change_pct}]
+- 分时: GET /api/minute/{code}?date={YYYY-MM-DD}  → [{minute_time, close, avg_price, volume, amount}]
+- 基本面: GET /api/fundamental/{code}  → F10快照(eps/roe/pe/pb/revenue/net_profit等)
+- 财务视图: GET /api/fundamental/{code}/finance-view  → 财务报表数据
+- 个股新闻: GET /api/news/{code}  → [{title, source, pub_time, url}]
+- 股吧资讯: GET /api/guba/{code}  → [{title, url, author, read_count, pub_time}]
+- 热门股吧: GET /api/guba/hot  → [{code, name, ...}]
+- 快讯: GET /api/flash  → [{title, digest, ctime, category, url}]
+- 概念板块: GET /api/board  → [{code, name, change_pct, lead_stock, ...}]
+- 板块成分: GET /api/board/constituents/{board_code}  → [{code, name, ...}]
+- 产业板块: GET /api/board/industry  → [{code, name, ...}]
+- 申万行业: GET /api/sw-industry  → [{code, name, change_pct, ...}]
+- 申万行业成分: GET /api/sw-industry/constituents/{board_code}  → [{code, name, ...}]
+- 申万行业K线: GET /api/sw-industry/kline/{board_code}  → [{trade_date, close, change_pct, ...}]
+- 主题/人气: GET /api/theme  /  GET /api/theme/popular-stocks
+- 概念资金流: GET /api/fund-flow/concept  → [{name, mainNet, superNet, bigNet, changePct, ...}]
+- 行业资金流: GET /api/fund-flow/industry  → [{name, mainNet, superNet, bigNet, changePct, ...}]
+- 市场资金流: GET /api/market-flow/summary  → {main_net, super_net, big_net, ...}
+- 北向资金: GET /api/market-flow/north-bound  → {north_net, ...}
+- 市场情绪: GET /api/market-breadth  → [{trade_date, up_count, down_count, limit_up, limit_down, ...}]
+- 市场情绪汇总: GET /api/market-breadth/summary?days=20  → {sentiment_score, sentiment_level, signals, ...}
+- 融资融券: GET /api/margin-trading/latest  /  GET /api/margin-trading/history  /  GET /api/margin-trading/stocks
+- 全球指数: GET /api/global/indices  → [{code, name, price, change_pct, ...}]
+- 全球概览: GET /api/global/overview  → {indices, ...}
 
 查询示例:
-  sqlite3 '${DB_PATH}' "SELECT code,name,price,change,pe,pb,market_cap FROM stock_quote WHERE code='000001';"
-  sqlite3 '${DB_PATH}' "SELECT trade_date,close,change_pct,volume FROM stock_kline WHERE code='000001' AND period='daily' ORDER BY trade_date DESC LIMIT 60;"
-  sqlite3 '${DB_PATH}' "SELECT trade_date,kdj_k,kdj_d,kdj_j,ma5,ma10,ma20,ma60,macd_diff,macd_dea,macd_hist,rsi14,boll_upper,boll_middle,boll_lower FROM stock_indicator WHERE code='000001' AND period='daily' ORDER BY trade_date DESC LIMIT 5;"
-  sqlite3 '${DB_PATH}' "SELECT s.code,s.name,s.price,s.change_pct FROM sw_industry_constituent c JOIN sw_industry s ON s.code=c.board_code WHERE c.stock_code='000001';"
-  sqlite3 '${DB_PATH}' "SELECT trade_date,close,change_pct,volume FROM stock_kline WHERE code='801780' AND period='daily' ORDER BY trade_date DESC LIMIT 60;"
-  sqlite3 '${DB_PATH}' "SELECT minute_time,close,avg_price,volume,amount FROM stock_minute_kline WHERE code='000001' AND trade_date='2026-07-13' ORDER BY minute_time;"
-  sqlite3 '${DB_PATH}' "SELECT trade_date,up_count,down_count,limit_up,limit_down,total FROM market_breadth ORDER BY trade_date DESC LIMIT 5;"
-  curl -s 'http://localhost:3000/api/market-breadth?summary=1&days=20'
-  sqlite3 '${DB_PATH}' "SELECT trade_date,main_net,super_net,big_net,mid_net,small_net FROM market_daily_fund_flow ORDER BY trade_date DESC LIMIT 10;"
-  sqlite3 '${DB_PATH}' "SELECT trade_date,investor_type,netflow FROM market_fund_flow_snapshot ORDER BY trade_date DESC LIMIT 10;"
-  sqlite3 '${DB_PATH}' "SELECT trade_date,board_type,name,netflow,top_stock FROM fund_flow_snapshot WHERE period='today' ORDER BY trade_date DESC LIMIT 20;"
-  sqlite3 '${DB_PATH}' "SELECT trade_date,market,margin_balance,rz_buy,rq_balance FROM margin_trading_daily ORDER BY trade_date DESC LIMIT 20;"
-  sqlite3 '${DB_PATH}' "SELECT code,name,rz_net,rz_balance,margin_balance FROM margin_trading_stock_snapshot ORDER BY trade_date DESC LIMIT 20;"
-  sqlite3 '${DB_PATH}' "SELECT code,name,region,price,change_pct FROM global_market_index ORDER BY updated_at DESC LIMIT 20;"
-  sqlite3 '${DB_PATH}' "SELECT code,name,change_pct,turnover FROM sw_industry ORDER BY change_pct DESC LIMIT 20;"
-  sqlite3 '${DB_PATH}' "SELECT code,name,change_pct,lead_stock FROM concept_board ORDER BY change_pct DESC LIMIT 20;"
-  sqlite3 '${DB_PATH}' "SELECT * FROM stock_f10_snapshot WHERE code='000001';"
-  sqlite3 '${DB_PATH}' "SELECT institution,year,eps_forecast,rating FROM stock_f10_institution_forecast WHERE code='000001' ORDER BY year;"
-  sqlite3 '${DB_PATH}' "SELECT event_date,event_type,event_desc FROM stock_f10_key_events WHERE code='000001' ORDER BY event_date DESC LIMIT 20;"`;
+  curl -s 'http://localhost:8000/api/quote/000001'
+  curl -s 'http://localhost:8000/api/kline/000001?period=daily&count=120'
+  curl -s 'http://localhost:8000/api/fundamental/000001'
+  curl -s 'http://localhost:8000/api/sw-industry'
+  curl -s 'http://localhost:8000/api/market-breadth/summary?days=20'
+  curl -s 'http://localhost:8000/api/fund-flow/concept'
+  curl -s 'http://localhost:8000/api/margin-trading/latest'
+  curl -s 'http://localhost:8000/api/global/indices'
+  sqlite3 '${DB_PATH}' "SELECT industry_id,name,company_count FROM industry_list ORDER BY sort_order;"
+  sqlite3 '${DB_PATH}' "SELECT node_id,label,stocks FROM industry_node WHERE industry_id='aiserver';"
+  sqlite3 '${DB_PATH}' "SELECT code,name,cost_price,shares FROM portfolio_holding;"
+  sqlite3 '${DB_PATH}' "SELECT code,sort_order FROM user_watchlist ORDER BY sort_order;"`;
 
 export function loadLlmEnv(): Record<string, string> {
   if (process.env.LLM_AUTHORIZATION && process.env.LLM_USER) {

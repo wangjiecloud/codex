@@ -10,18 +10,25 @@ export async function POST(
   const { id } = await params;
   try {
     const formData = await req.formData();
-    const file = formData.get("file");
-    if (!file || !(file instanceof File)) {
-      return NextResponse.json({ error: "No file uploaded" }, { status: 400 });
+    const files = formData.getAll("files");
+    if (!files || files.length === 0) {
+      return NextResponse.json({ error: "No files uploaded" }, { status: 400 });
     }
 
     const forwardForm = new FormData();
-    forwardForm.append("file", file, file.name);
+    for (const f of files) {
+      if (f instanceof File) {
+        forwardForm.append("files", f, f.name);
+      }
+    }
 
-    const res = await fetch(`${DATA_SERVICE_URL}/api/xmind/merge-pdf/${id}`, {
-      method: "POST",
-      body: forwardForm,
-    });
+    const res = await fetch(
+      `${DATA_SERVICE_URL}/api/xmind/merge-directory/${id}`,
+      {
+        method: "POST",
+        body: forwardForm,
+      },
+    );
     if (!res.ok) {
       const err = await res.text();
       return NextResponse.json({ error: err }, { status: res.status });

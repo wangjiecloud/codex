@@ -531,41 +531,21 @@ function StockDetailTab({
   name: string;
   onClose: () => void;
 }) {
-  const [status, setStatus] = useState<
-    "loading" | "syncing" | "done" | "error"
-  >("loading");
+  const [status, setStatus] = useState<"loading" | "done" | "error">("loading");
   const [historyRows, setHistoryRows] = useState<StockHistoryRow[]>([]);
   const [activeMetric, setActiveMetric] = useState<StockMetric>("rzBalance");
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const checkAndLoad = useCallback(async () => {
     try {
-      const res = await fetch(
-        `${API_BASE}/api/margin-trading/stock/${code}/status`,
+      const histRes = await fetch(
+        `${API_BASE}/api/margin-trading/stock/${code}/history?limit=200`,
       );
-      const data = await res.json();
-
-      if (data.status === "done" && data.rowCount > 0) {
-        const histRes = await fetch(
-          `${API_BASE}/api/margin-trading/stock/${code}/history?limit=200`,
-        );
+      if (histRes.ok) {
         const rows = await histRes.json();
         setHistoryRows(Array.isArray(rows) ? rows : []);
         setStatus("done");
-        if (pollRef.current) clearInterval(pollRef.current);
-        return;
-      }
-
-      if (data.status === "none" || data.status === "pending") {
-        await fetch(`${API_BASE}/api/margin-trading/stock/${code}/trigger`, {
-          method: "POST",
-        });
-        setStatus("syncing");
-      } else if (data.status === "syncing") {
-        setStatus("syncing");
-      } else if (data.status === "failed") {
+      } else {
         setStatus("error");
-        if (pollRef.current) clearInterval(pollRef.current);
       }
     } catch {
       setStatus("error");
@@ -574,10 +554,6 @@ function StockDetailTab({
 
   useEffect(() => {
     checkAndLoad();
-    pollRef.current = setInterval(checkAndLoad, 3000);
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
-    };
   }, [checkAndLoad]);
 
   const metricUnit: Record<StockMetric, string> = {
@@ -606,16 +582,6 @@ function StockDetailTab({
       {status === "loading" && (
         <div className="py-12 text-center text-[var(--text-tertiary)] text-sm">
           加载中...
-        </div>
-      )}
-      {status === "syncing" && (
-        <div className="py-12 text-center space-y-2">
-          <div className="text-sm text-[var(--text-secondary)]">
-            后台更新中，请稍候...
-          </div>
-          <div className="text-xs text-[var(--text-tertiary)]">
-            正在从同花顺获取 {name}（{code}）的融资融券历史数据
-          </div>
         </div>
       )}
       {status === "error" && (

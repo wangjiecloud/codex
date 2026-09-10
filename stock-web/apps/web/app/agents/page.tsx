@@ -743,10 +743,10 @@ export default function AgentsPage() {
   ) => {
     const state = agentStates[agentId];
     const inputText = overrideText ?? state.input;
+    const sessionId = state.activeSessionId;
     const session = state.sessions.find((s) => s.id === sessionId);
     if (!session) return;
     if ((!inputText.trim() && !state.pastedImage) || session.loading) return;
-    const sessionId = state.activeSessionId;
 
     const userText = inputText;
     const pastedImage = overrideText ? undefined : state.pastedImage;

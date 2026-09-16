@@ -604,14 +604,19 @@ def fetch_board_kline(
 ) -> list[dict]:
     klt = {"daily": 101, "weekly": 102, "monthly": 103}.get(period, 101)
     secid = f"90.{board_code}"
+    # 多拉 1 根用于初始化 prev_close，确保第一根的涨跌幅计算正确
+    fetch_lmt = count + 1
     url = (
         f"{EM_KLINE_HIS_URL}?secid={secid}"
         f"&fields1=f1,f2,f3,f4,f5,f6"
         f"&fields2=f51,f52,f53,f54,f55,f56,f57"
-        f"&klt={klt}&fqt=1&beg=0&end=20500101&lmt={count}&_={_ts()}"
+        f"&klt={klt}&fqt=1&beg=0&end=20500101&lmt={fetch_lmt}&_={_ts()}"
     )
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
     try:
-        resp = requests.get(url, timeout=15)
+        resp = requests.get(url, timeout=15, headers=headers)
         data = resp.json().get("data", {})
         klines = data.get("klines", [])
         if not klines:
@@ -644,7 +649,10 @@ def fetch_board_kline(
                     "changePct": change_pct,
                 }
             )
-        return bars[-count:] if len(bars) > count else bars
+        # 去掉第一根（仅用于初始化 prev_close），返回最近 count 根
+        if len(bars) > count:
+            bars = bars[-count:]
+        return bars
     except Exception as e:
         logger.error(f"fetch_board_kline({board_code},{period}) error: {e}")
         return []

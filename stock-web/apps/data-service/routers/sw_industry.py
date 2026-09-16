@@ -4,10 +4,17 @@ from datetime import datetime, date, timedelta
 import realtime_data
 import akshare as ak
 import logging
+import time
+import threading
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# ── 板块轮动缓存（key: days, value: (data, timestamp)）──
+_rotation_cache: dict[int, tuple[dict, float]] = {}
+_rotation_lock = threading.Lock()
+_ROTATION_TTL = 120  # 2分钟缓存
 
 
 def _latest_trade_date() -> str:
@@ -93,6 +100,113 @@ async def get_sw_kline(
         realtime_data.fetch_board_kline, board_code, period, count
     )
     return bars[-count:] if len(bars) > count else bars
+
+
+@router.get("/rotation")
+async def get_sw_rotation(days: int = Query(default=7, ge=1, le=30)):
+    # 命中缓存直接返回（TTL内）
+    now = time.time()
+    with _rotation_lock:
+        cached = _rotation_cache.get(days)
+        if cached and (now - cached[1]) < _ROTATION_TTL:
+            return cached[0]
+
+    # 缓存未命中或已过期，同步计算
+    result = await run_in_threadpool(_build_sw_rotation, days)
+
+    with _rotation_lock:
+        _rotation_cache[days] = (result, time.time())
+
+    return result
+
+
+def _build_sw_rotation(days: int) -> dict:
+    """用 akshare 申万二级行业实时+历史接口构建轮动数据"""
+    import concurrent.futures as cf
+    import pandas as pd
+
+    # ── 1. 获取申万二级行业实时行情（今日涨跌幅 + 代码名称）──
+    try:
+        df_rt = ak.index_realtime_sw(symbol="二级行业")
+    except Exception as e:
+        logger.error(f"index_realtime_sw error: {e}")
+        return {"dates": [], "boards": []}
+
+    # 计算今日涨跌幅：(最新价 - 昨收盘) / 昨收盘
+    df_rt["changePct"] = (
+        (df_rt["最新价"] - df_rt["昨收盘"]) / df_rt["昨收盘"] * 100
+    ).round(4)
+    rt_map = {
+        str(row["指数代码"]): {
+            "name": row["指数名称"],
+            "currentChangePct": row["changePct"],
+        }
+        for _, row in df_rt.iterrows()
+        if row["昨收盘"] and row["昨收盘"] != 0
+    }
+
+    codes = list(rt_map.keys())
+    if not codes:
+        return {"dates": [], "boards": []}
+
+    # ── 2. 并发拉历史K线（只取最近 days+1 行）──
+    fetch_count = days + 2  # 多1根初始化 prev_close
+
+    def fetch_hist(code: str):
+        try:
+            df = ak.index_hist_sw(symbol=code, period="day")
+            if df is None or df.empty:
+                return code, []
+            df = df.tail(fetch_count).reset_index(drop=True)
+            bars = []
+            prev_close = None
+            for _, row in df.iterrows():
+                close = float(row["收盘"])
+                if prev_close is not None and prev_close > 0:
+                    pct = round((close - prev_close) / prev_close * 100, 4)
+                else:
+                    pct = 0.0
+                prev_close = close
+                bars.append({"time": str(row["日期"])[:10], "changePct": pct})
+            # 去掉第一根（仅作 prev_close 基准）
+            return code, bars[1:] if len(bars) > 1 else bars
+        except Exception as e:
+            logger.debug(f"index_hist_sw({code}) error: {e}")
+            return code, []
+
+    hist_map: dict[str, list] = {}
+    with cf.ThreadPoolExecutor(max_workers=20) as executor:
+        futures = {executor.submit(fetch_hist, c): c for c in codes}
+        for f in cf.as_completed(futures):
+            try:
+                code, bars = f.result()
+                hist_map[code] = bars
+            except Exception:
+                pass
+
+    # ── 3. 组装响应 ──
+    dates: list[str] = []
+    rotation_boards: list[dict] = []
+
+    for code, info in rt_map.items():
+        bars = hist_map.get(code, [])
+        if not bars:
+            continue
+        # 取最近 days 根历史
+        hist = bars[-days:] if len(bars) >= days else bars
+        if not dates and hist:
+            dates = [b["time"] for b in hist]
+        rotation_boards.append(
+            {
+                "code": code,
+                "name": info["name"],
+                "tag": None,
+                "currentChangePct": info["currentChangePct"],
+                "data": [b["changePct"] for b in hist],
+            }
+        )
+
+    return {"dates": dates, "boards": rotation_boards}
 
 
 @router.get("/boards-by-stock/{stock_code}")

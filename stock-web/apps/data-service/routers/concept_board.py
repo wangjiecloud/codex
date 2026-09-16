@@ -1,6 +1,8 @@
+import json
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.concurrency import run_in_threadpool
 from datetime import datetime
+from db import SessionLocal, IndustryNode, IndustryList
 import realtime_data
 
 router = APIRouter()
@@ -74,3 +76,91 @@ async def get_industry_constituents(board_code: str):
         }
         for s in stocks
     ]
+
+
+@router.get("/industry-rotation")
+async def get_industry_rotation(days: int = Query(default=7, ge=1, le=30)):
+    def _fetch():
+        db = SessionLocal()
+        try:
+            nodes = db.query(IndustryNode).filter(IndustryNode.stocks != "[]").all()
+            groups: dict[tuple[str, str], set[str]] = {}
+            for node in nodes:
+                stocks_list = json.loads(node.stocks or "[]")
+                key = (node.industry_id, node.layer)
+                if key not in groups:
+                    groups[key] = set()
+                for code in stocks_list:
+                    if code and realtime_data.is_a_share(code):
+                        groups[key].add(code)
+
+            all_codes = sorted(set().union(*groups.values())) if groups else []
+            if not all_codes:
+                return {"dates": [], "boards": []}
+
+            quotes = realtime_data.fetch_batch_quotes(all_codes)
+            quote_map = {q["code"]: q for q in quotes}
+
+            import concurrent.futures as cf
+
+            kline_map: dict[str, list] = {}
+            with cf.ThreadPoolExecutor(max_workers=50) as executor:
+                futures = {
+                    executor.submit(realtime_data.fetch_kline, c, "daily", days + 1): c
+                    for c in all_codes
+                }
+                for f in cf.as_completed(futures):
+                    code = futures[f]
+                    try:
+                        kline_map[code] = f.result()
+                    except Exception:
+                        pass
+
+            industry_map = {}
+            for il in db.query(IndustryList).all():
+                industry_map[il.industry_id] = il.name
+
+            dates: list[str] = []
+            rotation_boards: list[dict] = []
+            for (industry_id, layer), codes in groups.items():
+                valid_quotes = [quote_map[c] for c in codes if c in quote_map]
+                if not valid_quotes:
+                    continue
+                avg_pct = sum(q["change"] for q in valid_quotes) / len(valid_quotes)
+
+                hist_data: list[float | None] = [None] * days
+                for i in range(days):
+                    vals = []
+                    for c in codes:
+                        bars = kline_map.get(c, [])
+                        if len(bars) >= 2:
+                            hist_bars = bars[-(days + 1) : -1]
+                            if i < len(hist_bars):
+                                vals.append(hist_bars[i].get("changePct", 0.0))
+                    if vals:
+                        hist_data[i] = round(sum(vals) / len(vals), 2)
+
+                if not dates:
+                    for c in codes:
+                        bars = kline_map.get(c, [])
+                        if len(bars) >= 2:
+                            hist_bars = bars[-(days + 1) : -1]
+                            dates = [b["time"] for b in hist_bars]
+                            break
+
+                industry_name = industry_map.get(industry_id, industry_id)
+                rotation_boards.append(
+                    {
+                        "code": f"{industry_id}_{layer}",
+                        "name": f"{industry_name}·{layer}",
+                        "tag": None,
+                        "currentChangePct": round(avg_pct, 2),
+                        "data": hist_data,
+                    }
+                )
+
+            return {"dates": dates, "boards": rotation_boards}
+        finally:
+            db.close()
+
+    return await run_in_threadpool(_fetch)

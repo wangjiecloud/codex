@@ -6,6 +6,7 @@ pub(crate) mod trace_context;
 
 mod otlp;
 mod targets;
+mod tool_result;
 
 use crate::metrics::Result as MetricsResult;
 use codex_protocol::auth::AuthMode;
@@ -59,6 +60,7 @@ impl From<AuthMode> for TelemetryAuthMode {
             AuthMode::ApiKey | AuthMode::BedrockApiKey => Self::ApiKey,
             AuthMode::Chatgpt
             | AuthMode::ChatgptAuthTokens
+            | AuthMode::Headers
             | AuthMode::AgentIdentity
             | AuthMode::PersonalAccessToken => Self::Chatgpt,
         }

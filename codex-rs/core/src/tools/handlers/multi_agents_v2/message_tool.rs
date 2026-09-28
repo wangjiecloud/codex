@@ -7,8 +7,6 @@ use super::*;
 use crate::agent_communication::AgentCommunicationContext;
 use crate::agent_communication::AgentCommunicationKind;
 use crate::tools::context::FunctionToolOutput;
-use crate::turn_timing::now_unix_timestamp_ms;
-use codex_protocol::protocol::InterAgentCommunication;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum MessageDeliveryMode {
@@ -17,17 +15,10 @@ pub(crate) enum MessageDeliveryMode {
 }
 
 impl MessageDeliveryMode {
-    /// Returns whether the produced communication should start a turn immediately.
-    fn apply(self, communication: InterAgentCommunication) -> InterAgentCommunication {
+    fn trigger_turn(self) -> bool {
         match self {
-            Self::QueueOnly => InterAgentCommunication {
-                trigger_turn: false,
-                ..communication
-            },
-            Self::TriggerTurn => InterAgentCommunication {
-                trigger_turn: true,
-                ..communication
-            },
+            Self::QueueOnly => false,
+            Self::TriggerTurn => true,
         }
     }
 }
@@ -69,6 +60,7 @@ pub(crate) async fn handle_message_string_tool(
         session,
         turn,
         call_id,
+        source,
         ..
     } = invocation;
     let receiver_thread_id = resolve_agent_target(&session, &turn, &target).await?;
@@ -101,33 +93,44 @@ pub(crate) async fn handle_message_string_tool(
         .session_source
         .get_agent_path()
         .unwrap_or_else(AgentPath::root);
-    let communication =
-        communication_from_tool_message(author, receiver_agent_path.clone(), message);
+    let communication = communication_from_tool_message(
+        author,
+        receiver_agent_path.clone(),
+        message,
+        &source,
+        mode.trigger_turn(),
+    );
     let kind = match mode {
         MessageDeliveryMode::QueueOnly => AgentCommunicationKind::Message,
         MessageDeliveryMode::TriggerTurn => AgentCommunicationKind::Followup,
     };
     let context = AgentCommunicationContext::new(kind, session.thread_id);
+    let parent_turn_id =
+        matches!(mode, MessageDeliveryMode::TriggerTurn).then(|| turn.sub_id.clone());
     let result = session
         .services
         .agent_control
-        .send_inter_agent_communication(receiver_thread_id, mode.apply(communication), context)
+        .send_inter_agent_communication(
+            receiver_thread_id,
+            communication,
+            context,
+            parent_turn_id,
+            turn.turn_metadata_state.root_turn_id(),
+        )
         .await
         .map_err(|err| collab_agent_error(receiver_thread_id, err));
     result?;
-    session
-        .send_event(
-            &turn,
-            SubAgentActivityEvent {
-                event_id: call_id,
-                occurred_at_ms: now_unix_timestamp_ms(),
-                agent_thread_id: receiver_thread_id,
-                agent_path: receiver_agent_path,
-                kind: SubAgentActivityKind::Interacted,
-            }
-            .into(),
-        )
-        .await;
+    emit_sub_agent_activity(
+        &session,
+        &turn,
+        SubAgentActivityItem {
+            id: call_id,
+            agent_thread_id: receiver_thread_id,
+            agent_path: receiver_agent_path,
+            kind: SubAgentActivityKind::Interacted,
+        },
+    )
+    .await;
 
     Ok(FunctionToolOutput::from_text(String::new(), Some(true)))
 }

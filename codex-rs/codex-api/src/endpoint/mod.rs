@@ -12,6 +12,7 @@ mod session;
 
 pub use chat_completions::ChatCompletionsClient;
 pub use compact::CompactClient;
+pub use images::ImageRequestError;
 pub use images::ImagesClient;
 pub use memories::MemoriesClient;
 pub use models::ModelsClient;
